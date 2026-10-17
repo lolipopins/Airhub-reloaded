@@ -1,9 +1,11 @@
---// AirHub - 04_wallhack.lua v7
---// CHANGES v7:
---//  - China Hat: FIXED gaps between segments (width now divides by cosSlope + 15% overlap)
---//  - China Hat: Added adjustable Height slider
---//  - Increased part thickness to 0.15 (prevents see-through edges)
---//  - Texture chams preserved from v5/v6
+--// AirHub - 04_wallhack.lua v8
+--// CHANGES v8:
+--//  - China Hat: REAL triangles (2× WedgePart per facet)
+--//  - Each facet = right half (WedgePart) + left half (mirrored WedgePart)
+--//  - Separate Width (base diameter) and Height (cone length) sliders
+--//  - No stepped approximation — clean triangular facets
+--//  - Removed Tiers slider (not needed, each facet is 1 triangle)
+--//  - Texture chams from v5 preserved
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -93,13 +95,12 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         Enabled = false,
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
-        Size = 4,          -- base diameter
-        Height = 7.6,      -- NEW: explicit height
+        Size = 4,      -- width (base diameter)
+        Height = 6,    -- length (cone height)
         OffsetY = 1.8, Transparency = 0, Rotation = 0,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
-        Tiers = 6,         -- vertical slices per facet
-        Sides = 8,         -- facets around cone
+        Sides = 8,
     },
 }
 do
@@ -113,14 +114,14 @@ do
     if WallHack.Visuals.SelfESP.ChinaHat.UseMesh ~= nil then
         WallHack.Visuals.SelfESP.ChinaHat.UseMesh = nil
     end
-    if WallHack.Visuals.SelfESP.ChinaHat.Tiers == nil then
-        WallHack.Visuals.SelfESP.ChinaHat.Tiers = 6
+    if WallHack.Visuals.SelfESP.ChinaHat.Tiers ~= nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Tiers = nil
+    end
+    if WallHack.Visuals.SelfESP.ChinaHat.Height == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Height = 6
     end
     if WallHack.Visuals.SelfESP.ChinaHat.Sides == nil then
         WallHack.Visuals.SelfESP.ChinaHat.Sides = 8
-    end
-    if WallHack.Visuals.SelfESP.ChinaHat.Height == nil then
-        WallHack.Visuals.SelfESP.ChinaHat.Height = (WallHack.Visuals.SelfESP.ChinaHat.Size or 4) * 1.9
     end
 end
 
@@ -572,9 +573,10 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- CHINA HAT — VERTICAL TRIANGULAR CONE
+    -- CHINA HAT — REAL TRIANGLE FACETS (2 WedgeParts per facet)
     -- ========================================================================
-    local SLICE_MIN_WIDTH = 0.03
+    local HAT_WEDGE_THICKNESS = 0.12
+    local HAT_WEDGE_SCALE     = 1.02   -- 2% overlap to prevent edge gaps
 
     local function getHatFolder()
         local Se = WallHack.Internal.SelfESP
@@ -586,6 +588,32 @@ local okInit, errInit = pcall(function()
         end
         Se.HatFolder = existing
         return existing
+    end
+
+    -- Compute geometry for one facet (used in both build and update)
+    local function facetGeometry(i, N, baseR, H)
+        local theta = (i - 0.5) * 2 * math.pi / N
+        local cosT, sinT = math.cos(theta), math.sin(theta)
+        local radialOut = Vector3.new(cosT, 0, sinT)
+        local tangential = Vector3.new(-sinT, 0, cosT)
+
+        local rMid = baseR * math.cos(math.pi / N)
+        local halfChord = baseR * math.sin(math.pi / N)
+        local len = math.sqrt(rMid*rMid + H*H)
+        local alpha = math.atan2(H, rMid)
+        local sinA, cosA = math.sin(alpha), math.cos(alpha)
+
+        local up = Vector3.new(0, 1, 0)
+        local slopeDir  = -cosA * radialOut + sinA * up   -- base -> apex
+        local normalDir =  sinA * radialOut + cosA * up   -- outward + up
+
+        local chordMid = radialOut * rMid
+
+        return {
+            theta = theta, radialOut = radialOut, tangential = tangential,
+            rMid = rMid, halfChord = halfChord, len = len,
+            slopeDir = slopeDir, normalDir = normalDir, chordMid = chordMid,
+        }
     end
 
     local function buildHat(head)
@@ -600,63 +628,60 @@ local okInit, errInit = pcall(function()
 
         local baseSize = tonumber(C.Size) or 4
         local baseR = baseSize / 2
-        local H = tonumber(C.Height) or (baseSize * 1.9)
+        local H = tonumber(C.Height) or 6
         local sides = math.clamp(tonumber(C.Sides) or 8, 3, 16)
-        local slices = math.clamp(tonumber(C.Tiers) or 6, 2, 12)
         local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
         local trans = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        -- Slope compensation math
-        local slopeAngle = math.atan2(baseR, H)
-        local cosSlope = math.cos(slopeAngle)
-        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
-
-        local parts = {}
+        local layers = {}
         for i = 1, sides do
-            local angle = (i - 0.5) * 2 * math.pi / sides
-            for k = 0, slices - 1 do
-                local tBot = k / slices
-                local tTop = (k + 1) / slices
-                local tMid = (tBot + tTop) / 2
+            local g = facetGeometry(i, sides, baseR, H)
 
-                local wBot = edgeLen * (1 - tBot)
-                local wTop = edgeLen * (1 - tTop)
-                local wAvg = (wBot + wTop) / 2
+            -- Right half wedge
+            local rWedge = Instance.new("WedgePart")
+            rWedge.Name = string.format("AirHubHatR_%d", i)
+            rWedge.Anchored = true; rWedge.CanCollide = false
+            rWedge.CanQuery = false; rWedge.CanTouch = false
+            rWedge.Massless = true; rWedge.CastShadow = false
+            rWedge.Color = color; rWedge.Transparency = trans
+            rWedge.LocalTransparencyModifier = 0
+            rWedge.Material = resolved
+            rWedge.Size = Vector3.new(
+                HAT_WEDGE_THICKNESS,
+                g.len * HAT_WEDGE_SCALE,
+                g.halfChord * HAT_WEDGE_SCALE
+            )
+            local rPos = g.chordMid
+                + g.slopeDir * (g.len / 2)
+                + g.tangential * (g.halfChord / 2)
+            rWedge.CFrame = CFrame.fromMatrix(rPos, g.normalDir, g.slopeDir, g.tangential)
+            rWedge.Parent = folder
+            table.insert(layers, rWedge)
 
-                if wAvg < SLICE_MIN_WIDTH then break end
-
-                local yMid = tMid * H
-                local rMid = baseR * (1 - tMid)
-                local sliceH = (H / slices) / cosSlope * 1.12
-
-                -- Fix gaps: divide by cosSlope and add 15% overlap
-                local finalW = (wAvg / cosSlope) * 1.15
-
-                local p = Instance.new("Part")
-                p.Name = string.format("AirHubHat_%d_%d", i, k)
-                p.Anchored = true
-                p.CanCollide = false
-                p.CanQuery = false
-                p.CanTouch = false
-                p.Massless = true
-                p.CastShadow = false
-                p.Color = color
-                p.Transparency = trans
-                p.LocalTransparencyModifier = 0
-                p.Material = resolved
-                p.Size = Vector3.new(finalW, sliceH, 0.15) -- Increased thickness
-                p.CFrame = head.CFrame
-                    * CFrame.new(0, C.OffsetY, 0)
-                    * CFrame.Angles(0, angle, 0)
-                    * CFrame.new(0, yMid, rMid)
-                    * CFrame.Angles(-slopeAngle, 0, 0)
-                p.Parent = folder
-                table.insert(parts, p)
-            end
+            -- Left half wedge (180° rotation around slopeDir)
+            local lWedge = Instance.new("WedgePart")
+            lWedge.Name = string.format("AirHubHatL_%d", i)
+            lWedge.Anchored = true; lWedge.CanCollide = false
+            lWedge.CanQuery = false; lWedge.CanTouch = false
+            lWedge.Massless = true; lWedge.CastShadow = false
+            lWedge.Color = color; lWedge.Transparency = trans
+            lWedge.LocalTransparencyModifier = 0
+            lWedge.Material = resolved
+            lWedge.Size = Vector3.new(
+                HAT_WEDGE_THICKNESS,
+                g.len * HAT_WEDGE_SCALE,
+                g.halfChord * HAT_WEDGE_SCALE
+            )
+            local lPos = g.chordMid
+                + g.slopeDir * (g.len / 2)
+                - g.tangential * (g.halfChord / 2)
+            lWedge.CFrame = CFrame.fromMatrix(lPos, -g.normalDir, g.slopeDir, -g.tangential)
+            lWedge.Parent = folder
+            table.insert(layers, lWedge)
         end
 
         Se.LastAppliedMaterial = resolved
-        return { folder = folder, layers = parts, sides = sides, slices = slices }
+        return { folder = folder, layers = layers, sides = sides }
     end
 
     local function updateHatFrame(hatData, head, C, resolved)
@@ -664,13 +689,8 @@ local okInit, errInit = pcall(function()
 
         local baseSize = tonumber(C.Size) or 4
         local baseR = baseSize / 2
-        local H = tonumber(C.Height) or (baseSize * 1.9)
+        local H = tonumber(C.Height) or 6
         local sides = hatData.sides
-        local slices = hatData.slices
-
-        local slopeAngle = math.atan2(baseR, H)
-        local cosSlope = math.cos(slopeAngle)
-        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
 
         local color
         if C.Rainbow then
@@ -694,37 +714,46 @@ local okInit, errInit = pcall(function()
 
         local idx = 1
         for i = 1, sides do
-            local angle = (i - 0.5) * 2 * math.pi / sides
-            for k = 0, slices - 1 do
-                local p = hatData.layers[idx]
-                if p and p.Parent then
-                    local tBot = k / slices
-                    local tTop = (k + 1) / slices
-                    local tMid = (tBot + tTop) / 2
+            local g = facetGeometry(i, sides, baseR, H)
+            local wantSize = Vector3.new(
+                HAT_WEDGE_THICKNESS,
+                g.len * HAT_WEDGE_SCALE,
+                g.halfChord * HAT_WEDGE_SCALE
+            )
 
-                    local wBot = edgeLen * (1 - tBot)
-                    local wTop = edgeLen * (1 - tTop)
-                    local wAvg = (wBot + wTop) / 2
-
-                    if wAvg >= SLICE_MIN_WIDTH then
-                        local yMid = tMid * H
-                        local rMid = baseR * (1 - tMid)
-                        local sliceH = (H / slices) / cosSlope * 1.12
-                        local finalW = (wAvg / cosSlope) * 1.15
-
-                        p.Size = Vector3.new(finalW, sliceH, 0.15)
-                        p.Color = color
-                        p.Transparency = trans
-                        p.LocalTransparencyModifier = 0
-                        p.Material = resolved
-                        p.CFrame = baseCF
-                            * CFrame.Angles(0, angle, 0)
-                            * CFrame.new(0, yMid, rMid)
-                            * CFrame.Angles(-slopeAngle, 0, 0)
-                    end
-                end
-                idx = idx + 1
+            local rWedge = hatData.layers[idx]
+            if rWedge and rWedge.Parent then
+                rWedge.Size = wantSize
+                rWedge.Color = color
+                rWedge.Transparency = trans
+                rWedge.LocalTransparencyModifier = 0
+                rWedge.Material = resolved
+                local rPos = baseCF
+                    * CFrame.fromMatrix(
+                        g.chordMid + g.slopeDir * (g.len / 2) + g.tangential * (g.halfChord / 2),
+                        g.normalDir, g.slopeDir, g.tangential
+                    ).Position -- hmm need full CFrame
+                -- Use direct CFrame composition
+                rWedge.CFrame = baseCF * CFrame.fromMatrix(
+                    g.chordMid + g.slopeDir * (g.len / 2) + g.tangential * (g.halfChord / 2),
+                    g.normalDir, g.slopeDir, g.tangential
+                )
             end
+            idx = idx + 1
+
+            local lWedge = hatData.layers[idx]
+            if lWedge and lWedge.Parent then
+                lWedge.Size = wantSize
+                lWedge.Color = color
+                lWedge.Transparency = trans
+                lWedge.LocalTransparencyModifier = 0
+                lWedge.Material = resolved
+                lWedge.CFrame = baseCF * CFrame.fromMatrix(
+                    g.chordMid + g.slopeDir * (g.len / 2) - g.tangential * (g.halfChord / 2),
+                    -g.normalDir, g.slopeDir, -g.tangential
+                )
+            end
+            idx = idx + 1
         end
     end
 
@@ -761,15 +790,12 @@ local okInit, errInit = pcall(function()
 
             local C = WallHack.Visuals.SelfESP.ChinaHat
 
-            -- Rebuild if sides/tiers changed
             local wantSides = math.clamp(tonumber(C.Sides) or 8, 3, 16)
-            local wantTiers = math.clamp(tonumber(C.Tiers) or 6, 2, 12)
-            if Se.HatData.sides ~= wantSides or Se.HatData.slices ~= wantTiers then
+            if Se.HatData.sides ~= wantSides then
                 removeChinaHat()
                 Se.HatData = buildHat(Se.HatHead)
             end
 
-            -- Material change detection
             if Se.LastSchemaMaterial ~= C.Material then
                 local newResolved = setChinaHatMaterialInternal(C.Material, true)
                 Se.LastSchemaMaterial = C.Material
@@ -1358,7 +1384,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v7 (fixed gaps + height slider)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v8 (real triangular China Hat)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1537,7 +1563,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v7")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v8")
 end
 
 -- ============================================================================
@@ -1591,8 +1617,8 @@ do
             vis_se_texture_faces = "Texture Faces",
             vis_se_hat_enabled = "Enabled",
             vis_se_hat_color = "Color",
-            vis_se_hat_size = "Base Size",
-            vis_se_hat_height = "Height",
+            vis_se_hat_width = "Width (Base Diameter)",
+            vis_se_hat_height = "Length (Height)",
             vis_se_hat_offset = "Offset Y",
             vis_se_hat_rotation = "Rotation",
             vis_se_hat_autoro = "Auto Rotate",
@@ -1601,7 +1627,6 @@ do
             vis_se_hat_rainbow_speed = "Rainbow Speed",
             vis_se_hat_transparency = "Transparency",
             vis_se_hat_material = "Material",
-            vis_se_hat_tiers = "Vertical Slices",
             vis_se_hat_sides = "Facets Around Cone",
             vis_sp_enabled = "Enabled", vis_sp_rgb = "RGB Color",
             vis_sp_strength = "Strength", vis_sp_maxlimb = "Max Limb Distance",
@@ -1652,10 +1677,10 @@ do
             tt_vis_se_texture_id = "Only used when preset = Custom. Paste rbxassetid://NUMBER here",
             tt_vis_se_texture_transparency = "Texture image transparency",
             tt_vis_se_texture_faces = "Front = only front | AllFaces = all 6 faces (recommended)",
-            tt_vis_se_hat_enabled = "Show triangular cone hat above your head (vertical triangles)",
+            tt_vis_se_hat_enabled = "Show conical triangular hat above your head",
             tt_vis_se_hat_color = "Hat base color",
-            tt_vis_se_hat_size = "Base diameter (studs)",
-            tt_vis_se_hat_height = "Total height of the cone",
+            tt_vis_se_hat_width = "Width of the hat (base diameter in studs)",
+            tt_vis_se_hat_height = "Length of the hat (vertical height of the cone)",
             tt_vis_se_hat_offset = "Vertical offset from head",
             tt_vis_se_hat_rotation = "Fixed rotation angle (when Auto Rotate OFF)",
             tt_vis_se_hat_autoro = "Continuously rotate the cone",
@@ -1663,8 +1688,7 @@ do
             tt_vis_se_hat_rainbow = "Cycle through rainbow colors",
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
-            tt_vis_se_hat_material = "Roblox material for each slice — applies to all parts",
-            tt_vis_se_hat_tiers = "Vertical slices per triangular facet. Higher = smoother triangle silhouette. 6 is a good default",
+            tt_vis_se_hat_material = "Roblox material for each triangle — applies to all parts",
             tt_vis_se_hat_sides = "Number of triangular facets around the cone. Higher = rounder cone. 8 is a good default",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
@@ -1720,8 +1744,8 @@ do
             vis_se_texture_faces = "Грани текстуры",
             vis_se_hat_enabled = "Включена",
             vis_se_hat_color = "Цвет",
-            vis_se_hat_size = "Размер основания",
-            vis_se_hat_height = "Высота",
+            vis_se_hat_width = "Ширина (диаметр основания)",
+            vis_se_hat_height = "Длина (высота конуса)",
             vis_se_hat_offset = "Смещение Y",
             vis_se_hat_rotation = "Поворот",
             vis_se_hat_autoro = "Авто-вращение",
@@ -1730,7 +1754,6 @@ do
             vis_se_hat_rainbow_speed = "Скорость радуги",
             vis_se_hat_transparency = "Прозрачность",
             vis_se_hat_material = "Материал",
-            vis_se_hat_tiers = "Вертикальных срезов",
             vis_se_hat_sides = "Фасетов по кругу",
             vis_sp_enabled = "Включено", vis_sp_rgb = "RGB цвет",
             vis_sp_strength = "Сила", vis_sp_maxlimb = "Макс. дистанция конечности",
@@ -1781,10 +1804,10 @@ do
             tt_vis_se_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://NUMBER",
             tt_vis_se_texture_transparency = "Прозрачность картинки",
             tt_vis_se_texture_faces = "Front = только фронт | AllFaces = все 6 граней (рекомендуется)",
-            tt_vis_se_hat_enabled = "Показывать треугольный конус над головой (вертикальные треугольники)",
+            tt_vis_se_hat_enabled = "Показывать коническую треугольную шляпу над головой",
             tt_vis_se_hat_color = "Базовый цвет шляпы",
-            tt_vis_se_hat_size = "Диаметр основания (studs)",
-            tt_vis_se_hat_height = "Общая высота конуса",
+            tt_vis_se_hat_width = "Ширина основания (диаметр в studs)",
+            tt_vis_se_hat_height = "Длина конуса (высота)",
             tt_vis_se_hat_offset = "Вертикальное смещение от головы",
             tt_vis_se_hat_rotation = "Фиксированный поворот (при выкл. авто-вращении)",
             tt_vis_se_hat_autoro = "Постоянное вращение конуса",
@@ -1792,8 +1815,7 @@ do
             tt_vis_se_hat_rainbow = "Циклическая смена цветов",
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_hat_transparency = "Прозрачность шляпы",
-            tt_vis_se_hat_material = "Материал Roblox — применяется на каждый срез",
-            tt_vis_se_hat_tiers = "Вертикальных срезов на один треугольный фасет. Больше = глаже. 6 — хороший дефолт",
+            tt_vis_se_hat_material = "Материал Roblox — применяется на каждый треугольник",
             tt_vis_se_hat_sides = "Количество треугольных фасетов вокруг конуса. Больше = круглее. 8 — хороший дефолт",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
@@ -1979,14 +2001,12 @@ seSec:AddToggle({ Name = "vis_se_hat_enabled", Value = WallHack.Visuals.SelfESP.
     Callback = function(v) setHat("Enabled", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_enabled" })
 seSec:AddColorpicker({ Name = "vis_se_hat_color", Default = WallHack.Visuals.SelfESP.ChinaHat.Color,
     Callback = function(v) WallHack.Visuals.SelfESP.ChinaHat.Color = SafeColor(v, Color3.fromRGB(255,60,60)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_color" })
-seSec:AddSlider({ Name = "vis_se_hat_size", Value = WallHack.Visuals.SelfESP.ChinaHat.Size,
-    Min = 1, Max = 10, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_size" })
+seSec:AddSlider({ Name = "vis_se_hat_width", Value = WallHack.Visuals.SelfESP.ChinaHat.Size,
+    Min = 1, Max = 20, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_width" })
 seSec:AddSlider({ Name = "vis_se_hat_height", Value = WallHack.Visuals.SelfESP.ChinaHat.Height,
-    Min = 2, Max = 20, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
+    Min = 1, Max = 30, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
 seSec:AddSlider({ Name = "vis_se_hat_offset", Value = WallHack.Visuals.SelfESP.ChinaHat.OffsetY,
     Min = 0, Max = 5, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
-seSec:AddSlider({ Name = "vis_se_hat_tiers", Value = WallHack.Visuals.SelfESP.ChinaHat.Tiers or 6,
-    Min = 2, Max = 12, Callback = function(v) setHat("Tiers", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_tiers" })
 seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.ChinaHat.Sides or 8,
     Min = 3, Max = 16, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
 seSec:AddSlider({ Name = "vis_se_hat_rotation", Value = WallHack.Visuals.SelfESP.ChinaHat.Rotation,
@@ -2022,4 +2042,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v7 (fixed gaps + height)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v8 (real triangles + width/height)")
