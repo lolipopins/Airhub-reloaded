@@ -1,4 +1,4 @@
---// AirHub - arsenal extra tab (native AirHub UI only)
+--// AirHub - arsenal extra tab (native AirHub UI only, no standalone)
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then
     warn("[AirHub] arsenal extra tab: core not loaded")
@@ -318,12 +318,17 @@ Track(LocalPlayer.CharacterAdded:Connect(function()
 end))
 
 --====================================================================
--- AirHub tab
+-- AirHub tab (uses getgenv().airhubUI_Window and :AddTab)
 --====================================================================
 local function FillAirHubTab()
-    local MainFrame = H._UI and H._UI.MainFrame
-    if not MainFrame then return false end
-    local tab = MainFrame:CreateTab({ Name = "arsenal" })
+    local Window = getgenv().airhubUI_Window
+    if not Window then return false end
+
+    -- avoid duplicate tab
+    if Q.Internal._TabAdded then return true end
+
+    local tab = Window:AddTab({ Name = "arsenal" })
+    Q.Internal._TabAdded = true
 
     local secNT = tab:CreateSection({ Name = "Name Tags" })
     secNT:AddToggle({ Name = "Enabled", Value = Q.Settings.NameTagsEnabled,
@@ -369,23 +374,19 @@ local function FillAirHubTab()
     return true
 end
 
--- Wait for AirHub UI to be ready, then attach the tab.
+-- Wait for the AirHub UI to be ready, then attach the tab.
 task.spawn(function()
     local deadline = tick() + 30
     while tick() < deadline do
         if H.ShuttingDown then return end
-        if H._UI and H._UI.MainFrame then
-            local ok, err = pcall(FillAirHubTab)
-            if ok then
-                print("[AirHub] arsenal extra tab: added to AirHub UI")
-                return
-            else
-                warn("[AirHub] arsenal extra tab: FillAirHubTab failed: " .. tostring(err))
-            end
+        local ok, err = pcall(FillAirHubTab)
+        if ok then
+            print("[AirHub] arsenal extra tab: added to AirHub UI")
+            return
         end
         task.wait(0.5)
     end
-    warn("[AirHub] arsenal extra tab: AirHub UI never became available")
+    warn("[AirHub] arsenal extra tab: airhubUI_Window never became available")
 end)
 
 --====================================================================
