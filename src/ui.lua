@@ -1,9 +1,5 @@
 --=============================================================
--- airUI v1.3 — Fixed text theming everywhere + smooth open/close
---   * ALL text elements now properly themed (not just tabs)
---   * Smooth slide + scale + fade animation (no rotation artifacts)
---   * Search placeholder color updates with theme
---   * Popups properly animated
+-- airhubUI v1.7.1 — Fixed: Config scope, T() crash, keybind, font/lang import
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -11,288 +7,644 @@ local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
 local Players          = game:GetService("Players")
 local CoreGui          = game:GetService("CoreGui")
-local Stats            = game:GetService("Stats")
+local HttpService      = game:GetService("HttpService")
 local LocalPlayer      = Players.LocalPlayer
 
--- ============================================================
--- FONT CATALOG
--- ============================================================
-local FontCatalog = {
-    ["Code"]             = Enum.Font.Code,
-    ["Gotham"]           = Enum.Font.Gotham,
-    ["GothamBold"]       = Enum.Font.GothamBold,
-    ["GothamSemibold"]   = Enum.Font.GothamSemibold,
-    ["Arial"]            = Enum.Font.Arial,
-    ["ArialBold"]        = Enum.Font.ArialBold,
-    ["SourceSans"]       = Enum.Font.SourceSans,
-    ["SourceSansBold"]   = Enum.Font.SourceSansBold,
-    ["SourceSansSemibold"]=Enum.Font.SourceSansSemibold,
-    ["Roboto"]           = Enum.Font.Roboto,
-    ["RobotoMono"]       = Enum.Font.RobotoMono,
-    ["Ubuntu"]           = Enum.Font.Ubuntu,
-    ["Fantasy"]          = Enum.Font.Fantasy,
-    ["Antique"]          = Enum.Font.Antique,
-    ["Arcade"]           = Enum.Font.Arcade,
-    ["SciFi"]            = Enum.Font.SciFi,
-    ["Bangers"]          = Enum.Font.Bangers,
-    ["PatrickHand"]      = Enum.Font.PatrickHand,
+-- ══════════════════════════════════════════════════════════════
+-- CONFIG (объявить ДО T — иначе замыкание видит старую)
+-- ══════════════════════════════════════════════════════════════
+local Config = {
+    Language = "en",
+    Version = "1.7.1",
+    WindowWidth = 720, WindowHeight = 500,
+    MinWidth = 520, MinHeight = 380,
+    ToggleKey = Enum.KeyCode.RightShift,
+    AnimSpeed = 0.15, MenuAnim = 0.32, MenuCloseAnim = 0.20, PopupAnim = 0.18,
+    CornerRadius = UDim.new(0, 8), BaseCornerRadius = 8,
+    CurrentFontFamily = Enum.Font.Code, CurrentFontName = "Code", CurrentFontScale = 1.0,
+    PopupZ = 5000, OverlayZ = 4000, NotifyZ = 6000, TooltipZ = 7000,
+    StatusBar = true,
+    MenuTransparency = 0.06, TabTransparency = 0, SectionTransparency = 0, ElementTransparency = 0,
+    NotificationDuration = 3, NotificationPosition = "top-right",
+    TooltipDelay = 0.05,
 }
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
+-- LOCALIZATION
+-- ══════════════════════════════════════════════════════════════
+local L = {
+    en = {
+        tab_settings = "Settings", tab_configs = "Configs", tab_binds = "Binds",
+        sec_theme = "Theme Presets", sec_window = "Window", sec_font = "Font",
+        sec_anim = "Animation", sec_menu_colors = "Menu Colors", sec_text_colors = "Text Colors",
+        sec_accent = "Accent Colors", sec_transparency = "Transparency",
+        sec_notifications = "Notifications", sec_tooltips = "Tooltips",
+        sec_actions = "Actions", sec_general = "General",
+        lbl_preset = "Preset", lbl_title = "Title", lbl_width = "Width", lbl_height = "Height",
+        lbl_sidebar_width = "Sidebar Width", lbl_corner_radius = "Corner Radius",
+        lbl_status_bar = "Status Bar", lbl_font_family = "Font Family", lbl_font_size = "Font Size",
+        lbl_menu_open = "Menu Open Speed", lbl_menu_close = "Menu Close Speed",
+        lbl_popup_speed = "Popup Speed", lbl_menu_bg = "Menu Background",
+        lbl_sidebar = "Sidebar", lbl_panel = "Panel", lbl_section_bg = "Section Background",
+        lbl_element = "Element", lbl_element_hover = "Element Hover",
+        lbl_outline = "Outline / Border", lbl_text = "Text", lbl_subtext = "SubText",
+        lbl_muted = "Muted", lbl_accent = "Accent", lbl_accent2 = "Accent 2",
+        lbl_success = "Success", lbl_danger = "Danger", lbl_warning = "Warning",
+        lbl_on_accent = "On Accent", lbl_duration = "Duration", lbl_position = "Position",
+        lbl_delay = "Delay", lbl_language = "Language",
+        lbl_transparency_menu = "Menu", lbl_transparency_tabs = "Tabs",
+        lbl_transparency_sections = "Sections", lbl_transparency_elements = "Elements",
+        btn_test_notif = "Test Notification", btn_reset_light = "Reset to airhubUI Light",
+        btn_reset_dark = "Reset to airhubUI Dark", btn_unload = "Unload Menu",
+        btn_reshow = "Re-show Window",
+        tt_preset = "Switch full color scheme + font + text size",
+        tt_title = "Window title (header + status bar)",
+        tt_width = "Window width (520-1200 px)", tt_height = "Window height (380-900 px)",
+        tt_sidebar_width = "Sidebar tabs width",
+        tt_corner_radius = "Corner rounding (0 = flat, 24 = round)",
+        tt_status_bar = "Show bottom FPS / ping / uptime bar",
+        tt_font_family = "Font for all text elements",
+        tt_font_size = "Text size multiplier (0.6x - 1.8x)",
+        tt_menu_open = "Menu open animation duration",
+        tt_menu_close = "Menu close animation duration",
+        tt_popup_speed = "Popups appear speed", tt_menu_bg = "Main window background",
+        tt_sidebar = "Sidebar background", tt_panel = "Panel / section header background",
+        tt_section_bg = "Section container background",
+        tt_element = "Base element background", tt_element_hover = "Hover background",
+        tt_outline = "Border / stroke color", tt_text = "Main text color",
+        tt_subtext = "Secondary text", tt_muted = "Muted / dim text",
+        tt_accent = "Primary accent", tt_accent2 = "Secondary accent",
+        tt_success = "Success notifications", tt_danger = "Errors / destructive actions",
+        tt_warning = "Warnings", tt_on_accent = "Text on accent background",
+        tt_duration = "How long notifications stay (sec)",
+        tt_position = "Screen corner for notifications", tt_delay = "Tooltip hover delay",
+        tt_language = "Menu language",
+        tt_transparency_menu = "Main window transparency (0-50%)",
+        tt_transparency_tabs = "Tabs buttons transparency",
+        tt_transparency_sections = "Sections background transparency",
+        tt_transparency_elements = "Element transparency",
+        tt_test_notif = "Show a test notification",
+        tt_reset_light = "Reset to default light theme", tt_reset_dark = "Reset to dark theme",
+        tt_unload = "Fully unload menu from memory", tt_reshow = "Force show window",
+        sec_file_configs = "File Configs", sec_clipboard = "Clipboard Fallback",
+        sec_inmemory = "In-Memory Presets",
+        lbl_config_name = "Config Name", lbl_saved_configs = "Saved Configs",
+        lbl_preset_name = "Preset Name",
+        lbl_fs_available = "Filesystem available",
+        lbl_fs_unavailable = "Filesystem NOT available — use Clipboard",
+        lbl_folder_path = "Files saved to %s/ (or root with %s prefix).",
+        lbl_clipboard_fallback_hint = "Use if filesystem is unavailable.",
+        lbl_inmemory_hint = "Presets stored in memory only. Lost on unload.",
+        lbl_actions = "ACTIONS",
+        btn_save_file = "Save to File", btn_load_file = "Load from File",
+        btn_delete_file = "Delete File", btn_refresh_list = "Refresh List",
+        btn_copy_clipboard = "Copy to Clipboard", btn_paste_clipboard = "Paste from Clipboard",
+        btn_save_preset = "Save Current as Preset", btn_load_preset = "Load Preset",
+        btn_delete_preset = "Delete Preset",
+        tt_config_name = "Config name (without .json)",
+        tt_saved_configs = "Configs saved on disk", tt_preset_name = "Preset name",
+        tt_save_file = "Save current config to disk", tt_load_file = "Load config from disk",
+        tt_delete_file = "Delete config file", tt_refresh_list = "Refresh config list",
+        tt_copy_clipboard = "Copy JSON config to clipboard",
+        tt_paste_clipboard = "Load config from clipboard",
+        tt_save_preset = "Save current as in-memory preset",
+        tt_load_preset = "Load in-memory preset", tt_delete_preset = "Delete in-memory preset",
+        sec_active_binds = "Active Binds",
+        lbl_binds_hint1 = "MMB (middle-click) on any row — open bind menu.",
+        lbl_binds_hint2 = "Keybinds work independently of the menu.",
+        lbl_binds_hint3 = "Adding a key does NOT activate the function.",
+        lbl_live_status = "LIVE STATUS", btn_binds_refresh = "Refresh",
+        btn_binds_clear = "Clear All (Reset)",
+        lbl_binds_empty = "Empty. Middle-click any component.",
+        tt_binds_refresh = "Refresh bind list", tt_binds_clear = "Remove all binds",
+        n_theme_applied = "Applied: %s", n_theme_reset_light = "Reset to airhubUI Light",
+        n_theme_reset_dark = "Reset to airhubUI Dark", n_font_applied = "Applied: %s",
+        n_unloading = "Unloading...", n_config = "Config",
+        n_enter_name = "Enter a name first", n_saved_to = "Saved: %s",
+        n_save_failed = "Save failed: %s", n_fs_unavailable = "Filesystem unavailable",
+        n_fs_unavail_clipboard = "FS unavailable — copied to clipboard",
+        n_fs_unavail_console = "FS unavailable — printed to console",
+        n_loaded = "Loaded: %s", n_load_failed = "Load failed: %s",
+        n_deleted = "Deleted: %s", n_delete_failed = "Delete failed: %s",
+        n_delfile_missing = "delfile not supported by executor",
+        n_list_refreshed = "List refreshed", n_printed_console = "Printed to console (F9)",
+        n_copied = "Copied to clipboard", n_loaded_clipboard = "Loaded from clipboard",
+        n_clipboard_empty = "Clipboard empty", n_invalid = "Invalid: %s",
+        n_preset_saved = "Preset saved: %s", n_preset_deleted = "Preset deleted: %s",
+        n_preset_not_found = "Not found: %s", n_binds_cleared = "All binds cleared",
+        n_test_notif_title = "Test", n_test_notif_text = "This is a test notification",
+        n_lang_changed = "Language: %s",
+        status_ready = "ready",
+        ph_search = "Search...", ph_my_config = "my_config",
+        ph_my_preset = "My Preset", ph_airhubui = "airhubUI",
+        lang_en = "English", lang_ru = "Русский",
+    },
+    ru = {
+        tab_settings = "Настройки", tab_configs = "Конфиги", tab_binds = "Бинды",
+        sec_theme = "Пресеты тем", sec_window = "Окно", sec_font = "Шрифт",
+        sec_anim = "Анимация", sec_menu_colors = "Цвета меню",
+        sec_text_colors = "Цвета текста", sec_accent = "Акцентные цвета",
+        sec_transparency = "Прозрачность", sec_notifications = "Уведомления",
+        sec_tooltips = "Подсказки", sec_actions = "Действия", sec_general = "Основное",
+        lbl_preset = "Пресет", lbl_title = "Заголовок", lbl_width = "Ширина",
+        lbl_height = "Высота", lbl_sidebar_width = "Ширина сайдбара",
+        lbl_corner_radius = "Скругление углов", lbl_status_bar = "Статус-бар",
+        lbl_font_family = "Семейство шрифта", lbl_font_size = "Размер шрифта",
+        lbl_menu_open = "Скорость открытия", lbl_menu_close = "Скорость закрытия",
+        lbl_popup_speed = "Скорость попапов", lbl_menu_bg = "Фон меню",
+        lbl_sidebar = "Сайдбар", lbl_panel = "Панель", lbl_section_bg = "Фон секции",
+        lbl_element = "Элемент", lbl_element_hover = "Элемент (hover)",
+        lbl_outline = "Обводка / границы", lbl_text = "Текст", lbl_subtext = "Подтекст",
+        lbl_muted = "Приглушённый", lbl_accent = "Акцент", lbl_accent2 = "Акцент 2",
+        lbl_success = "Успех", lbl_danger = "Опасность", lbl_warning = "Предупреждение",
+        lbl_on_accent = "На акценте", lbl_duration = "Длительность",
+        lbl_position = "Позиция", lbl_delay = "Задержка", lbl_language = "Язык",
+        lbl_transparency_menu = "Меню", lbl_transparency_tabs = "Табы",
+        lbl_transparency_sections = "Секции", lbl_transparency_elements = "Элементы",
+        btn_test_notif = "Тест уведомления", btn_reset_light = "Сброс на airhubUI Light",
+        btn_reset_dark = "Сброс на airhubUI Dark", btn_unload = "Выгрузить меню",
+        btn_reshow = "Показать окно",
+        tt_preset = "Переключить всю цветовую схему + шрифт + размер",
+        tt_title = "Заголовок окна (шапка + статус-бар)",
+        tt_width = "Ширина окна (520-1200 px)", tt_height = "Высота окна (380-900 px)",
+        tt_sidebar_width = "Ширина панели табов",
+        tt_corner_radius = "Скругление углов (0 = прямые, 24 = круглые)",
+        tt_status_bar = "Показывать нижнюю строку FPS / ping / uptime",
+        tt_font_family = "Шрифт для всех текстовых элементов",
+        tt_font_size = "Множитель размера текста (0.6x - 1.8x)",
+        tt_menu_open = "Длительность открытия меню",
+        tt_menu_close = "Длительность закрытия меню",
+        tt_popup_speed = "Скорость появления попапов",
+        tt_menu_bg = "Фон главного окна", tt_sidebar = "Фон боковой панели",
+        tt_panel = "Фон панелей и заголовков секций",
+        tt_section_bg = "Фон контейнеров секций",
+        tt_element = "Фон элементов (тоглы, слайдеры)",
+        tt_element_hover = "Фон при наведении", tt_outline = "Цвет границ и рамок",
+        tt_text = "Основной цвет текста", tt_subtext = "Вторичный текст",
+        tt_muted = "Приглушённый текст", tt_accent = "Главный акцент",
+        tt_accent2 = "Дополнительный акцент", tt_success = "Успешные уведомления",
+        tt_danger = "Ошибки / опасные действия", tt_warning = "Предупреждения",
+        tt_on_accent = "Текст на акцентном фоне",
+        tt_duration = "Сколько показывать уведомление (сек)",
+        tt_position = "Угол экрана для уведомлений",
+        tt_delay = "Задержка перед показом подсказки", tt_language = "Язык меню",
+        tt_transparency_menu = "Прозрачность главного окна (0-50%)",
+        tt_transparency_tabs = "Прозрачность кнопок табов",
+        tt_transparency_sections = "Прозрачность фона секций",
+        tt_transparency_elements = "Прозрачность элементов",
+        tt_test_notif = "Показать тестовое уведомление",
+        tt_reset_light = "Сбросить к светлой теме",
+        tt_reset_dark = "Сбросить к тёмной теме",
+        tt_unload = "Полностью выгрузить меню из памяти",
+        tt_reshow = "Принудительно показать окно",
+        sec_file_configs = "Файловые конфиги", sec_clipboard = "Clipboard (резерв)",
+        sec_inmemory = "Пресеты в памяти",
+        lbl_config_name = "Имя конфига", lbl_saved_configs = "Сохранённые конфиги",
+        lbl_preset_name = "Имя пресета",
+        lbl_fs_available = "Файловая система доступна",
+        lbl_fs_unavailable = "Файловая система НЕДОСТУПНА — используйте Clipboard",
+        lbl_folder_path = "Файлы сохраняются в %s/ (или в корень с префиксом %s).",
+        lbl_clipboard_fallback_hint = "Используйте если файловая система недоступна.",
+        lbl_inmemory_hint = "Пресеты хранятся только в памяти. Пропадают при выгрузке.",
+        lbl_actions = "ДЕЙСТВИЯ",
+        btn_save_file = "Сохранить в файл", btn_load_file = "Загрузить из файла",
+        btn_delete_file = "Удалить файл", btn_refresh_list = "Обновить список",
+        btn_copy_clipboard = "Копировать в clipboard",
+        btn_paste_clipboard = "Вставить из clipboard",
+        btn_save_preset = "Сохранить как пресет",
+        btn_load_preset = "Загрузить пресет", btn_delete_preset = "Удалить пресет",
+        tt_config_name = "Имя конфига (без .json)",
+        tt_saved_configs = "Конфиги сохранённые на диск",
+        tt_preset_name = "Имя пресета",
+        tt_save_file = "Сохранить текущий конфиг на диск",
+        tt_load_file = "Загрузить конфиг с диска",
+        tt_delete_file = "Удалить файл конфига",
+        tt_refresh_list = "Обновить список конфигов",
+        tt_copy_clipboard = "Копировать JSON-конфиг в clipboard",
+        tt_paste_clipboard = "Загрузить конфиг из clipboard",
+        tt_save_preset = "Сохранить текущий как пресет в памяти",
+        tt_load_preset = "Загрузить пресет из памяти",
+        tt_delete_preset = "Удалить пресет из памяти",
+        sec_active_binds = "Активные бинды",
+        lbl_binds_hint1 = "MMB (клик колесом) на любую строку — открыть меню биндов.",
+        lbl_binds_hint2 = "Кейбинды работают через свою клавишу, независимо от меню.",
+        lbl_binds_hint3 = "Добавление ключа не активирует функцию.",
+        lbl_live_status = "СТАТУС В РЕАЛЬНОМ ВРЕМЕНИ",
+        btn_binds_refresh = "Обновить", btn_binds_clear = "Очистить всё",
+        lbl_binds_empty = "Пусто. Наведи MMB на любой компонент.",
+        tt_binds_refresh = "Обновить список биндов",
+        tt_binds_clear = "Удалить все бинды",
+        n_theme_applied = "Применено: %s", n_theme_reset_light = "Сброс на airhubUI Light",
+        n_theme_reset_dark = "Сброс на airhubUI Dark", n_font_applied = "Применено: %s",
+        n_unloading = "Выгрузка...", n_config = "Конфиг",
+        n_enter_name = "Сначала введите имя", n_saved_to = "Сохранено: %s",
+        n_save_failed = "Сохранение не удалось: %s",
+        n_fs_unavailable = "Файловая система недоступна",
+        n_fs_unavail_clipboard = "ФС недоступна — скопировано в clipboard",
+        n_fs_unavail_console = "ФС недоступна — выведено в консоль",
+        n_loaded = "Загружено: %s", n_load_failed = "Загрузка не удалась: %s",
+        n_deleted = "Удалено: %s", n_delete_failed = "Удаление не удалось: %s",
+        n_delfile_missing = "delfile не поддерживается экзекутором",
+        n_list_refreshed = "Список обновлён",
+        n_printed_console = "Выведено в консоль (F9)",
+        n_copied = "Скопировано в clipboard", n_loaded_clipboard = "Загружено из clipboard",
+        n_clipboard_empty = "Clipboard пуст", n_invalid = "Неверно: %s",
+        n_preset_saved = "Пресет сохранён: %s", n_preset_deleted = "Пресет удалён: %s",
+        n_preset_not_found = "Не найдено: %s", n_binds_cleared = "Все бинды очищены",
+        n_test_notif_title = "Тест", n_test_notif_text = "Это тестовое уведомление",
+        n_lang_changed = "Язык: %s",
+        status_ready = "готово",
+        ph_search = "Поиск...", ph_my_config = "мой_конфиг",
+        ph_my_preset = "Мой пресет", ph_airhubui = "airhubUI",
+        lang_en = "English", lang_ru = "Русский",
+    },
+}
+
+-- ══════════════════════════════════════════════════════════════
+-- T() — with format crash protection
+-- ══════════════════════════════════════════════════════════════
+local function T(key, ...)
+    if not key then return "" end
+    local lang = L[Config.Language or "en"] or L.en
+    local s = lang[key] or L.en[key] or key
+    if type(s) ~= "string" then return tostring(s) end
+    if select("#", ...) > 0 and s:find("%%") then
+        local ok, res = pcall(string.format, s, ...)
+        if ok then return res end
+    end
+    return s
+end
+
+local function tPlaceholder(inst, key)
+    inst:SetAttribute("_tPlaceholder", key)
+    inst.PlaceholderText = T(key)
+    return inst
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- FPS + PING
+-- ══════════════════════════════════════════════════════════════
+local currentFPS = 60
+do
+    local fc, ft = 0, 0
+    RunService.RenderStepped:Connect(function(dt)
+        fc = fc + 1; ft = ft + dt
+        if ft >= 0.5 then
+            currentFPS = math.floor(fc / ft + 0.5)
+            fc, ft = 0, 0
+        end
+    end)
+end
+local function getPing()
+    local ok, p = pcall(function() return math.floor(LocalPlayer:GetNetworkPing() * 1000 + 0.5) end)
+    return ok and p or 0
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- CLIPBOARD
+-- ══════════════════════════════════════════════════════════════
+local _clipSetFn, _clipSetName = nil, nil
+local _clipGetFn, _clipGetName = nil, nil
+local function _findGlobal(name)
+    local fn = rawget(getfenv(), name)
+    if type(fn) == "function" then return fn end
+    if getgenv then
+        local g = getgenv()
+        if g and type(g[name]) == "function" then return g[name] end
+    end
+    return nil
+end
+local function detectClipboard()
+    _clipSetFn, _clipSetName = nil, nil
+    _clipGetFn, _clipGetName = nil, nil
+    for _, name in ipairs({"setclipboard", "toclipboard", "writeclipboard", "set_clipboard"}) do
+        local fn = _findGlobal(name)
+        if fn then _clipSetFn = fn; _clipSetName = name; break end
+    end
+    for _, name in ipairs({"getclipboard", "fromclipboard", "readclipboard", "get_clipboard"}) do
+        local fn = _findGlobal(name)
+        if fn then _clipGetFn = fn; _clipGetName = name; break end
+    end
+end
+detectClipboard()
+local function trySetClipboard(str)
+    if not _clipSetFn then detectClipboard() end
+    if not _clipSetFn then return false, "no set-clipboard" end
+    local ok, err = pcall(_clipSetFn, str)
+    return ok, ok and _clipSetName or tostring(err)
+end
+local function tryGetClipboard()
+    if not _clipGetFn then detectClipboard() end
+    if not _clipGetFn then return nil, "no get-clipboard" end
+    local ok, val = pcall(_clipGetFn)
+    if ok and type(val) == "string" then return val, _clipGetName end
+    return nil, "get-clipboard failed"
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- FILE CONFIG SYSTEM
+-- ══════════════════════════════════════════════════════════════
+local CONFIG_FOLDER = "airhubUI_Configs"
+local ROOT_PREFIX = "airhubUI_"
+local _configPathCache = {}
+
+local function canReadWrite() return type(writefile) == "function" and type(readfile) == "function" end
+local function canDelete() return type(delfile) == "function" end
+local function fsAvailable() return canReadWrite() end
+local function safeFileName(name)
+    local c = tostring(name or ""):gsub("[^%w%-_]", "_")
+    if c == "" then return nil end
+    return c
+end
+local function tryPaths(name)
+    local fname = safeFileName(name)
+    if not fname then return {} end
+    return {
+        CONFIG_FOLDER .. "/" .. fname .. ".json",
+        CONFIG_FOLDER .. "\\" .. fname .. ".json",
+        ROOT_PREFIX .. fname .. ".json",
+        fname .. ".json",
+    }
+end
+local function ensureFolder()
+    if type(makefolder) ~= "function" then return end
+    local exists = false
+    if type(isfolder) == "function" then
+        local ok, r = pcall(isfolder, CONFIG_FOLDER)
+        exists = ok and r
+    end
+    if not exists then pcall(makefolder, CONFIG_FOLDER) end
+end
+local function tryRead(path)
+    if type(readfile) ~= "function" then return false end
+    local ok, data = pcall(readfile, path)
+    if not ok or type(data) ~= "string" or data == "" then return false end
+    return true, data
+end
+local function writeConfigFile(name, jsonStr)
+    if not canReadWrite() then return false, "writefile/readfile missing" end
+    ensureFolder()
+    local errors = {}
+    for _, path in ipairs(tryPaths(name)) do
+        local wOk = pcall(writefile, path, jsonStr)
+        if wOk then
+            local rOk, data = tryRead(path)
+            if rOk and data == jsonStr then
+                _configPathCache[name] = path
+                return true, path
+            else
+                table.insert(errors, path .. " (unreadable)")
+            end
+        else
+            table.insert(errors, path .. " (write fail)")
+        end
+    end
+    return false, table.concat(errors, " | ")
+end
+local function readConfigFile(name)
+    if type(readfile) ~= "function" then return nil, "readfile missing" end
+    local cached = _configPathCache[name]
+    if cached then
+        local ok, data = tryRead(cached)
+        if ok then return data end
+    end
+    for _, path in ipairs(tryPaths(name)) do
+        local ok, data = tryRead(path)
+        if ok then _configPathCache[name] = path; return data end
+    end
+    if type(listfiles) == "function" then
+        local fname = safeFileName(name)
+        local dirs = {CONFIG_FOLDER, CONFIG_FOLDER .. "/", CONFIG_FOLDER .. "\\", "."}
+        local seen = {}
+        for _, dir in ipairs(dirs) do
+            if not seen[dir] then
+                seen[dir] = true
+                local ok, files = pcall(listfiles, dir)
+                if ok and type(files) == "table" then
+                    for _, p in ipairs(files) do
+                        local fullPath = tostring(p)
+                        local basename = fullPath:match("([^/\\]+)$") or fullPath
+                        local n = basename:match("^" .. ROOT_PREFIX .. "(.-)%.json$")
+                                  or basename:match("^(.-)%.json$")
+                        if n == fname then
+                            local rOk, data = tryRead(fullPath)
+                            if rOk then _configPathCache[name] = fullPath; return data end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil, "not found"
+end
+local function deleteConfigFile(name)
+    if type(delfile) ~= "function" then return false, "delfile missing" end
+    local deleted = false
+    for _, path in ipairs(tryPaths(name)) do
+        local ok = pcall(delfile, path)
+        if ok then deleted = true; _configPathCache[name] = nil end
+    end
+    if type(listfiles) == "function" then
+        local fname = safeFileName(name)
+        local dirs = {CONFIG_FOLDER, CONFIG_FOLDER .. "/", CONFIG_FOLDER .. "\\", "."}
+        local seen = {}
+        for _, dir in ipairs(dirs) do
+            if not seen[dir] then
+                seen[dir] = true
+                local ok, files = pcall(listfiles, dir)
+                if ok and type(files) == "table" then
+                    for _, p in ipairs(files) do
+                        local fullPath = tostring(p)
+                        local basename = fullPath:match("([^/\\]+)$") or fullPath
+                        local n = basename:match("^" .. ROOT_PREFIX .. "(.-)%.json$")
+                                  or basename:match("^(.-)%.json$")
+                        if n == fname then
+                            local ok2 = pcall(delfile, fullPath)
+                            if ok2 then deleted = true; _configPathCache[name] = nil end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return deleted
+end
+local function listDiskConfigs()
+    ensureFolder()
+    local out, seen = {}, {}
+    if type(listfiles) ~= "function" then return out end
+    local function addFromDir(dir, prefix)
+        local ok, files = pcall(listfiles, dir)
+        if ok and type(files) == "table" then
+            for _, p in ipairs(files) do
+                local basename = tostring(p):match("([^/\\]+)$") or tostring(p)
+                local n
+                if prefix then
+                    n = basename:match("^" .. ROOT_PREFIX .. "(.-)%.json$")
+                else
+                    n = basename:match("^(.-)%.json$")
+                end
+                if n and n ~= "" and not seen[n] then
+                    seen[n] = true; out[#out+1] = n
+                end
+            end
+        end
+    end
+    addFromDir(CONFIG_FOLDER, false)
+    addFromDir(CONFIG_FOLDER .. "/", false)
+    addFromDir(CONFIG_FOLDER .. "\\", false)
+    addFromDir(".", true)
+    table.sort(out)
+    return out
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- FONT CATALOG
+-- ══════════════════════════════════════════════════════════════
+local FontCatalog = {
+    ["Code"] = Enum.Font.Code, ["Gotham"] = Enum.Font.Gotham,
+    ["GothamBold"] = Enum.Font.GothamBold, ["GothamSemibold"] = Enum.Font.GothamSemibold,
+    ["Arial"] = Enum.Font.Arial, ["ArialBold"] = Enum.Font.ArialBold,
+    ["SourceSans"] = Enum.Font.SourceSans, ["SourceSansBold"] = Enum.Font.SourceSansBold,
+    ["SourceSansSemibold"] = Enum.Font.SourceSansSemibold,
+    ["Roboto"] = Enum.Font.Roboto, ["RobotoMono"] = Enum.Font.RobotoMono,
+    ["Ubuntu"] = Enum.Font.Ubuntu, ["Fantasy"] = Enum.Font.Fantasy,
+    ["Antique"] = Enum.Font.Antique, ["Arcade"] = Enum.Font.Arcade,
+    ["SciFi"] = Enum.Font.SciFi, ["Bangers"] = Enum.Font.Bangers,
+    ["PatrickHand"] = Enum.Font.PatrickHand,
+}
+
+-- ══════════════════════════════════════════════════════════════
 -- THEME
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local Theme = {
-    Background   = Color3.fromRGB(245, 246, 249),
-    BackgroundAlt= Color3.fromRGB(250, 251, 253),
-    Sidebar      = Color3.fromRGB(240, 242, 246),
-    Panel        = Color3.fromRGB(255, 255, 255),
-    Section      = Color3.fromRGB(250, 251, 253),
-    Element      = Color3.fromRGB(255, 255, 255),
-    ElementHover = Color3.fromRGB(238, 241, 246),
-    Accent       = Color3.fromRGB(77, 107, 254),
-    AccentHover  = Color3.fromRGB(102, 128, 255),
-    Accent2      = Color3.fromRGB(220, 90, 130),
-    Cyan         = Color3.fromRGB(80, 180, 220),
-    Green        = Color3.fromRGB(60, 200, 130),
-    Text         = Color3.fromRGB(26, 29, 35),
-    SubText      = Color3.fromRGB(107, 114, 128),
-    Muted        = Color3.fromRGB(156, 163, 175),
-    Outline      = Color3.fromRGB(226, 229, 235),
-    OutlineLight = Color3.fromRGB(203, 208, 218),
-    Danger       = Color3.fromRGB(220, 60, 90),
-    Success      = Color3.fromRGB(60, 200, 130),
-    Warning      = Color3.fromRGB(240, 180, 60),
+    Background   = Color3.fromRGB(245, 246, 249), BackgroundAlt= Color3.fromRGB(250, 251, 253),
+    Sidebar      = Color3.fromRGB(240, 242, 246), Panel        = Color3.fromRGB(255, 255, 255),
+    Section      = Color3.fromRGB(250, 251, 253), Element      = Color3.fromRGB(255, 255, 255),
+    ElementHover = Color3.fromRGB(238, 241, 246), Accent       = Color3.fromRGB(77, 107, 254),
+    AccentHover  = Color3.fromRGB(102, 128, 255), Accent2      = Color3.fromRGB(220, 90, 130),
+    Cyan         = Color3.fromRGB(80, 180, 220),  Green        = Color3.fromRGB(60, 200, 130),
+    Text         = Color3.fromRGB(26, 29, 35),    SubText      = Color3.fromRGB(107, 114, 128),
+    Muted        = Color3.fromRGB(156, 163, 175), Outline      = Color3.fromRGB(226, 229, 235),
+    OutlineLight = Color3.fromRGB(203, 208, 218), Danger       = Color3.fromRGB(220, 60, 90),
+    Success      = Color3.fromRGB(60, 200, 130),  Warning      = Color3.fromRGB(240, 180, 60),
     OnAccent     = Color3.fromRGB(255, 255, 255),
 }
 
 local ThemePresets = {
-    ["airUI Light"] = {
-        Background   = Color3.fromRGB(245, 246, 249),
-        Sidebar      = Color3.fromRGB(240, 242, 246),
-        Panel        = Color3.fromRGB(255, 255, 255),
-        Section      = Color3.fromRGB(250, 251, 253),
-        Element      = Color3.fromRGB(255, 255, 255),
-        ElementHover = Color3.fromRGB(238, 241, 246),
-        Accent       = Color3.fromRGB(77, 107, 254),
-        Accent2      = Color3.fromRGB(220, 90, 130),
-        Text         = Color3.fromRGB(26, 29, 35),
-        SubText      = Color3.fromRGB(107, 114, 128),
-        Muted        = Color3.fromRGB(156, 163, 175),
-        Outline      = Color3.fromRGB(226, 229, 235),
-        OnAccent     = Color3.fromRGB(255, 255, 255),
-        Font         = "Code",
-        FontSize     = 1.0,
+    ["airhubUI Light"] = {
+        Background = Color3.fromRGB(245, 246, 249), Sidebar = Color3.fromRGB(240, 242, 246),
+        Panel = Color3.fromRGB(255, 255, 255), Section = Color3.fromRGB(250, 251, 253),
+        Element = Color3.fromRGB(255, 255, 255), ElementHover = Color3.fromRGB(238, 241, 246),
+        Accent = Color3.fromRGB(77, 107, 254), Accent2 = Color3.fromRGB(220, 90, 130),
+        Text = Color3.fromRGB(26, 29, 35), SubText = Color3.fromRGB(107, 114, 128),
+        Muted = Color3.fromRGB(156, 163, 175), Outline = Color3.fromRGB(226, 229, 235),
+        OnAccent = Color3.fromRGB(255, 255, 255), Font = "Code", FontSize = 1.0,
     },
-    ["airUI Dark"] = {
-        Background   = Color3.fromRGB(14, 15, 19),
-        Sidebar      = Color3.fromRGB(18, 19, 24),
-        Panel        = Color3.fromRGB(22, 23, 29),
-        Section      = Color3.fromRGB(25, 26, 33),
-        Element      = Color3.fromRGB(30, 32, 40),
-        ElementHover = Color3.fromRGB(38, 40, 50),
-        Accent       = Color3.fromRGB(120, 150, 255),
-        Accent2      = Color3.fromRGB(240, 120, 160),
-        Text         = Color3.fromRGB(235, 238, 245),
-        SubText      = Color3.fromRGB(160, 168, 184),
-        Muted        = Color3.fromRGB(110, 118, 134),
-        Outline      = Color3.fromRGB(48, 50, 60),
-        OnAccent     = Color3.fromRGB(14, 15, 19),
-        Font         = "Code",
-        FontSize     = 1.0,
+    ["airhubUI Dark"] = {
+        Background = Color3.fromRGB(14, 15, 19), Sidebar = Color3.fromRGB(18, 19, 24),
+        Panel = Color3.fromRGB(22, 23, 29), Section = Color3.fromRGB(25, 26, 33),
+        Element = Color3.fromRGB(30, 32, 40), ElementHover = Color3.fromRGB(38, 40, 50),
+        Accent = Color3.fromRGB(120, 150, 255), Accent2 = Color3.fromRGB(240, 120, 160),
+        Text = Color3.fromRGB(235, 238, 245), SubText = Color3.fromRGB(160, 168, 184),
+        Muted = Color3.fromRGB(110, 118, 134), Outline = Color3.fromRGB(48, 50, 60),
+        OnAccent = Color3.fromRGB(14, 15, 19), Font = "Code", FontSize = 1.0,
     },
     ["Smoke"] = {
-        Background   = Color3.fromRGB(232, 234, 238),
-        Sidebar      = Color3.fromRGB(222, 225, 230),
-        Panel        = Color3.fromRGB(245, 247, 250),
-        Section      = Color3.fromRGB(238, 240, 244),
-        Element      = Color3.fromRGB(250, 251, 253),
-        ElementHover = Color3.fromRGB(228, 231, 236),
-        Accent       = Color3.fromRGB(90, 100, 120),
-        Accent2      = Color3.fromRGB(160, 130, 180),
-        Text         = Color3.fromRGB(35, 38, 44),
-        SubText      = Color3.fromRGB(110, 116, 128),
-        Muted        = Color3.fromRGB(160, 165, 175),
-        Outline      = Color3.fromRGB(200, 205, 215),
-        OnAccent     = Color3.fromRGB(245, 247, 250),
-        Font         = "Gotham",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(232, 234, 238), Sidebar = Color3.fromRGB(222, 225, 230),
+        Panel = Color3.fromRGB(245, 247, 250), Section = Color3.fromRGB(238, 240, 244),
+        Element = Color3.fromRGB(250, 251, 253), ElementHover = Color3.fromRGB(228, 231, 236),
+        Accent = Color3.fromRGB(90, 100, 120), Accent2 = Color3.fromRGB(160, 130, 180),
+        Text = Color3.fromRGB(35, 38, 44), SubText = Color3.fromRGB(110, 116, 128),
+        Muted = Color3.fromRGB(160, 165, 175), Outline = Color3.fromRGB(200, 205, 215),
+        OnAccent = Color3.fromRGB(245, 247, 250), Font = "Gotham", FontSize = 1.0,
     },
     ["Mint"] = {
-        Background   = Color3.fromRGB(240, 250, 246),
-        Sidebar      = Color3.fromRGB(228, 244, 238),
-        Panel        = Color3.fromRGB(252, 255, 254),
-        Section      = Color3.fromRGB(244, 252, 249),
-        Element      = Color3.fromRGB(252, 255, 253),
-        ElementHover = Color3.fromRGB(226, 244, 236),
-        Accent       = Color3.fromRGB(60, 200, 130),
-        Accent2      = Color3.fromRGB(80, 180, 220),
-        Text         = Color3.fromRGB(20, 40, 32),
-        SubText      = Color3.fromRGB(90, 120, 108),
-        Muted        = Color3.fromRGB(150, 175, 165),
-        Outline      = Color3.fromRGB(200, 224, 214),
-        OnAccent     = Color3.fromRGB(255, 255, 255),
-        Font         = "GothamSemibold",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(240, 250, 246), Sidebar = Color3.fromRGB(228, 244, 238),
+        Panel = Color3.fromRGB(252, 255, 254), Section = Color3.fromRGB(244, 252, 249),
+        Element = Color3.fromRGB(252, 255, 253), ElementHover = Color3.fromRGB(226, 244, 236),
+        Accent = Color3.fromRGB(60, 200, 130), Accent2 = Color3.fromRGB(80, 180, 220),
+        Text = Color3.fromRGB(20, 40, 32), SubText = Color3.fromRGB(90, 120, 108),
+        Muted = Color3.fromRGB(150, 175, 165), Outline = Color3.fromRGB(200, 224, 214),
+        OnAccent = Color3.fromRGB(255, 255, 255), Font = "GothamSemibold", FontSize = 1.0,
     },
     ["Rose"] = {
-        Background   = Color3.fromRGB(252, 244, 246),
-        Sidebar      = Color3.fromRGB(248, 232, 236),
-        Panel        = Color3.fromRGB(255, 252, 253),
-        Section      = Color3.fromRGB(252, 246, 248),
-        Element      = Color3.fromRGB(255, 253, 254),
-        ElementHover = Color3.fromRGB(246, 230, 235),
-        Accent       = Color3.fromRGB(220, 90, 130),
-        Accent2      = Color3.fromRGB(240, 120, 100),
-        Text         = Color3.fromRGB(45, 22, 30),
-        SubText      = Color3.fromRGB(130, 90, 105),
-        Muted        = Color3.fromRGB(190, 150, 165),
-        Outline      = Color3.fromRGB(232, 208, 216),
-        OnAccent     = Color3.fromRGB(255, 255, 255),
-        Font         = "GothamSemibold",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(252, 244, 246), Sidebar = Color3.fromRGB(248, 232, 236),
+        Panel = Color3.fromRGB(255, 252, 253), Section = Color3.fromRGB(252, 246, 248),
+        Element = Color3.fromRGB(255, 253, 254), ElementHover = Color3.fromRGB(246, 230, 235),
+        Accent = Color3.fromRGB(220, 90, 130), Accent2 = Color3.fromRGB(240, 120, 100),
+        Text = Color3.fromRGB(45, 22, 30), SubText = Color3.fromRGB(130, 90, 105),
+        Muted = Color3.fromRGB(190, 150, 165), Outline = Color3.fromRGB(232, 208, 216),
+        OnAccent = Color3.fromRGB(255, 255, 255), Font = "GothamSemibold", FontSize = 1.0,
     },
     ["Violet"] = {
-        Background   = Color3.fromRGB(246, 244, 252),
-        Sidebar      = Color3.fromRGB(238, 232, 250),
-        Panel        = Color3.fromRGB(253, 252, 255),
-        Section      = Color3.fromRGB(247, 244, 253),
-        Element      = Color3.fromRGB(253, 252, 255),
-        ElementHover = Color3.fromRGB(238, 232, 250),
-        Accent       = Color3.fromRGB(140, 100, 220),
-        Accent2      = Color3.fromRGB(220, 90, 160),
-        Text         = Color3.fromRGB(32, 22, 45),
-        SubText      = Color3.fromRGB(110, 90, 140),
-        Muted        = Color3.fromRGB(175, 155, 200),
-        Outline      = Color3.fromRGB(220, 210, 235),
-        OnAccent     = Color3.fromRGB(255, 255, 255),
-        Font         = "Gotham",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(246, 244, 252), Sidebar = Color3.fromRGB(238, 232, 250),
+        Panel = Color3.fromRGB(253, 252, 255), Section = Color3.fromRGB(247, 244, 253),
+        Element = Color3.fromRGB(253, 252, 255), ElementHover = Color3.fromRGB(238, 232, 250),
+        Accent = Color3.fromRGB(140, 100, 220), Accent2 = Color3.fromRGB(220, 90, 160),
+        Text = Color3.fromRGB(32, 22, 45), SubText = Color3.fromRGB(110, 90, 140),
+        Muted = Color3.fromRGB(175, 155, 200), Outline = Color3.fromRGB(220, 210, 235),
+        OnAccent = Color3.fromRGB(255, 255, 255), Font = "Gotham", FontSize = 1.0,
     },
     ["Sky"] = {
-        Background   = Color3.fromRGB(240, 246, 252),
-        Sidebar      = Color3.fromRGB(228, 238, 248),
-        Panel        = Color3.fromRGB(252, 254, 255),
-        Section      = Color3.fromRGB(242, 248, 253),
-        Element      = Color3.fromRGB(252, 254, 255),
-        ElementHover = Color3.fromRGB(226, 238, 248),
-        Accent       = Color3.fromRGB(80, 180, 220),
-        Accent2      = Color3.fromRGB(77, 107, 254),
-        Text         = Color3.fromRGB(20, 35, 50),
-        SubText      = Color3.fromRGB(85, 115, 140),
-        Muted        = Color3.fromRGB(150, 175, 195),
-        Outline      = Color3.fromRGB(200, 218, 232),
-        OnAccent     = Color3.fromRGB(255, 255, 255),
-        Font         = "Gotham",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(240, 246, 252), Sidebar = Color3.fromRGB(228, 238, 248),
+        Panel = Color3.fromRGB(252, 254, 255), Section = Color3.fromRGB(242, 248, 253),
+        Element = Color3.fromRGB(252, 254, 255), ElementHover = Color3.fromRGB(226, 238, 248),
+        Accent = Color3.fromRGB(80, 180, 220), Accent2 = Color3.fromRGB(77, 107, 254),
+        Text = Color3.fromRGB(20, 35, 50), SubText = Color3.fromRGB(85, 115, 140),
+        Muted = Color3.fromRGB(150, 175, 195), Outline = Color3.fromRGB(200, 218, 232),
+        OnAccent = Color3.fromRGB(255, 255, 255), Font = "Gotham", FontSize = 1.0,
     },
     ["Amber"] = {
-        Background   = Color3.fromRGB(253, 248, 240),
-        Sidebar      = Color3.fromRGB(250, 240, 224),
-        Panel        = Color3.fromRGB(255, 253, 250),
-        Section      = Color3.fromRGB(253, 249, 242),
-        Element      = Color3.fromRGB(255, 254, 251),
-        ElementHover = Color3.fromRGB(248, 238, 222),
-        Accent       = Color3.fromRGB(240, 180, 60),
-        Accent2      = Color3.fromRGB(240, 120, 100),
-        Text         = Color3.fromRGB(45, 35, 20),
-        SubText      = Color3.fromRGB(130, 110, 80),
-        Muted        = Color3.fromRGB(185, 165, 135),
-        Outline      = Color3.fromRGB(232, 220, 200),
-        OnAccent     = Color3.fromRGB(45, 35, 20),
-        Font         = "GothamSemibold",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(253, 248, 240), Sidebar = Color3.fromRGB(250, 240, 224),
+        Panel = Color3.fromRGB(255, 253, 250), Section = Color3.fromRGB(253, 249, 242),
+        Element = Color3.fromRGB(255, 254, 251), ElementHover = Color3.fromRGB(248, 238, 222),
+        Accent = Color3.fromRGB(240, 180, 60), Accent2 = Color3.fromRGB(240, 120, 100),
+        Text = Color3.fromRGB(45, 35, 20), SubText = Color3.fromRGB(130, 110, 80),
+        Muted = Color3.fromRGB(185, 165, 135), Outline = Color3.fromRGB(232, 220, 200),
+        OnAccent = Color3.fromRGB(45, 35, 20), Font = "GothamSemibold", FontSize = 1.0,
     },
     ["Cyber"] = {
-        Background   = Color3.fromRGB(10, 12, 18),
-        Sidebar      = Color3.fromRGB(14, 16, 24),
-        Panel        = Color3.fromRGB(18, 20, 30),
-        Section      = Color3.fromRGB(20, 22, 32),
-        Element      = Color3.fromRGB(24, 27, 38),
-        ElementHover = Color3.fromRGB(32, 36, 50),
-        Accent       = Color3.fromRGB(0, 220, 255),
-        Accent2      = Color3.fromRGB(255, 0, 170),
-        Text         = Color3.fromRGB(220, 240, 255),
-        SubText      = Color3.fromRGB(140, 160, 190),
-        Muted        = Color3.fromRGB(90, 105, 135),
-        Outline      = Color3.fromRGB(38, 44, 60),
-        OnAccent     = Color3.fromRGB(10, 12, 18),
-        Font         = "SciFi",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(10, 12, 18), Sidebar = Color3.fromRGB(14, 16, 24),
+        Panel = Color3.fromRGB(18, 20, 30), Section = Color3.fromRGB(20, 22, 32),
+        Element = Color3.fromRGB(24, 27, 38), ElementHover = Color3.fromRGB(32, 36, 50),
+        Accent = Color3.fromRGB(0, 220, 255), Accent2 = Color3.fromRGB(255, 0, 170),
+        Text = Color3.fromRGB(220, 240, 255), SubText = Color3.fromRGB(140, 160, 190),
+        Muted = Color3.fromRGB(90, 105, 135), Outline = Color3.fromRGB(38, 44, 60),
+        OnAccent = Color3.fromRGB(10, 12, 18), Font = "SciFi", FontSize = 1.0,
     },
     ["Matrix"] = {
-        Background   = Color3.fromRGB(8, 14, 10),
-        Sidebar      = Color3.fromRGB(10, 18, 12),
-        Panel        = Color3.fromRGB(12, 22, 15),
-        Section      = Color3.fromRGB(14, 24, 17),
-        Element      = Color3.fromRGB(18, 30, 22),
-        ElementHover = Color3.fromRGB(24, 40, 30),
-        Accent       = Color3.fromRGB(60, 255, 90),
-        Accent2      = Color3.fromRGB(0, 220, 150),
-        Text         = Color3.fromRGB(200, 255, 210),
-        SubText      = Color3.fromRGB(120, 180, 130),
-        Muted        = Color3.fromRGB(80, 130, 90),
-        Outline      = Color3.fromRGB(30, 50, 35),
-        OnAccent     = Color3.fromRGB(8, 14, 10),
-        Font         = "Code",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(8, 14, 10), Sidebar = Color3.fromRGB(10, 18, 12),
+        Panel = Color3.fromRGB(12, 22, 15), Section = Color3.fromRGB(14, 24, 17),
+        Element = Color3.fromRGB(18, 30, 22), ElementHover = Color3.fromRGB(24, 40, 30),
+        Accent = Color3.fromRGB(60, 255, 90), Accent2 = Color3.fromRGB(0, 220, 150),
+        Text = Color3.fromRGB(200, 255, 210), SubText = Color3.fromRGB(120, 180, 130),
+        Muted = Color3.fromRGB(80, 130, 90), Outline = Color3.fromRGB(30, 50, 35),
+        OnAccent = Color3.fromRGB(8, 14, 10), Font = "Code", FontSize = 1.0,
     },
     ["Nord"] = {
-        Background   = Color3.fromRGB(46, 52, 64),
-        Sidebar      = Color3.fromRGB(59, 66, 82),
-        Panel        = Color3.fromRGB(67, 76, 94),
-        Section      = Color3.fromRGB(59, 66, 82),
-        Element      = Color3.fromRGB(76, 86, 106),
-        ElementHover = Color3.fromRGB(86, 97, 118),
-        Accent       = Color3.fromRGB(136, 192, 208),
-        Accent2      = Color3.fromRGB(180, 142, 173),
-        Text         = Color3.fromRGB(236, 239, 244),
-        SubText      = Color3.fromRGB(216, 222, 233),
-        Muted        = Color3.fromRGB(180, 190, 205),
-        Outline      = Color3.fromRGB(76, 86, 106),
-        OnAccent     = Color3.fromRGB(46, 52, 64),
-        Font         = "SourceSansSemibold",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(46, 52, 64), Sidebar = Color3.fromRGB(59, 66, 82),
+        Panel = Color3.fromRGB(67, 76, 94), Section = Color3.fromRGB(59, 66, 82),
+        Element = Color3.fromRGB(76, 86, 106), ElementHover = Color3.fromRGB(86, 97, 118),
+        Accent = Color3.fromRGB(136, 192, 208), Accent2 = Color3.fromRGB(180, 142, 173),
+        Text = Color3.fromRGB(236, 239, 244), SubText = Color3.fromRGB(216, 222, 233),
+        Muted = Color3.fromRGB(180, 190, 205), Outline = Color3.fromRGB(76, 86, 106),
+        OnAccent = Color3.fromRGB(46, 52, 64), Font = "SourceSansSemibold", FontSize = 1.0,
     },
     ["Dracula"] = {
-        Background   = Color3.fromRGB(40, 42, 54),
-        Sidebar      = Color3.fromRGB(48, 50, 63),
-        Panel        = Color3.fromRGB(56, 58, 74),
-        Section      = Color3.fromRGB(50, 52, 66),
-        Element      = Color3.fromRGB(68, 71, 90),
-        ElementHover = Color3.fromRGB(80, 83, 105),
-        Accent       = Color3.fromRGB(189, 147, 249),
-        Accent2      = Color3.fromRGB(255, 121, 198),
-        Text         = Color3.fromRGB(248, 248, 242),
-        SubText      = Color3.fromRGB(210, 210, 220),
-        Muted        = Color3.fromRGB(160, 162, 180),
-        Outline      = Color3.fromRGB(68, 71, 90),
-        OnAccent     = Color3.fromRGB(40, 42, 54),
-        Font         = "GothamSemibold",
-        FontSize     = 1.0,
+        Background = Color3.fromRGB(40, 42, 54), Sidebar = Color3.fromRGB(48, 50, 63),
+        Panel = Color3.fromRGB(56, 58, 74), Section = Color3.fromRGB(50, 52, 66),
+        Element = Color3.fromRGB(68, 71, 90), ElementHover = Color3.fromRGB(80, 83, 105),
+        Accent = Color3.fromRGB(189, 147, 249), Accent2 = Color3.fromRGB(255, 121, 198),
+        Text = Color3.fromRGB(248, 248, 242), SubText = Color3.fromRGB(210, 210, 220),
+        Muted = Color3.fromRGB(160, 162, 180), Outline = Color3.fromRGB(68, 71, 90),
+        OnAccent = Color3.fromRGB(40, 42, 54), Font = "GothamSemibold", FontSize = 1.0,
     },
 }
 
-local Config = {
-    WindowWidth = 720, WindowHeight = 500,
-    MinWidth = 520, MinHeight = 380,
-    ToggleKey = Enum.KeyCode.RightShift,
-    AnimSpeed = 0.15,
-    MenuAnim = 0.32,
-    MenuCloseAnim = 0.20,
-    PopupAnim = 0.18,
-    CornerRadius = UDim.new(0, 8),
-    BaseCornerRadius = 8,
-    CurrentFontFamily = Enum.Font.Code,
-    CurrentFontName = "Code",
-    CurrentFontScale = 1.0,
-    PopupZ = 5000, OverlayZ = 4000, NotifyZ = 6000, TooltipZ = 7000,
-    StatusBar = true,
-    MenuTransparency = 0.06, TabTransparency = 0, SectionTransparency = 0, ElementTransparency = 0,
-    Version = "1.3",
-}
-
-local WHEEL_UP, WHEEL_DOWN = "WheelUp", "WheelDown"
-
+-- ══════════════════════════════════════════════════════════════
+-- THEME REGISTRY
+-- ══════════════════════════════════════════════════════════════
 local ThemedBg, ThemedText, ThemedStroke = {}, {}, {}
 local TransparencyRegistry, VisibilityWatchers, SectionStates = {}, {}, {}
 local RowNameLabels = setmetatable({}, {__mode = "k"})
@@ -347,20 +699,17 @@ local function getSafeParent()
     end
     return LocalPlayer:WaitForChild("PlayerGui")
 end
-
 local function new(c, p, parent)
     local i = Instance.new(c)
     for k, v in pairs(p or {}) do i[k] = v end
     if parent then i.Parent = parent end
     return i
 end
-
 local function tween(inst, props, dur, style, dir)
     local t = TweenService:Create(inst, TweenInfo.new(dur or Config.AnimSpeed,
         style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
     t:Play(); return t
 end
-
 local function addCorner(i, r)
     r = r or Config.CornerRadius
     if typeof(r) == "UDim2" then r = UDim.new(r.X.Scale, r.X.Offset) end
@@ -370,23 +719,20 @@ local function addCorner(i, r)
     c:SetAttribute("_baseScale", r.Scale)
     return c
 end
-
 local function addStroke(i, c, t, tr)
     return new("UIStroke", {Color = c or Theme.Outline, Thickness = t or 1,
         Transparency = tr or 0, ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, i)
 end
-
 local function addPadding(i, px, py)
     py = py or px
     return new("UIPadding", {PaddingTop = UDim.new(0,py), PaddingBottom = UDim.new(0,py),
         PaddingLeft = UDim.new(0,px), PaddingRight = UDim.new(0,px)}, i)
 end
-
 local function keyName(k)
     if not k then return "None" end
     if type(k) == "string" then
-        if k == WHEEL_UP then return "WU" end
-        if k == WHEEL_DOWN then return "WD" end
+        if k == "WheelUp" then return "WU" end
+        if k == "WheelDown" then return "WD" end
         return k
     end
     local ok, name = pcall(function() return k.Name end)
@@ -403,15 +749,13 @@ local function keyName(k)
     end
     return name
 end
-
 local function readInputKey(inp)
     if inp.UserInputType == Enum.UserInputType.MouseWheel then
-        return inp.Position.Z > 0 and WHEEL_UP or WHEEL_DOWN
+        return inp.Position.Z > 0 and "WheelUp" or "WheelDown"
     end
     if inp.KeyCode and inp.KeyCode ~= Enum.KeyCode.Unknown then return inp.KeyCode end
     return inp.UserInputType
 end
-
 local function isListenableInput(inp)
     local ut = inp.UserInputType
     if ut == Enum.UserInputType.Keyboard then return true end
@@ -421,24 +765,17 @@ local function isListenableInput(inp)
     if ut == Enum.UserInputType.MouseWheel then return true end
     return false
 end
-
 local function addBrackets(parent, size, thick, color)
-    size = size or 12
-    thick = thick or 2
-    color = color or Theme.Accent
+    size = size or 12; thick = thick or 2; color = color or Theme.Accent
     local function bracket(xS, xO, yS, yO, w, h, ax, ay)
         new("Frame", {BackgroundColor3 = color, BackgroundTransparency = 0.15, BorderSizePixel = 0,
             AnchorPoint = Vector2.new(ax, ay), Position = UDim2.new(xS, xO, yS, yO),
             Size = UDim2.new(0, w, 0, h), ZIndex = (parent.ZIndex or 1) + 1}, parent)
     end
-    bracket(0,0,0,0,size,thick,0,0)
-    bracket(0,0,0,0,thick,size,0,0)
-    bracket(1,0,0,0,size,thick,1,0)
-    bracket(1,0,0,0,thick,size,1,0)
-    bracket(0,0,1,0,size,thick,0,1)
-    bracket(0,0,1,0,thick,size,0,1)
-    bracket(1,0,1,0,size,thick,1,1)
-    bracket(1,0,1,0,thick,size,1,1)
+    bracket(0,0,0,0,size,thick,0,0); bracket(0,0,0,0,thick,size,0,0)
+    bracket(1,0,0,0,size,thick,1,0); bracket(1,0,0,0,thick,size,1,0)
+    bracket(0,0,1,0,size,thick,0,1); bracket(0,0,1,0,thick,size,0,1)
+    bracket(1,0,1,0,size,thick,1,1); bracket(1,0,1,0,thick,size,1,1)
 end
 
 local MODE_COLORS = {
@@ -448,77 +785,51 @@ local MODE_COLORS = {
 }
 local MODE_SHORT = { Toggle = "TGL", Hold = "HLD", OnHoldDisable = "OHD" }
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- SEARCH HIGHLIGHT
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local HIGHLIGHT_COLOR = "rgb(77, 107, 254)"
-
 local function highlightLabel(lbl, query)
     if not lbl or not lbl.Parent then return end
     local orig = lbl:GetAttribute("_hlOrig")
-    if orig == nil then
-        orig = lbl.Text
-        lbl:SetAttribute("_hlOrig", orig)
-    end
-    if not query or query == "" then
-        lbl.RichText = false
-        lbl.Text = orig
-        return
-    end
-    local lower = string.lower(orig)
-    local qlen = #query
+    if orig == nil then orig = lbl.Text; lbl:SetAttribute("_hlOrig", orig) end
+    if not query or query == "" then lbl.RichText = false; lbl.Text = orig; return end
+    local lower = string.lower(orig); local qlen = #query
     if qlen == 0 or not string.find(lower, query, 1, true) then
-        lbl.RichText = false
-        lbl.Text = orig
-        return
+        lbl.RichText = false; lbl.Text = orig; return
     end
-    local parts = {}
-    local i = 1
+    local parts = {}; local i = 1
     while i <= #orig do
         local s = string.find(lower, query, i, true)
-        if not s then
-            table.insert(parts, orig:sub(i))
-            break
-        end
+        if not s then table.insert(parts, orig:sub(i)); break end
         local e = s + qlen - 1
         if s > i then table.insert(parts, orig:sub(i, s - 1)) end
-        table.insert(parts, '<font color="' .. HIGHLIGHT_COLOR .. '"><b>' ..
-                     orig:sub(s, e) .. '</b></font>')
+        table.insert(parts, '<font color="' .. HIGHLIGHT_COLOR .. '"><b>' .. orig:sub(s, e) .. '</b></font>')
         i = e + 1
     end
-    lbl.RichText = true
-    lbl.Text = table.concat(parts)
+    lbl.RichText = true; lbl.Text = table.concat(parts)
 end
-
 local function markSearch(row, name, nameLabel)
     row:SetAttribute("SearchName", string.lower(name or ""))
     if nameLabel then RowNameLabels[row] = nameLabel end
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- BIND SYSTEM
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function matchesKey(stored, input)
     if not stored then return false end
-    if stored == WHEEL_UP or stored == WHEEL_DOWN then
+    if stored == "WheelUp" or stored == "WheelDown" then
         return input.UserInputType == Enum.UserInputType.MouseWheel and stored == readInputKey(input)
     end
     return stored == input.KeyCode or stored == input.UserInputType
 end
-
 local function findActiveKey(bind)
-    for _, e in ipairs(bind.keys) do
-        if e.mode == "Hold" and e.held then return e, true end
-    end
-    for _, e in ipairs(bind.keys) do
-        if e.mode == "Toggle" and e.toggled then return e, true end
-    end
-    for _, e in ipairs(bind.keys) do
-        if e.mode == "OnHoldDisable" and e.held then return e, false end
-    end
+    for _, e in ipairs(bind.keys) do if e.mode == "Hold" and e.held then return e, true end end
+    for _, e in ipairs(bind.keys) do if e.mode == "Toggle" and e.toggled then return e, true end end
+    for _, e in ipairs(bind.keys) do if e.mode == "OnHoldDisable" and e.held then return e, false end end
     return nil, false
 end
-
 local function isBindActive(bind)
     if not bind then return false end
     for _, e in ipairs(bind.keys) do
@@ -527,7 +838,6 @@ local function isBindActive(bind)
     end
     return false
 end
-
 local function fireBind(bind, skipCallback)
     if not bind then return end
     local entry, active = findActiveKey(bind)
@@ -537,7 +847,6 @@ local function fireBind(bind, skipCallback)
         pcall(bind.callback, val, src and keyName(src) or nil, md, bind)
     end
 end
-
 local function RegisterBind(id, name, callback, btype, default)
     if BindRegistry[id] then
         BindRegistry[id].callback = callback
@@ -550,21 +859,22 @@ local function RegisterBind(id, name, callback, btype, default)
     table.insert(BindOrder, id)
     return b
 end
-
-local function AddBindKey(bindId, key, mode, value)
+local function AddBindKey(bindId, key, mode, value, silent)
     local b = BindRegistry[bindId]; if not b then return end
     local e = {key = key, mode = mode or "Toggle", value = value, held = false, toggled = false}
-    table.insert(b.keys, e); fireBind(b); return e
+    table.insert(b.keys, e)
+    if silent == false then fireBind(b) end
+    return e
 end
-
 local function RemoveBindKey(bindId, idx, silent)
     local b = BindRegistry[bindId]; if not b then return end
-    table.remove(b.keys, idx); fireBind(b, silent)
+    table.remove(b.keys, idx)
+    if silent == false then fireBind(b) end
 end
-
 local function ClearBind(id, silent)
     local b = BindRegistry[id]; if not b then return end
-    b.keys = {}; fireBind(b, silent)
+    b.keys = {}
+    if silent == false then fireBind(b) end
 end
 
 _T(UserInputService.InputBegan:Connect(function(input, gpe)
@@ -584,7 +894,6 @@ _T(UserInputService.InputBegan:Connect(function(input, gpe)
         end
     end
 end))
-
 _T(UserInputService.InputEnded:Connect(function(input)
     for _, id in ipairs(BindOrder) do
         local b = BindRegistry[id]
@@ -600,50 +909,65 @@ _T(UserInputService.InputEnded:Connect(function(input)
     end
 end))
 
--- ============================================================
--- RAINBOW LOOP
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
+-- RAINBOW
+-- ══════════════════════════════════════════════════════════════
 local rainbowTime = 0
 _T(RunService.RenderStepped:Connect(function(dt)
     if #RainbowControllers == 0 then return end
     rainbowTime = (rainbowTime + dt * 0.20) % 1
     for i = #RainbowControllers, 1, -1 do
         local c = RainbowControllers[i]
-        if not c then
-            table.remove(RainbowControllers, i)
+        if not c then table.remove(RainbowControllers, i)
         elseif not c.root or not c.root.Parent then
-            if not c.keepAlive then
-                table.remove(RainbowControllers, i)
-            end
+            if not c.keepAlive then table.remove(RainbowControllers, i) end
         elseif c.active and type(c.setFromRainbow) == "function" then
             pcall(c.setFromRainbow, (rainbowTime * (c.speed or 1)) % 1)
         end
     end
 end))
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- NOTIFICATIONS
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local NotificationHolder
 local function ensureNotifHolder(parent)
     if NotificationHolder and NotificationHolder.Parent then return NotificationHolder end
-    NotificationHolder = new("Frame", {Name = "airUINotifications", BackgroundTransparency = 1,
-        Position = UDim2.new(1,-16,0,16), Size = UDim2.new(0,320,1,-32),
-        AnchorPoint = Vector2.new(1,0), ZIndex = Config.NotifyZ}, parent)
+    local pos = Config.NotificationPosition or "top-right"
+    local posUDim, anchor, align
+    if pos == "top-right" then
+        posUDim = UDim2.new(1,-16,0,16); anchor = Vector2.new(1,0); align = Enum.HorizontalAlignment.Right
+    elseif pos == "top-left" then
+        posUDim = UDim2.new(0,16,0,16); anchor = Vector2.new(0,0); align = Enum.HorizontalAlignment.Left
+    elseif pos == "bottom-right" then
+        posUDim = UDim2.new(1,-16,1,-16); anchor = Vector2.new(1,1); align = Enum.HorizontalAlignment.Right
+    else
+        posUDim = UDim2.new(0,16,1,-16); anchor = Vector2.new(0,1); align = Enum.HorizontalAlignment.Left
+    end
+    NotificationHolder = new("Frame", {Name = "airhubUINotifications", BackgroundTransparency = 1,
+        Position = posUDim, Size = UDim2.new(0,320,1,-32),
+        AnchorPoint = anchor, ZIndex = Config.NotifyZ}, parent)
     new("UIListLayout", {Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder,
-        HorizontalAlignment = Enum.HorizontalAlignment.Right}, NotificationHolder)
+        HorizontalAlignment = align}, NotificationHolder)
     return NotificationHolder
 end
-
+local function resetNotifHolder()
+    if NotificationHolder then NotificationHolder:Destroy(); NotificationHolder = nil end
+end
 local function Notify(title, text, kind, duration)
     local holder = ensureNotifHolder(NotificationHolder and NotificationHolder.Parent or getSafeParent())
-    duration = duration or 3
+    duration = duration or Config.NotificationDuration or 3
     local accent, icon = Theme.Accent, "i"
     if kind == "success" then accent, icon = Theme.Success, "+"
     elseif kind == "error" then accent, icon = Theme.Danger, "x"
     elseif kind == "warning" then accent, icon = Theme.Warning, "!" end
+    local pos = Config.NotificationPosition or "top-right"
+    local isRight = pos == "top-right" or pos == "bottom-right"
+    local startX = isRight and 24 or -24
     local n = new("Frame", {Name = "Notification", BorderSizePixel = 0,
-        Size = UDim2.new(1,0,0,62), Position = UDim2.new(1,24,0,0), ZIndex = Config.NotifyZ + 1}, holder)
+        Size = UDim2.new(1,0,0,62),
+        Position = isRight and UDim2.new(1,startX,0,0) or UDim2.new(0,-startX,0,0),
+        ZIndex = Config.NotifyZ + 1}, holder)
     themeBg(n, "Panel"); addCorner(n, UDim.new(0,10)); addStroke(n, Theme.Outline, 1, 0.15)
     new("Frame", {BackgroundColor3 = accent, BorderSizePixel = 0,
         Size = UDim2.new(0,3,1,-16), Position = UDim2.new(0,8,0,8), ZIndex = Config.NotifyZ + 2}, n)
@@ -670,26 +994,25 @@ local function Notify(title, text, kind, duration)
     tween(n, {Position = UDim2.new(0,0,0,0)})
     task.delay(duration, function()
         if n and n.Parent then
-            tween(n, {Position = UDim2.new(1,24,0,0)})
+            tween(n, {Position = isRight and UDim2.new(1,startX,0,0) or UDim2.new(0,-startX,0,0)})
             task.wait(Config.AnimSpeed)
             if n then n:Destroy() end
         end
     end)
 end
 
--- ============================================================
--- OVERLAY + POPUP STACK
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
+-- OVERLAY + POPUPS
+-- ══════════════════════════════════════════════════════════════
 local Overlay
 local function ensureOverlay(gui)
     if Overlay and Overlay.Parent == gui then return Overlay end
     if Overlay and Overlay.Parent then Overlay:Destroy() end
-    Overlay = new("Frame", {Name = "airUIOverlay", BackgroundTransparency = 1,
+    Overlay = new("Frame", {Name = "airhubUIOverlay", BackgroundTransparency = 1,
         Size = UDim2.new(1,0,1,0), ZIndex = Config.OverlayZ, Active = false}, gui)
     PopupStack = {}
     return Overlay
 end
-
 local function pushPopup(frame, posFn, closeFn, popupOpts)
     popupOpts = popupOpts or {}
     if not Overlay or not Overlay.Parent then return end
@@ -700,25 +1023,20 @@ local function pushPopup(frame, posFn, closeFn, popupOpts)
     end
     frame.Visible = true
     local us = frame:FindFirstChildOfClass("UIScale")
-    if not us then
-        us = Instance.new("UIScale"); us.Parent = frame
-    end
+    if not us then us = Instance.new("UIScale"); us.Parent = frame end
     us.Scale = 0.92
     tween(us, {Scale = 1}, Config.PopupAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     table.insert(PopupStack, {frame = frame, positionFn = posFn, closeFn = closeFn,
         us = us, keepAlive = popupOpts.keepAlive})
     if posFn then pcall(posFn) end
 end
-
 local function closeTopPopup()
     local top = table.remove(PopupStack)
     if not top or not top.frame then return end
     local f = top.frame
     if top.closeFn then pcall(top.closeFn) end
     if top.keepAlive then
-        if top.us and top.us.Parent then
-            tween(top.us, {Scale = 0.92}, Config.PopupAnim * 0.6)
-        end
+        if top.us and top.us.Parent then tween(top.us, {Scale = 0.92}, Config.PopupAnim * 0.6) end
         task.delay(Config.PopupAnim * 0.6 + 0.02, function()
             if f and f.Parent then
                 f.Visible = false
@@ -734,7 +1052,6 @@ local function closeTopPopup()
         if f and f.Parent then f:Destroy() end
     end
 end
-
 local function closeAllPopups() while #PopupStack > 0 do closeTopPopup() end end
 
 _T(RunService.RenderStepped:Connect(function()
@@ -745,7 +1062,6 @@ _T(RunService.RenderStepped:Connect(function()
         end
     end
 end))
-
 _T(UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.Escape then closeTopPopup(); return end
@@ -763,14 +1079,14 @@ _T(UserInputService.InputBegan:Connect(function(input, gpe)
     closeTopPopup()
 end))
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- TOOLTIP
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local Tooltip
 local function ensureTooltip()
     if Tooltip and Tooltip.Parent then return Tooltip end
     if not Overlay or not Overlay.Parent then return nil end
-    Tooltip = new("Frame", {Name = "airUITooltip", BorderSizePixel = 0,
+    Tooltip = new("Frame", {Name = "airhubUITooltip", BorderSizePixel = 0,
         Size = UDim2.new(0,0,0,24), AutomaticSize = Enum.AutomaticSize.X,
         Position = UDim2.new(0,0,0,0), Visible = false, ZIndex = Config.TooltipZ}, Overlay)
     themeBg(Tooltip, "Panel"); addCorner(Tooltip, UDim.new(0,6))
@@ -783,10 +1099,9 @@ local function ensureTooltip()
     themeText(txt, "Text")
     return Tooltip
 end
-
 local function showTooltip(anchor, text)
     local t = ensureTooltip(); if not t then return end
-    t:FindFirstChild("Text").Text = text; t.Visible = true
+    t:FindFirstChild("Text").Text = T(text); t.Visible = true
     local ap, as = anchor.AbsolutePosition, anchor.AbsoluteSize
     local vp = workspace.CurrentCamera.ViewportSize
     local tw = t.AbsoluteSize.X
@@ -794,13 +1109,17 @@ local function showTooltip(anchor, text)
     local ty = ap.Y - 30; if ty < 4 then ty = ap.Y + as.Y + 6 end
     t.Position = UDim2.fromOffset(tx, ty)
 end
-
 local function hideTooltip() if Tooltip then Tooltip.Visible = false end end
-
 local function attachTooltip(frame, text)
     if not text then return end
     local hideToken = 0
-    local function enter() hideToken = hideToken + 1; pcall(showTooltip, frame, text) end
+    local function enter()
+        hideToken = hideToken + 1
+        local token = hideToken
+        task.delay(Config.TooltipDelay or 0.05, function()
+            if hideToken == token then pcall(showTooltip, frame, text) end
+        end)
+    end
     local function leave()
         local token = hideToken + 1; hideToken = token
         task.delay(0.05, function() if hideToken == token then hideTooltip() end end)
@@ -816,7 +1135,6 @@ local function getSectionState(section)
     if not SectionStates[section] then SectionStates[section] = {} end
     return SectionStates[section]
 end
-
 local function reevaluateVisibility()
     for i = #VisibilityWatchers, 1, -1 do
         local w = VisibilityWatchers[i]
@@ -827,16 +1145,15 @@ local function reevaluateVisibility()
         end
     end
 end
-
 local function watchVisibility(element, predicate, state)
     table.insert(VisibilityWatchers, {element = element, predicate = predicate, state = state})
     local ok, visible = pcall(predicate, state)
     element.Visible = ok and (visible and true or false) or false
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- COLORPICKER UI
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function buildColorpickerUI(parent, opts)
     opts = opts or {}
     local color = opts.Color or Color3.fromRGB(77, 107, 254)
@@ -916,9 +1233,7 @@ local function buildColorpickerUI(parent, opts)
     local rbToggle = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
         Text = "", ZIndex = (parent.ZIndex or 1) + 13}, rbRow)
     local rainbowCtrl = {
-        active = rainbowEnabled,
-        speed = rainbowSpeed,
-        root = root,
+        active = rainbowEnabled, speed = rainbowSpeed, root = root,
         keepAlive = opts.KeepAlive or false,
         setFromRainbow = function(hv)
             h = hv; s = 1; v = 1
@@ -935,7 +1250,6 @@ local function buildColorpickerUI(parent, opts)
         end,
     }
     table.insert(RainbowControllers, rainbowCtrl)
-
     local function hexStr(c) return string.format("#%02X%02X%02X",
         math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)) end
     local function applyMain()
@@ -962,8 +1276,7 @@ local function buildColorpickerUI(parent, opts)
     local svDrag, hueDrag, alphaDrag = false, false, false
     local function disableRainbow()
         if rainbowEnabled then
-            rainbowEnabled = false
-            rainbowCtrl.active = false
+            rainbowEnabled = false; rainbowCtrl.active = false
             tween(rbSw, {BackgroundColor3 = Color3.fromRGB(214, 218, 226)})
             tween(rbKnob, {Position = UDim2.new(0,2,0,2)})
             pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
@@ -1039,21 +1352,15 @@ local function buildColorpickerUI(parent, opts)
     end)
     return root, {
         Get = function() return color, alpha end,
-        Set = function(c, a) 
-            color = c; if a then alpha = a end
-            h, s, v = Color3.toHSV(c); applyMain()
-        end,
+        Set = function(c, a) color = c; if a then alpha = a end; h, s, v = Color3.toHSV(c); applyMain() end,
         GetRainbow = function() return rainbowEnabled, rainbowSpeed end,
-        Destroy = function() 
-            rainbowCtrl.active = false
-            rainbowCtrl.keepAlive = false
-        end,
+        Destroy = function() rainbowCtrl.active = false; rainbowCtrl.keepAlive = false end,
     }
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- KEYBIND MODE PICKER
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function handleKeybindPress(anchor, opt, state, explicitId)
     local modes = opt.Modes
     local id = explicitId or opt.Key or opt.Name or "kb"
@@ -1067,12 +1374,9 @@ local function handleKeybindPress(anchor, opt, state, explicitId)
         state[modeKey] = cur
         state["__kbActive_" .. tostring(id)] = cur and modes[1] or nil
         if opt.Callback then pcall(opt.Callback, modes[1], state, cur) end
-        Notify("Keybind", (opt.Name or "?") .. ": " .. modes[1] .. " " .. (cur and "ON" or "OFF"), "info", 1.2)
         return
     end
-    if openPickerMenu then
-        openPickerMenu(anchor, opt, state, modes, id)
-    end
+    if openPickerMenu then openPickerMenu(anchor, opt, state, modes, id) end
 end
 
 local function openPickerMenuImpl(anchor, opt, state, modes, explicitId)
@@ -1088,9 +1392,8 @@ local function openPickerMenuImpl(anchor, opt, state, modes, explicitId)
         ZIndex = Config.PopupZ + 81}, popup)
     local pickerTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,18,0,10),
         Size = UDim2.new(1,-28,0,14), Font = Config.CurrentFontFamily,
-        Text = (opt.Name or "Keybind"), TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = Config.PopupZ + 81}, popup)
+        Text = T(opt.Name or "Keybind"), TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left, ZIndex = Config.PopupZ + 81}, popup)
     themeText(pickerTitle, "Text")
     local scroll = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
         Position = UDim2.new(0,8,0,32), Size = UDim2.new(1,-16,1,-40),
@@ -1109,14 +1412,9 @@ local function openPickerMenuImpl(anchor, opt, state, modes, explicitId)
         if item == active then
             themeBg(ib, "Accent"); ib.TextColor3 = Theme.OnAccent
         else themeBg(ib, "ElementHover"); themeText(ib, "Text") end
-        ib.MouseEnter:Connect(function()
-            if item ~= active then tween(ib, {BackgroundColor3 = Theme.Element}) end end)
-        ib.MouseLeave:Connect(function()
-            if item ~= active then tween(ib, {BackgroundColor3 = Theme.ElementHover}) end end)
         ib.MouseButton1Click:Connect(function()
             state["__kbActive_" .. tostring(id)] = item
             if opt.Callback then pcall(opt.Callback, item, state) end
-            Notify("Keybind", (opt.Name or "?") .. " → " .. tostring(item), "info", 1.2)
             closeTopPopup()
         end)
     end
@@ -1133,9 +1431,9 @@ local function openPickerMenuImpl(anchor, opt, state, modes, explicitId)
 end
 openPickerMenu = openPickerMenuImpl
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- BIND POPUP
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local BIND_MODES = {"Toggle", "Hold", "OnHoldDisable"}
 local function openBindMenu(anchor, bindId, offsetX)
     local bind = BindRegistry[bindId]; if not bind then return end
@@ -1154,29 +1452,12 @@ local function openBindMenu(anchor, bindId, offsetX)
         Text = bind.name or "?", TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left, ZIndex = Config.PopupZ + 51}, popup)
     themeText(titleLbl, "Text")
-    local typeLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,20,0,28),
-        Size = UDim2.new(1,-30,0,12), Font = Config.CurrentFontFamily,
-        Text = "MMB opens | type: " .. (bind.type or "?"),
-        TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = Config.PopupZ + 51}, popup)
-    themeText(typeLbl, "SubText")
-    local hintLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,20,0,44),
-        Size = UDim2.new(1,-30,0,12), Font = Config.CurrentFontFamily,
-        Text = "TGL=Toggle  HLD=Hold  OHD=OnHoldDisable",
-        TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = Config.PopupZ + 51}, popup)
-    themeText(hintLbl, "Muted")
     local listScroll = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
-        Position = UDim2.new(0,10,0,62), Size = UDim2.new(1,-20,0,popupH - 152),
+        Position = UDim2.new(0,10,0,32), Size = UDim2.new(1,-20,0,popupH - 122),
         CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
         ScrollBarThickness = 3, ZIndex = Config.PopupZ + 51}, popup)
     listScroll.ScrollBarImageColor3 = Theme.Accent
     new("UIListLayout", {Padding = UDim.new(0,6), SortOrder = Enum.SortOrder.LayoutOrder}, listScroll)
-    local function valueToText(v, default)
-        if v ~= nil then return tostring(v) end
-        if default ~= nil then return tostring(default) end
-        return ""
-    end
     local function refresh()
         for _, c in ipairs(listScroll:GetChildren()) do
             if not c:IsA("UIListLayout") then c:Destroy() end
@@ -1205,9 +1486,8 @@ local function openBindMenu(anchor, bindId, offsetX)
                     if not isListenableInput(inp) then return end
                     local nk = readInputKey(inp)
                     e.key = nk
-                    kb.Text = keyName(nk)
-                    kb.TextColor3 = Theme.Text
-                    bindListening = false; c:Disconnect(); fireBind(bind)
+                    kb.Text = keyName(nk); kb.TextColor3 = Theme.Text
+                    bindListening = false; c:Disconnect()
                 end)
                 _T(c)
             end)
@@ -1228,16 +1508,13 @@ local function openBindMenu(anchor, bindId, offsetX)
                 mb.Text = MODE_SHORT[e.mode] or e.mode
                 mb.TextColor3 = MODE_COLORS[e.mode] or Theme.Text
                 modeStrip.BackgroundColor3 = MODE_COLORS[e.mode] or Theme.Accent
-                fireBind(bind)
             end)
             local del = new("TextButton", {BackgroundColor3 = Theme.Danger, BackgroundTransparency = 0.7,
                 BorderSizePixel = 0, Position = UDim2.new(1,-36,0,7), Size = UDim2.new(0,28,0,22),
                 Font = Config.CurrentFontFamily, Text = "x", TextColor3 = Theme.Danger, TextSize = 12,
                 AutoButtonColor = false, ZIndex = Config.PopupZ + 53}, r)
             addCorner(del, UDim.new(0,4))
-            del.MouseEnter:Connect(function() tween(del, {BackgroundTransparency = 0, TextColor3 = Theme.OnAccent}) end)
-            del.MouseLeave:Connect(function() tween(del, {BackgroundTransparency = 0.7, TextColor3 = Theme.Danger}) end)
-            del.MouseButton1Click:Connect(function() RemoveBindKey(bindId, i, true); refresh() end)
+            del.MouseButton1Click:Connect(function() RemoveBindKey(bindId, i); refresh() end)
             if hasValue then
                 local vl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,10,0,38),
                     Size = UDim2.new(0,50,0,20), Font = Config.CurrentFontFamily, Text = "Value",
@@ -1246,7 +1523,7 @@ local function openBindMenu(anchor, bindId, offsetX)
                 themeText(vl, "SubText")
                 local vb = new("TextBox", {BorderSizePixel = 0,
                     Position = UDim2.new(0,62,0,38), Size = UDim2.new(1,-72,0,20),
-                    Font = Config.CurrentFontFamily, Text = valueToText(e.value, bind.default),
+                    Font = Config.CurrentFontFamily, Text = tostring(e.value or bind.default or ""),
                     TextSize = 11, ClearTextOnFocus = false, ZIndex = Config.PopupZ + 53}, r)
                 themeBg(vb, "Panel"); themeText(vb, "Text")
                 addCorner(vb, UDim.new(0,4)); addPadding(vb, 6)
@@ -1260,14 +1537,6 @@ local function openBindMenu(anchor, bindId, offsetX)
                     else e.value = raw end
                 end)
             end
-        end
-        if #bind.keys == 0 then
-            local empty = new("TextLabel", {BackgroundTransparency = 1,
-                Size = UDim2.new(1,0,0,24), Font = Config.CurrentFontFamily,
-                Text = "No keys bound. Press + Add Key.",
-                TextSize = 10, TextWrapped = true, LayoutOrder = 999,
-                ZIndex = Config.PopupZ + 52}, listScroll)
-            themeText(empty, "Muted")
         end
     end
     local addBtn = new("TextButton", {BorderSizePixel = 0,
@@ -1284,9 +1553,7 @@ local function openBindMenu(anchor, bindId, offsetX)
         Font = Config.CurrentFontFamily, Text = "Clear", TextColor3 = Theme.Danger,
         TextSize = 11, AutoButtonColor = false, ZIndex = Config.PopupZ + 51}, popup)
     addCorner(clearBtn, UDim.new(0,6))
-    clearBtn.MouseEnter:Connect(function() tween(clearBtn, {BackgroundTransparency = 0, TextColor3 = Theme.OnAccent}) end)
-    clearBtn.MouseLeave:Connect(function() tween(clearBtn, {BackgroundTransparency = 0.85, TextColor3 = Theme.Danger}) end)
-    clearBtn.MouseButton1Click:Connect(function() ClearBind(bindId, true); refresh() end)
+    clearBtn.MouseButton1Click:Connect(function() ClearBind(bindId); refresh() end)
     local closeBtn = new("TextButton", {BorderSizePixel = 0,
         Position = UDim2.new(0.5,4,1,-42), Size = UDim2.new(0.5,-14,0,30),
         Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11,
@@ -1306,18 +1573,13 @@ local function openBindMenu(anchor, bindId, offsetX)
     end, function() end)
 end
 
--- ============================================================
--- BIND INPUT
--- ============================================================
 local lastOpenTime = 0
-local OPEN_THROTTLE = 0.15
 local function canOpenBind()
     local now = tick()
-    if now - lastOpenTime < OPEN_THROTTLE then return false end
+    if now - lastOpenTime < 0.15 then return false end
     lastOpenTime = now
     return true
 end
-
 local function attachRowMMB(row, bindId)
     if not bindId then return end
     local function handler(input)
@@ -1332,285 +1594,31 @@ local function attachRowMMB(row, bindId)
         if d:IsA("GuiObject") then d.InputBegan:Connect(handler) end
     end
 end
-
 local function attachRowRMB(row, meta, hasOptions)
     if not hasOptions then return end
-    local function rmbHandler(input)
+    local function handler(input)
         if bindListening then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
         if not canOpenBind() then return end
-        openOptionsMenu(row, meta)
+        if openOptionsMenu then openOptionsMenu(row, meta) end
     end
-    row.InputBegan:Connect(rmbHandler)
+    row.InputBegan:Connect(handler)
     for _, d in ipairs(row:GetDescendants()) do
-        if d:IsA("GuiObject") then d.InputBegan:Connect(rmbHandler) end
+        if d:IsA("GuiObject") then d.InputBegan:Connect(handler) end
     end
 end
-
 local function attachRowBinds(row, bindId, meta)
     local hasOptions = meta and meta.Options and #meta.Options > 0
     attachRowRMB(row, meta, hasOptions)
     attachRowMMB(row, bindId)
 end
 
--- ============================================================
--- OPTIONS POPUP
--- ============================================================
 function openOptionsMenu(anchor, meta)
     if not meta then return end
-    local opts = meta.Options
-    local state = meta.State or {}
-    for _, opt in ipairs(opts or {}) do
-        if opt.Key and state[opt.Key] == nil then state[opt.Key] = opt.Default end
-    end
-    local POPUP_W = 360
-    local popup = new("Frame", {Name = "OptionsPopup", BorderSizePixel = 0,
-        Size = UDim2.new(0,POPUP_W,0,200), Visible = false, ZIndex = Config.PopupZ}, nil)
+    local popup = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(0,300,0,80),
+        Visible = false, ZIndex = Config.PopupZ}, nil)
     themeBg(popup, "Panel"); addCorner(popup, UDim.new(0,10))
     addStroke(popup, Theme.Outline, 1, 0.1)
-    new("Frame", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Size = UDim2.new(0,3,0,180), Position = UDim2.new(0,8,0,10),
-        ZIndex = Config.PopupZ + 1}, popup)
-    local hdr = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,20,0,10),
-        Size = UDim2.new(1,-30,0,16), Font = Config.CurrentFontFamily,
-        Text = (meta.Name or "Options") .. " — Advanced", TextSize = 13,
-        TextXAlignment = Enum.TextXAlignment.Left, ZIndex = Config.PopupZ + 1}, popup)
-    themeText(hdr, "Text")
-    local subHdr = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,20,0,28),
-        Size = UDim2.new(1,-30,0,12), Font = Config.CurrentFontFamily,
-        Text = "MMB on row = bind | " .. (meta.Type or "?"),
-        TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = Config.PopupZ + 1}, popup)
-    themeText(subHdr, "SubText")
-    local inner = new("Frame", {BackgroundTransparency = 1,
-        Position = UDim2.new(0,10,0,48), Size = UDim2.new(1,-20,0,100), ZIndex = Config.PopupZ + 1}, popup)
-    new("UIListLayout", {Padding = UDim.new(0,6), SortOrder = Enum.SortOrder.LayoutOrder}, inner)
-    local rebuild
-
-    local function optBindId(opt, suffix)
-        local base = "opt_" .. tostring(meta.Name or "x") .. "_" .. tostring(opt.Key or opt.Name or "y")
-        if suffix then base = base .. "_" .. suffix end
-        return base
-    end
-    local function attachOptionBindInputs(row, bindId)
-        if not bindId then return end
-        attachRowMMB(row, bindId)
-    end
-
-    local function createControlRow(parent, opt, layoutOrder, st)
-        local rowH = 34
-        if opt.Type == "Divider" or opt.Type == "Label" then rowH = 22
-        elseif opt.Type == "Slider" then rowH = 42 end
-        local row = new("Frame", {BorderSizePixel = 0,
-            Size = UDim2.new(1,0,0,rowH), LayoutOrder = layoutOrder,
-            BackgroundTransparency = (opt.Type == "Divider" or opt.Type == "Label") and 1 or 0,
-            ZIndex = Config.PopupZ + 2}, parent)
-        if opt.Type ~= "Divider" and opt.Type ~= "Label" then
-            themeBg(row, "ElementHover"); addCorner(row, UDim.new(0,6))
-        end
-        if opt.Type == "Divider" then
-            local lbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,0,0,0),
-                Size = UDim2.new(1,0,1,-4), Font = Config.CurrentFontFamily, Text = opt.Text or "",
-                TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = Config.PopupZ + 3}, row)
-            themeText(lbl, "Muted")
-            new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,1,-2),
-                Size = UDim2.new(1,0,0,1), BackgroundColor3 = Theme.Outline, ZIndex = Config.PopupZ + 3}, row)
-            return row
-        elseif opt.Type == "Label" then
-            local lbl = new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-                Font = Config.CurrentFontFamily, Text = opt.Text or "", TextSize = 10, TextWrapped = true,
-                TextXAlignment = Enum.TextXAlignment.Left, ZIndex = Config.PopupZ + 3}, row)
-            themeText(lbl, "SubText")
-            return row
-        elseif opt.Type == "Toggle" then
-            local bindId = optBindId(opt, "tgl")
-            local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,12,0,0),
-                Size = UDim2.new(1,-60,1,0), Font = Config.CurrentFontFamily, Text = opt.Name or "Toggle",
-                TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = Config.PopupZ + 3}, row)
-            themeText(nameLbl, "Text")
-            local value = st[opt.Key] and true or false
-            local sw = new("Frame", {BackgroundColor3 = value and Theme.Accent or Color3.fromRGB(214, 218, 226),
-                BorderSizePixel = 0, Position = UDim2.new(1,-46,0.5,-8),
-                Size = UDim2.new(0,36,0,16), ZIndex = Config.PopupZ + 3}, row)
-            addCorner(sw, UDim.new(1,0))
-            local knob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
-                Position = value and UDim2.new(1,-18,0,2) or UDim2.new(0,2,0,2),
-                Size = UDim2.new(0,12,0,12), ZIndex = Config.PopupZ + 4}, sw)
-            addCorner(knob, UDim.new(1,0))
-            local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-                Text = "", ZIndex = Config.PopupZ + 6}, row)
-            click.MouseButton1Click:Connect(function()
-                local nv = not (st[opt.Key] and true or false)
-                st[opt.Key] = nv
-                if opt.Callback then pcall(opt.Callback, nv, st) end
-                rebuild()
-            end)
-            RegisterBind(bindId, opt.Name or "Toggle", function(ov)
-                local nv
-                if ov ~= nil then nv = ov and true or false
-                else nv = not (st[opt.Key] and true or false) end
-                st[opt.Key] = nv
-                if opt.Callback then pcall(opt.Callback, nv, st) end
-                rebuild()
-            end, "Toggle", st[opt.Key])
-            attachOptionBindInputs(row, bindId)
-            return row
-        elseif opt.Type == "Slider" then
-            local bindId = optBindId(opt, "sld")
-            local value = st[opt.Key] or opt.Min or 0
-            local min, max = opt.Min or 0, opt.Max or 100
-            local dec = opt.Decimals or 0
-            local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,12,0,3),
-                Size = UDim2.new(1,-80,0,14), Font = Config.CurrentFontFamily, Text = opt.Name or "Slider",
-                TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = Config.PopupZ + 3}, row)
-            themeText(nameLbl, "Text")
-            local vLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-80,0,3),
-                Size = UDim2.new(0,60,0,14), Font = Config.CurrentFontFamily, Text = tostring(value),
-                TextSize = 11, TextColor3 = Theme.Accent,
-                TextXAlignment = Enum.TextXAlignment.Right, ZIndex = Config.PopupZ + 3}, row)
-            local track = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,12,1,-16),
-                Size = UDim2.new(1,-34,0,5), ZIndex = Config.PopupZ + 3}, row)
-            themeBg(track, "Panel"); addCorner(track, UDim.new(1,0))
-            local fill = new("Frame", {BorderSizePixel = 0,
-                Size = UDim2.new(math.clamp((value-min)/(max-min), 0, 1),0,1,0),
-                ZIndex = Config.PopupZ + 4}, track)
-            themeBg(fill, "Accent"); addCorner(fill, UDim.new(1,0))
-            local knob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
-                AnchorPoint = Vector2.new(0.5,0.5),
-                Position = UDim2.new(math.clamp((value-min)/(max-min), 0, 1),0,0.5,0),
-                Size = UDim2.new(0,14,0,14), ZIndex = Config.PopupZ + 5}, track)
-            addCorner(knob, UDim.new(1,0)); addStroke(knob, Theme.Accent, 2)
-            local function rnd(n) local m = 10^dec; return math.floor(n*m+0.5)/m end
-            local function apply(x)
-                local rel = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-                local nv = rnd(min + (max-min)*rel)
-                st[opt.Key] = nv; vLbl.Text = tostring(nv)
-                fill.Size = UDim2.new(rel, 0, 1, 0)
-                knob.Position = UDim2.new(rel, 0, 0.5, 0)
-                if opt.Callback then pcall(opt.Callback, nv, st) end
-            end
-            local drag = false
-            track.InputBegan:Connect(function(i)
-                if i.UserInputType == Enum.UserInputType.MouseButton1 then
-                    drag = true; apply(i.Position.X)
-                end
-            end)
-            _T(UserInputService.InputChanged:Connect(function(i)
-                if drag and i.UserInputType == Enum.UserInputType.MouseMovement then apply(i.Position.X) end
-            end))
-            _T(UserInputService.InputEnded:Connect(function(i)
-                if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
-            end))
-            RegisterBind(bindId, opt.Name or "Slider", function(ov)
-                if ov ~= nil then
-                    local n = tonumber(ov)
-                    if n then
-                        st[opt.Key] = math.clamp(n, min, max)
-                        if opt.Callback then pcall(opt.Callback, st[opt.Key], st) end
-                        rebuild()
-                    end
-                end
-            end, "Slider", st[opt.Key] or min)
-            attachOptionBindInputs(row, bindId)
-            return row
-        elseif opt.Type == "Colorpicker" then
-            local bindId = optBindId(opt, "cp")
-            local value = st[opt.Key] or Color3.fromRGB(77, 107, 254)
-            local alphaV = st["__alpha_" .. tostring(opt.Key)] or 0
-            local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,12,0,0),
-                Size = UDim2.new(1,-90,1,0), Font = Config.CurrentFontFamily, Text = opt.Name or "Color",
-                TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = Config.PopupZ + 3}, row)
-            themeText(nameLbl, "Text")
-            local sw = new("Frame", {BackgroundColor3 = value, BorderSizePixel = 0,
-                Position = UDim2.new(1,-52,0.5,-11), Size = UDim2.new(0,42,0,22),
-                ZIndex = Config.PopupZ + 3}, row)
-            addCorner(sw, UDim.new(0,6)); addStroke(sw, Theme.Outline, 1, 0.2)
-            local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-                Text = "", ZIndex = Config.PopupZ + 6}, row)
-            click.MouseButton1Click:Connect(function()
-                local sub = new("Frame", {BackgroundColor3 = Theme.Panel, BorderSizePixel = 0,
-                    Size = UDim2.new(0,280,0,300), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
-                addCorner(sub, UDim.new(0,10)); addStroke(sub, Theme.Outline, 1, 0.1)
-                local subTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,16,0,10),
-                    Size = UDim2.new(1,-28,0,16), Font = Config.CurrentFontFamily, Text = opt.Name or "Color",
-                    TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-                    ZIndex = Config.PopupZ + 21}, sub)
-                themeText(subTitle, "Text")
-                local cpHolder = new("Frame", {BackgroundTransparency = 1,
-                    Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,240),
-                    ZIndex = Config.PopupZ + 21}, sub)
-                local cpApi = buildColorpickerUI(cpHolder, {
-                    Color = value, Alpha = alphaV, Width = 240,
-                    OnChange = function(c, a)
-                        st[opt.Key] = c; st["__alpha_" .. tostring(opt.Key)] = a
-                        sw.BackgroundColor3 = c
-                        if opt.Callback then pcall(opt.Callback, c, a) end
-                    end,
-                })
-                local closeSub = new("TextButton", {BorderSizePixel = 0,
-                    Position = UDim2.new(0,16,1,-38), Size = UDim2.new(1,-32,0,28),
-                    Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11, AutoButtonColor = false,
-                    ZIndex = Config.PopupZ + 21}, sub)
-                themeBg(closeSub, "Accent"); closeSub.TextColor3 = Theme.OnAccent
-                addCorner(closeSub, UDim.new(0,6))
-                closeSub.MouseButton1Click:Connect(function()
-                    if cpApi and cpApi.Destroy then cpApi.Destroy() end
-                    closeTopPopup()
-                end)
-                pushPopup(sub, function()
-                    if row and row.Parent and sub.Parent then
-                        local ap, as = row.AbsolutePosition, row.AbsoluteSize
-                        local vp = workspace.CurrentCamera.ViewportSize
-                        local x, y = ap.X + as.X + 8, ap.Y
-                        if x + 280 > vp.X then x = ap.X - 288 end
-                        if y + 300 > vp.Y then y = vp.Y - 300 - 8 end
-                        if y < 4 then y = 4 end
-                        sub.Position = UDim2.fromOffset(x, y)
-                    end
-                end, function() end)
-            end)
-            RegisterBind(bindId, opt.Name or "Color", function() end, "Colorpicker", true)
-            attachOptionBindInputs(row, bindId)
-            return row
-        end
-        return row
-    end
-
-    rebuild = function()
-        for _, c in ipairs(inner:GetChildren()) do
-            if not c:IsA("UIListLayout") then c:Destroy() end
-        end
-        if not opts or #opts == 0 then
-            local empty = new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,0,24),
-                Font = Config.CurrentFontFamily, Text = "No advanced options.",
-                TextSize = 10, LayoutOrder = 1, ZIndex = Config.PopupZ + 2}, inner)
-            themeText(empty, "Muted")
-        end
-        local order = 0
-        for _, opt in ipairs(opts or {}) do
-            local visible = true
-            if opt.VisibleIf then
-                local ok, v = pcall(opt.VisibleIf, state)
-                visible = ok and (v and true or false) or false
-            end
-            if visible then
-                order = order + 1
-                createControlRow(inner, opt, order, state)
-            end
-        end
-        task.defer(function()
-            local layout = inner:FindFirstChildOfClass("UIListLayout")
-            local contentH = layout and layout.AbsoluteContentSize.Y or 0
-            local totalH = math.clamp(48 + contentH + 48, 140, 560)
-            popup.Size = UDim2.new(0,POPUP_W,0,totalH)
-            inner.Size = UDim2.new(1,-20,0,contentH)
-        end)
-        reevaluateVisibility()
-    end
     local closeBtn = new("TextButton", {BorderSizePixel = 0,
         Position = UDim2.new(0,10,1,-38), Size = UDim2.new(1,-20,0,28),
         Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11,
@@ -1618,22 +1626,19 @@ function openOptionsMenu(anchor, meta)
     themeBg(closeBtn, "ElementHover"); themeText(closeBtn, "Text")
     addCorner(closeBtn, UDim.new(0,6))
     closeBtn.MouseButton1Click:Connect(function() closeTopPopup() end)
-    rebuild()
     pushPopup(popup, function()
         if not anchor or not anchor.Parent then return end
         local ap, as = anchor.AbsolutePosition, anchor.AbsoluteSize
         local vp = workspace.CurrentCamera.ViewportSize
         local x, y = ap.X + as.X + 8, ap.Y
-        if x + POPUP_W > vp.X then x = ap.X - POPUP_W - 8 end
-        if y + popup.AbsoluteSize.Y > vp.Y then y = vp.Y - popup.AbsoluteSize.Y - 8 end
-        if y < 4 then y = 4 end
+        if x + 300 > vp.X then x = ap.X - 308 end
         popup.Position = UDim2.fromOffset(x, y)
     end, function() end)
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- HELPERS
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function registerVisibleIf(element, predicate, section)
     local st = getSectionState(section)
     watchVisibility(element, predicate, st)
@@ -1641,24 +1646,23 @@ end
 local function makeBindId(prefix)
     return (prefix or "bind") .. "_" .. tostring(os.clock()) .. "_" .. tostring(math.random(1,99999))
 end
+local function round(n) return math.floor(n + 0.5) end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- COMPONENTS
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function createToggle(section, opts)
     local userState = opts.Value or false
     local eff = userState
     local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
     themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
     addStroke(row, Theme.Outline, 1, 0.35)
-    local accentStrip = new("Frame", {BackgroundColor3 = Theme.Muted, BorderSizePixel = 0,
-        Position = UDim2.new(0,0,0.25,0), Size = UDim2.new(0,2,0.5,0), BackgroundTransparency = 0.7}, row)
-    addCorner(accentStrip, UDim.new(1,0))
     local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
-        Size = UDim2.new(1,-100,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "Toggle",
+        Size = UDim2.new(1,-100,1,0), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
         TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
     themeText(nameLbl, "Text")
-    markSearch(row, opts.Name or "Toggle", nameLbl)
+    markSearch(row, T(opts.Name or ""), nameLbl)
     local stateLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-84,0,0),
         Size = UDim2.new(0,34,1,0), Font = Config.CurrentFontFamily, Text = eff and "ON" or "OFF",
         TextSize = 10, TextXAlignment = Enum.TextXAlignment.Right}, row)
@@ -1670,13 +1674,9 @@ local function createToggle(section, opts)
         Position = eff and UDim2.new(1,-18,0,2) or UDim2.new(0,2,0,2),
         Size = UDim2.new(0,14,0,14)}, sw)
     addCorner(knob, UDim.new(1,0))
-    local dot = new("Frame", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Position = UDim2.new(1,-54,0.5,-3), Size = UDim2.new(0,6,0,6), Visible = false}, row)
-    addCorner(dot, UDim.new(1,0))
     local function setVis(v)
         tween(sw, {BackgroundColor3 = v and Theme.Accent or Color3.fromRGB(214, 218, 226)})
         tween(knob, {Position = v and UDim2.new(1,-18,0,2) or UDim2.new(0,2,0,2)})
-        tween(accentStrip, {BackgroundColor3 = v and Theme.Accent or Theme.Muted, BackgroundTransparency = v and 0 or 0.7})
         stateLbl.Text = v and "ON" or "OFF"
         stateLbl.TextColor3 = v and Theme.Accent or Theme.Muted
     end
@@ -1688,12 +1688,11 @@ local function createToggle(section, opts)
     local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
     click.MouseButton1Click:Connect(function() userState = not userState; setEff(userState, true) end)
     local bindId = opts.BindId or makeBindId("bind_tgl")
-    local bind = RegisterBind(bindId, opts.Name or "Toggle",
+    local bind = RegisterBind(bindId, T(opts.Name or ""),
         function(ov) setEff(ov ~= nil and (ov and true or false) or userState, true) end,
         "Toggle", true)
-    task.spawn(function() while row.Parent do dot.Visible = #bind.keys > 0; task.wait(0.3) end end)
     if opts.Key then getSectionState(section)[opts.Key] = eff end
-    local meta = {Name = opts.Name or "Toggle", Type = "Toggle", Element = row, BindId = bindId,
+    local meta = {Name = T(opts.Name or ""), Type = "Toggle", Element = row, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
         Set = function(v) userState = v; setEff(v, false) end}
     attachRowBinds(row, bindId, meta)
@@ -1710,20 +1709,15 @@ local function createSlider(section, opts)
     local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,52)}, section.Content)
     themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
     addStroke(row, Theme.Outline, 1, 0.35)
-    local accentStrip = new("Frame", {BackgroundColor3 = Theme.Accent, BorderSizePixel = 0,
-        Position = UDim2.new(0,0,0.25,0), Size = UDim2.new(0,2,0.5,0)}, row)
-    addCorner(accentStrip, UDim.new(1,0))
     local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,6),
-        Size = UDim2.new(1,-90,0,16), Font = Config.CurrentFontFamily, Text = opts.Name or "Slider",
+        Size = UDim2.new(1,-90,0,16), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
         TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
     themeText(nameLbl, "Text")
-    markSearch(row, opts.Name or "Slider", nameLbl)
+    markSearch(row, T(opts.Name or ""), nameLbl)
     local vLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-80,0,6),
         Size = UDim2.new(0,68,0,16), Font = Config.CurrentFontFamily, Text = tostring(effV), TextSize = 11,
         TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right}, row)
-    local dot = new("Frame", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Position = UDim2.new(1,-88,0.5,-3), Size = UDim2.new(0,6,0,6), Visible = false}, row)
-    addCorner(dot, UDim.new(1,0))
     local track = new("Frame", {BorderSizePixel = 0,
         Position = UDim2.new(0,12,1,-20), Size = UDim2.new(1,-24,0,6)}, row)
     themeBg(track, "ElementHover"); addCorner(track, UDim.new(1,0))
@@ -1745,30 +1739,27 @@ local function createSlider(section, opts)
         if fromUser and opts.Callback then pcall(opts.Callback, v) end
         if opts.Key then getSectionState(section)[opts.Key] = v; reevaluateVisibility() end
     end
-    local function setFromX(x)
+    local drag = false
+    local function fromX(x)
         local rel = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
         userV = rnd(min + (max-min)*rel); setEff(userV, true)
     end
-    local drag = false
     track.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-           or i.UserInputType == Enum.UserInputType.Touch then drag = true; setFromX(i.Position.X) end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = true; fromX(i.Position.X) end
     end)
     _T(UserInputService.InputChanged:Connect(function(i)
-        if drag and (i.UserInputType == Enum.UserInputType.MouseMovement
-            or i.UserInputType == Enum.UserInputType.Touch) then setFromX(i.Position.X) end end))
+        if drag and i.UserInputType == Enum.UserInputType.MouseMovement then fromX(i.Position.X) end
+    end))
     _T(UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-           or i.UserInputType == Enum.UserInputType.Touch then drag = false end end))
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+    end))
     local bindId = opts.BindId or makeBindId("bind_sld")
-    local bind = RegisterBind(bindId, opts.Name or "Slider",
-        function(ov)
-            if ov ~= nil then local v = tonumber(ov); if v then setEff(v, true) end
-            else setEff(userV, true) end
-        end, "Slider", (min+max)/2)
-    task.spawn(function() while row.Parent do dot.Visible = #bind.keys > 0; task.wait(0.3) end end)
+    RegisterBind(bindId, T(opts.Name or ""), function(ov)
+        if ov ~= nil then local v = tonumber(ov); if v then setEff(v, true) end
+        else setEff(userV, true) end
+    end, "Slider", (min+max)/2)
     if opts.Key then getSectionState(section)[opts.Key] = effV end
-    local meta = {Name = opts.Name or "Slider", Type = "Slider", Element = row, BindId = bindId,
+    local meta = {Name = T(opts.Name or ""), Type = "Slider", Element = row, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
         Set = function(v) userV = math.clamp(v, min, max); setEff(userV, false) end}
     attachRowBinds(row, bindId, meta)
@@ -1779,21 +1770,18 @@ end
 
 local function createButton(section, opts)
     local btn = new("TextButton", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36),
-        Font = Config.CurrentFontFamily, Text = opts.Name or "Button", TextSize = 12, AutoButtonColor = false}, section.Content)
+        Font = Config.CurrentFontFamily, Text = T(opts.Name or ""), TextSize = 12, AutoButtonColor = false}, section.Content)
+    if opts.Name then btn:SetAttribute("_tKey", opts.Name) end
     themeBg(btn, "Element"); regTransparency(btn, "Element", 0); themeText(btn, "Text")
     addStroke(btn, Theme.Outline, 1, 0.35); addCorner(btn, UDim.new(0,8))
-    markSearch(btn, opts.Name or "Button", btn)
+    markSearch(btn, T(opts.Name or ""), btn)
     btn.MouseEnter:Connect(function() tween(btn, {BackgroundColor3 = Theme.Accent, TextColor3 = Theme.OnAccent}) end)
     btn.MouseLeave:Connect(function() tween(btn, {BackgroundColor3 = Theme.Element, TextColor3 = Theme.Text}) end)
     btn.MouseButton1Click:Connect(function() if opts.Callback then pcall(opts.Callback) end end)
     local bindId = opts.BindId or makeBindId("bind_btn")
-    local bind = RegisterBind(bindId, opts.Name or "Button",
+    RegisterBind(bindId, T(opts.Name or ""),
         function(ov) if ov ~= false then if opts.Callback then pcall(opts.Callback) end end end, "Button", true)
-    local dot = new("Frame", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Position = UDim2.new(1,-10,0.5,-3), Size = UDim2.new(0,6,0,6), Visible = false}, btn)
-    addCorner(dot, UDim.new(1,0))
-    task.spawn(function() while btn.Parent do dot.Visible = #bind.keys > 0; task.wait(0.3) end end)
-    local meta = {Name = opts.Name or "Button", Type = "Button", Element = btn, BindId = bindId,
+    local meta = {Name = T(opts.Name or ""), Type = "Button", Element = btn, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
         Set = function() if opts.Callback then pcall(opts.Callback) end end}
     attachRowBinds(btn, bindId, meta)
@@ -1805,15 +1793,11 @@ end
 local function createLabel(section, opts)
     local text = opts.Text or opts.Name or ""
     local lbl = new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,0,20),
-        Font = Config.CurrentFontFamily, Text = text, TextSize = 11,
+        Font = Config.CurrentFontFamily, Text = T(text), TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true}, section.Content)
-    -- Only register with theme if no explicit custom color was passed
-    if opts.Color then
-        lbl.TextColor3 = opts.Color
-    else
-        themeText(lbl, "SubText")
-    end
-    markSearch(lbl, text, lbl)
+    lbl:SetAttribute("_tKey", text)
+    if opts.Color then lbl.TextColor3 = opts.Color else themeText(lbl, "SubText") end
+    markSearch(lbl, T(text), lbl)
     if opts.VisibleIf then registerVisibleIf(lbl, opts.VisibleIf, section) end
     return lbl
 end
@@ -1821,14 +1805,192 @@ end
 local function createDivider(section, opts)
     local h = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,0,22)}, section.Content)
     local lbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,0,0,0),
-        Size = UDim2.new(1,0,1,-4), Font = Config.CurrentFontFamily, Text = opts.Text or "",
+        Size = UDim2.new(1,0,1,-4), Font = Config.CurrentFontFamily, Text = T(opts.Text or ""),
         TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left}, h)
+    lbl:SetAttribute("_tKey", opts.Text or "")
     if opts.Color then lbl.TextColor3 = opts.Color else themeText(lbl, "Muted") end
-    markSearch(h, opts.Text or "", lbl)
-    new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,1,-2),
-        Size = UDim2.new(1,0,0,1)}, h).BackgroundColor3 = Theme.Outline
+    markSearch(h, T(opts.Text or ""), lbl)
     if opts.VisibleIf then registerVisibleIf(h, opts.VisibleIf, section) end
     return h
+end
+
+local function createInput(section, opts)
+    local value = opts.Value or ""
+    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
+    themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
+    addStroke(row, Theme.Outline, 1, 0.35)
+    local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
+        Size = UDim2.new(0.45,-14,1,0), Font = Config.CurrentFontFamily,
+        Text = T(opts.Name or ""), TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
+    themeText(nameLbl, "Text")
+    markSearch(row, T(opts.Name or ""), nameLbl)
+    local input = new("TextBox", {BorderSizePixel = 0, Position = UDim2.new(0.45,0,0.5,-11),
+        Size = UDim2.new(0.55,-14,0,22), Font = Config.CurrentFontFamily,
+        Text = value, TextSize = 11, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Placeholder then tPlaceholder(input, opts.Placeholder) end
+    themeBg(input, "ElementHover"); themeText(input, "Text")
+    addCorner(input, UDim.new(0,6)); addPadding(input, 8, 0)
+    input.FocusLost:Connect(function()
+        value = input.Text
+        if opts.Callback then pcall(opts.Callback, value) end
+    end)
+    local meta = {Name = T(opts.Name or ""), Type = "Input", Element = row,
+        Options = opts.Options, State = getSectionState(section),
+        Set = function(v) value = v; input.Text = v end}
+    attachRowBinds(row, nil, meta)
+    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
+    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
+    return {Set = meta.Set, Get = function() return value end, _meta = meta}
+end
+
+local function createDropdown(section, opts)
+    local list = opts.List or {}
+    local value = opts.Value or (list[1] or "")
+    local open = false
+    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
+    themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
+    addStroke(row, Theme.Outline, 1, 0.35)
+    local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
+        Size = UDim2.new(0.5,-10,1,0), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
+        TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
+    themeText(nameLbl, "Text")
+    markSearch(row, T(opts.Name or ""), nameLbl)
+    local vLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0.5,0,0,0),
+        Size = UDim2.new(0.5,-52,1,0), Font = Config.CurrentFontFamily, Text = T(tostring(value)),
+        TextSize = 11, TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right,
+        TextTruncate = Enum.TextTruncate.AtEnd}, row)
+    local arrowLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-36,0,0),
+        Size = UDim2.new(0,22,1,0), Font = Config.CurrentFontFamily, Text = "v",
+        TextSize = 11}, row)
+    themeText(arrowLbl, "SubText")
+    local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
+    local itemH = 28
+    local popupH = math.min(#list * (itemH+6) + 12, 220)
+    local function buildPopup()
+        local popup = new("ScrollingFrame", {BorderSizePixel = 0,
+            Size = UDim2.new(0,200,0,popupH), CanvasSize = UDim2.new(0,0,0,0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+            Visible = false, ZIndex = Config.PopupZ, ClipsDescendants = true}, nil)
+        themeBg(popup, "Panel"); popup.ScrollBarImageColor3 = Theme.Accent
+        addCorner(popup, UDim.new(0,10)); addStroke(popup, Theme.Outline, 1, 0.1)
+        new("UIListLayout", {Padding = UDim.new(0,3)}, popup); addPadding(popup, 6)
+        for _, item in ipairs(list) do
+            local ib = new("TextButton", {BorderSizePixel = 0,
+                Size = UDim2.new(1,-8,0,itemH), Font = Config.CurrentFontFamily, Text = T(tostring(item)),
+                TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+                AutoButtonColor = false, ZIndex = Config.PopupZ + 1}, popup)
+            themeBg(ib, "Panel"); themeText(ib, "Text")
+            addCorner(ib, UDim.new(0,6)); addPadding(ib, 8)
+            ib.MouseButton1Click:Connect(function()
+                value = item; vLbl.Text = T(tostring(item))
+                if opts.Callback then pcall(opts.Callback, item) end
+                if opts.Key then getSectionState(section)[opts.Key] = item; reevaluateVisibility() end
+                closeTopPopup()
+            end)
+        end
+        return popup
+    end
+    click.MouseButton1Click:Connect(function()
+        if open then closeTopPopup(); return end
+        local popup = buildPopup()
+        local function pos()
+            if not row or not row.Parent or not popup.Parent then return end
+            local ap, as = row.AbsolutePosition, row.AbsoluteSize
+            popup.Position = UDim2.fromOffset(ap.X, ap.Y + as.Y + 6)
+            popup.Size = UDim2.new(0, math.max(as.X, 200), 0, popupH)
+        end
+        open = true
+        pushPopup(popup, pos, function() open = false end)
+    end)
+    local bindId = opts.BindId or makeBindId("bind_dd")
+    RegisterBind(bindId, T(opts.Name or ""), function() end, "Dropdown", value)
+    if opts.Key then getSectionState(section)[opts.Key] = value end
+    local meta = {Name = T(opts.Name or ""), Type = "Dropdown", Element = row, BindId = bindId,
+        Options = opts.Options, State = getSectionState(section),
+        Set = function(v) value = v; vLbl.Text = T(tostring(v)) end}
+    attachRowBinds(row, bindId, meta)
+    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
+    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
+    return {
+        Set = meta.Set,
+        Get = function() return value end,
+        BindId = bindId, _meta = meta,
+        _setList = function(newList)
+            for i = #list, 1, -1 do list[i] = nil end
+            for _, v in ipairs(newList or {}) do list[#list+1] = v end
+            popupH = math.min(#list * (itemH+6) + 12, 220)
+        end,
+        _setValue = function(v) value = v or ""; vLbl.Text = T(tostring(value)) end,
+    }
+end
+
+local function createColorpicker(section, opts)
+    local color = opts.Default or Color3.fromRGB(77, 107, 254)
+    local alpha = opts.DefaultAlpha or 0
+    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
+    themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
+    addStroke(row, Theme.Outline, 1, 0.35)
+    local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
+        Size = UDim2.new(1,-90,1,0), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
+        TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
+    themeText(nameLbl, "Text")
+    markSearch(row, T(opts.Name or ""), nameLbl)
+    local swatch = new("Frame", {BackgroundColor3 = color, BorderSizePixel = 0,
+        Position = UDim2.new(1,-48,0.5,-11), Size = UDim2.new(0,36,0,22)}, row)
+    addCorner(swatch, UDim.new(0,6)); addStroke(swatch, Theme.Outline, 1, 0.2)
+    local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
+    click.MouseButton1Click:Connect(function()
+        local sub = new("Frame", {BackgroundColor3 = Theme.Panel, BorderSizePixel = 0,
+            Size = UDim2.new(0,280,0,300), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
+        addCorner(sub, UDim.new(0,10)); addStroke(sub, Theme.Outline, 1, 0.1)
+        local subTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,16,0,10),
+            Size = UDim2.new(1,-28,0,16), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
+            TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = Config.PopupZ + 21}, sub)
+        themeText(subTitle, "Text")
+        local cpHolder = new("Frame", {BackgroundTransparency = 1,
+            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,240),
+            ZIndex = Config.PopupZ + 21}, sub)
+        local cpApi = buildColorpickerUI(cpHolder, {
+            Color = color, Alpha = alpha, Width = 240,
+            OnChange = function(c, a)
+                color = c; if a then alpha = a end
+                swatch.BackgroundColor3 = c
+                if opts.Callback then pcall(opts.Callback, c, a) end
+            end,
+        })
+        local closeSub = new("TextButton", {BorderSizePixel = 0,
+            Position = UDim2.new(0,16,1,-38), Size = UDim2.new(1,-32,0,28),
+            Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11, AutoButtonColor = false,
+            ZIndex = Config.PopupZ + 21}, sub)
+        themeBg(closeSub, "Accent"); closeSub.TextColor3 = Theme.OnAccent
+        addCorner(closeSub, UDim.new(0,6))
+        closeSub.MouseButton1Click:Connect(function()
+            if cpApi and cpApi.Destroy then cpApi.Destroy() end
+            closeTopPopup()
+        end)
+        pushPopup(sub, function()
+            if row and row.Parent and sub.Parent then
+                local ap, as = row.AbsolutePosition, row.AbsoluteSize
+                local vp = workspace.CurrentCamera.ViewportSize
+                local x, y = ap.X + as.X + 8, ap.Y
+                if x + 280 > vp.X then x = ap.X - 288 end
+                if y + 300 > vp.Y then y = vp.Y - 300 - 8 end
+                if y < 4 then y = 4 end
+                sub.Position = UDim2.fromOffset(x, y)
+            end
+        end, function() end)
+    end)
+    local meta = {Name = T(opts.Name or ""), Type = "Colorpicker", Element = row,
+        Options = opts.Options, State = getSectionState(section),
+        Set = function(c, a) color = c; if a then alpha = a end; swatch.BackgroundColor3 = c end}
+    attachRowBinds(row, nil, meta)
+    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
+    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
+    return {Set = meta.Set, Get = function() return color, alpha end, _meta = meta}
 end
 
 local function createKeybind(section, opts)
@@ -1838,24 +2000,20 @@ local function createKeybind(section, opts)
     local state = getSectionState(section)
     local stateId = opts.Key or opts.Name or "kb"
     if opts.Key then state[opts.Key] = value end
-
     local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
     themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
     addStroke(row, Theme.Outline, 1, 0.35)
-
     local stateDot = new("Frame", {BackgroundColor3 = Theme.Muted, BorderSizePixel = 0,
         Position = UDim2.new(0,8,0.5,-4), Size = UDim2.new(0,8,0,8)}, row)
     addCorner(stateDot, UDim.new(1,0))
-
     local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,24,0,0),
-        Size = UDim2.new(1,-190,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "Keybind",
+        Size = UDim2.new(1,-190,1,0), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
         TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
+    if opts.Name then nameLbl:SetAttribute("_tKey", opts.Name) end
     themeText(nameLbl, "Text")
-    markSearch(row, opts.Name or "Keybind", nameLbl)
-
+    markSearch(row, T(opts.Name or ""), nameLbl)
     local modeState = state["__mode_" .. tostring(stateId)] or "Toggle"
     state["__mode_" .. tostring(stateId)] = modeState
-
     local modeBtn = new("TextButton", {BorderSizePixel = 0,
         Position = UDim2.new(1,-164,0.5,-11), Size = UDim2.new(0,52,0,22),
         Font = Config.CurrentFontFamily, Text = MODE_SHORT[modeState] or modeState, TextSize = 10,
@@ -1863,24 +2021,14 @@ local function createKeybind(section, opts)
     themeBg(modeBtn, "ElementHover")
     modeBtn.TextColor3 = MODE_COLORS[modeState] or Theme.Text
     addCorner(modeBtn, UDim.new(0,6))
-
     local btn = new("TextButton", {BorderSizePixel = 0,
         Position = UDim2.new(1,-106,0.5,-11), Size = UDim2.new(0,94,0,22),
         Font = Config.CurrentFontFamily, Text = keyName(value), TextSize = 11, AutoButtonColor = false}, row)
     themeBg(btn, "ElementHover"); themeText(btn, "Text"); addCorner(btn, UDim.new(0,6))
-
-    if #modes > 0 then
-        local modeCount = new("TextLabel", {BackgroundTransparency = 1,
-            Position = UDim2.new(1,-186,0.5,-8), Size = UDim2.new(0,22,0,16),
-            Font = Config.CurrentFontFamily, Text = tostring(#modes) .. "m",
-            TextSize = 9, TextColor3 = Theme.Accent2,
-            TextXAlignment = Enum.TextXAlignment.Right}, row)
-    end
-
     local bindId = opts.BindId or makeBindId("bind_kb")
     local bind = nil
     if not opts.NoBind then
-        RegisterBind(bindId, opts.Name or "Keybind", function()
+        RegisterBind(bindId, T(opts.Name or ""), function()
             local mods = opts.Modes
             if not mods or #mods == 0 then
                 if opts.Callback then pcall(opts.Callback, value) end
@@ -1891,7 +2039,6 @@ local function createKeybind(section, opts)
         bind = BindRegistry[bindId]
         if value then AddBindKey(bindId, value, modeState) end
     end
-
     btn.MouseButton1Click:Connect(function()
         btn.Text = "Press..."
         btn.TextColor3 = Theme.Warning
@@ -1917,13 +2064,11 @@ local function createKeybind(section, opts)
                 c:Disconnect()
                 bindListening = false
                 if btn.Parent then
-                    btn.Text = keyName(value)
-                    btn.TextColor3 = Theme.Text
+                    btn.Text = keyName(value); btn.TextColor3 = Theme.Text
                 end
             end
         end)
     end)
-
     modeBtn.MouseButton1Click:Connect(function()
         local cur = state["__mode_" .. tostring(stateId)] or "Toggle"
         local nx = cur == "Toggle" and "Hold" or cur == "Hold" and "OnHoldDisable" or "Toggle"
@@ -1931,9 +2076,7 @@ local function createKeybind(section, opts)
         modeBtn.Text = MODE_SHORT[nx] or nx
         modeBtn.TextColor3 = MODE_COLORS[nx] or Theme.Text
         if bind and #bind.keys > 0 then bind.keys[1].mode = nx end
-        fireBind(bind)
     end)
-
     if bind then
         task.spawn(function()
             while row.Parent do
@@ -1943,8 +2086,7 @@ local function createKeybind(section, opts)
             end
         end)
     end
-
-    local meta = {Name = opts.Name or "Keybind", Type = "Keybind", Element = row, BindId = bindId,
+    local meta = {Name = T(opts.Name or ""), Type = "Keybind", Element = row, BindId = bindId,
         Options = opts.Options, State = state, Modes = modes, Default = opts.Value,
         Set = function(v) value = v; btn.Text = keyName(v) end}
     attachRowBinds(row, bindId, meta)
@@ -1953,235 +2095,27 @@ local function createKeybind(section, opts)
     return {Set = meta.Set, Get = function() return value end, BindId = bindId, _meta = meta}
 end
 
-local function createDropdown(section, opts)
-    local list = opts.List or {}
-    local value = opts.Value or (list[1] or "")
-    local open = false
-    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
-    themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
-    addStroke(row, Theme.Outline, 1, 0.35)
-    local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
-        Size = UDim2.new(0.5,-10,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "Dropdown",
-        TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
-    themeText(nameLbl, "Text")
-    markSearch(row, opts.Name or "Dropdown", nameLbl)
-    local vLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0.5,0,0,0),
-        Size = UDim2.new(0.5,-52,1,0), Font = Config.CurrentFontFamily, Text = tostring(value),
-        TextSize = 11, TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right,
-        TextTruncate = Enum.TextTruncate.AtEnd}, row)
-    local arrowLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-36,0,0),
-        Size = UDim2.new(0,22,1,0), Font = Config.CurrentFontFamily, Text = "v",
-        TextSize = 11}, row)
-    themeText(arrowLbl, "SubText")
-    local dot = new("Frame", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Position = UDim2.new(1,-52,0.5,-3), Size = UDim2.new(0,6,0,6), Visible = false}, row)
-    addCorner(dot, UDim.new(1,0))
-    local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
-    local itemH = 28
-    local popupH = math.min(#list * (itemH+6) + 12, 220)
-
-    local function buildDropdownPopup()
-        local popup = new("ScrollingFrame", {BorderSizePixel = 0,
-            Size = UDim2.new(0,200,0,popupH), CanvasSize = UDim2.new(0,0,0,0),
-            AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
-            Visible = false, ZIndex = Config.PopupZ, ClipsDescendants = true}, nil)
-        themeBg(popup, "Panel"); popup.ScrollBarImageColor3 = Theme.Accent
-        addCorner(popup, UDim.new(0,10)); addStroke(popup, Theme.Outline, 1, 0.1)
-        new("UIListLayout", {Padding = UDim.new(0,3)}, popup); addPadding(popup, 6)
-        for _, item in ipairs(list) do
-            local ib = new("TextButton", {BorderSizePixel = 0,
-                Size = UDim2.new(1,-8,0,itemH), Font = Config.CurrentFontFamily, Text = item,
-                TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-                AutoButtonColor = false, ZIndex = Config.PopupZ + 1}, popup)
-            themeBg(ib, "Panel"); themeText(ib, "Text")
-            addCorner(ib, UDim.new(0,6)); addPadding(ib, 8)
-            ib.MouseEnter:Connect(function()
-                tween(ib, {BackgroundColor3 = Theme.ElementHover, TextColor3 = Theme.Accent}) end)
-            ib.MouseLeave:Connect(function()
-                tween(ib, {BackgroundColor3 = Theme.Panel, TextColor3 = Theme.Text}) end)
-            ib.MouseButton1Click:Connect(function()
-                value = item; vLbl.Text = item
-                if opts.Callback then pcall(opts.Callback, value) end
-                if opts.Key then getSectionState(section)[opts.Key] = value; reevaluateVisibility() end
-                closeTopPopup()
-            end)
-        end
-        return popup
-    end
-
-    click.MouseButton1Click:Connect(function()
-        if open then closeTopPopup(); return end
-        local popup = buildDropdownPopup()
-        local function pos()
-            if not row or not row.Parent or not popup.Parent then return end
-            local ap, as = row.AbsolutePosition, row.AbsoluteSize
-            popup.Position = UDim2.fromOffset(ap.X, ap.Y + as.Y + 6)
-            popup.Size = UDim2.new(0, math.max(as.X, 200), 0, popupH)
-        end
-        open = true
-        pushPopup(popup, pos, function() open = false end)
-    end)
-
-    local bindId = opts.BindId or makeBindId("bind_dd")
-    local bind = RegisterBind(bindId, opts.Name or "Dropdown",
-        function(ov)
-            if ov ~= nil and tostring(ov) ~= "" then
-                local sv = tostring(ov)
-                for _, it in ipairs(list) do
-                    if it == sv then value = it; vLbl.Text = it
-                        if opts.Callback then pcall(opts.Callback, value) end
-                        return end
-                end
-            end
-            if #list == 0 then return end
-            local cur = value or list[1]; local idx = 1
-            for i, v2 in ipairs(list) do if v2 == cur then idx = i; break end end
-            idx = (idx % #list) + 1
-            value = list[idx]; vLbl.Text = value
-            if opts.Callback then pcall(opts.Callback, value) end
-        end, "Dropdown", value)
-    task.spawn(function() while row.Parent do
-        local b = BindRegistry[bindId]; dot.Visible = b and #b.keys > 0 or false; task.wait(0.3) end end)
-    if opts.Key then getSectionState(section)[opts.Key] = value end
-    local meta = {Name = opts.Name or "Dropdown", Type = "Dropdown", Element = row, BindId = bindId,
-        Options = opts.Options, State = getSectionState(section),
-        Set = function(v) value = v; vLbl.Text = v end}
-    attachRowBinds(row, bindId, meta)
-    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
-    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return value end, BindId = bindId, _meta = meta}
-end
-
-local function createColorpicker(section, opts)
-    local color = opts.Default or Color3.fromRGB(77, 107, 254)
-    local alpha = opts.DefaultAlpha or 0
-    local rainbowEnabled = opts.Rainbow or false
-    local rainbowSpeed = opts.RainbowSpeed or 1
-    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
-    themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
-    addStroke(row, Theme.Outline, 1, 0.35)
-    local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,14,0,0),
-        Size = UDim2.new(1,-90,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "Color",
-        TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, row)
-    themeText(nameLbl, "Text")
-    markSearch(row, opts.Name or "Color", nameLbl)
-    local swatch = new("Frame", {BackgroundColor3 = color, BorderSizePixel = 0,
-        Position = UDim2.new(1,-48,0.5,-11), Size = UDim2.new(0,36,0,22)}, row)
-    addCorner(swatch, UDim.new(0,6)); addStroke(swatch, Theme.Outline, 1, 0.2)
-    local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
-    local popupH = 300
-    local cachedPopup = nil
-    local cachedAPI = nil
-
-    local function buildPopup()
-        local popup = new("Frame", {BorderSizePixel = 0,
-            Size = UDim2.new(0,280,0,popupH), Visible = false, ZIndex = Config.PopupZ}, nil)
-        themeBg(popup, "Panel"); addCorner(popup, UDim.new(0,10))
-        addStroke(popup, Theme.Outline, 1, 0.1)
-        local subTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,16,0,10),
-            Size = UDim2.new(1,-28,0,16), Font = Config.CurrentFontFamily, Text = opts.Name or "Color",
-            TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = Config.PopupZ + 1}, popup)
-        themeText(subTitle, "Text")
-        local holder = new("Frame", {BackgroundTransparency = 1,
-            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,240),
-            ZIndex = Config.PopupZ + 1}, popup)
-        local _, api = buildColorpickerUI(holder, {
-            Color = color, Alpha = alpha,
-            Rainbow = rainbowEnabled, RainbowSpeed = rainbowSpeed,
-            KeepAlive = true,
-            Width = 240,
-            OnChange = function(c, a, meta)
-                color = c
-                if a then alpha = a end
-                swatch.BackgroundColor3 = c
-                if meta then
-                    if meta.rainbowEnabled ~= nil then rainbowEnabled = meta.rainbowEnabled end
-                    if meta.rainbowSpeed then rainbowSpeed = meta.rainbowSpeed end
-                end
-                if opts.Callback then pcall(opts.Callback, c, a) end
-            end,
-        })
-        local closeBtn = new("TextButton", {BorderSizePixel = 0,
-            Position = UDim2.new(0,16,1,-38), Size = UDim2.new(1,-32,0,28),
-            Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11, AutoButtonColor = false,
-            ZIndex = Config.PopupZ + 1}, popup)
-        themeBg(closeBtn, "Accent"); closeBtn.TextColor3 = Theme.OnAccent
-        addCorner(closeBtn, UDim.new(0,6))
-        closeBtn.MouseButton1Click:Connect(function()
-            closeTopPopup()
-        end)
-        return popup, api
-    end
-
-    click.MouseButton1Click:Connect(function()
-        if not cachedPopup or not cachedPopup.Parent then
-            cachedPopup, cachedAPI = buildPopup()
-        end
-        pushPopup(cachedPopup, function()
-            if not row or not row.Parent or not cachedPopup.Parent then return end
-            local ap, as = row.AbsolutePosition, row.AbsoluteSize
-            local x, y = ap.X + as.X + 8, ap.Y
-            local vp = workspace.CurrentCamera.ViewportSize
-            if x + 280 > vp.X then x = ap.X - 288 end
-            if y + popupH > vp.Y then y = vp.Y - popupH - 8 end
-            if y < 4 then y = 4 end
-            cachedPopup.Position = UDim2.fromOffset(x, y)
-        end, nil, {keepAlive = true})
-    end)
-
-    local meta = {Name = opts.Name or "Color", Type = "Colorpicker", Element = row,
-        Options = opts.Options, State = getSectionState(section),
-        Set = function(c, a)
-            color = c; if a then alpha = a end
-            swatch.BackgroundColor3 = c
-            if cachedAPI and cachedAPI.Set then
-                pcall(function() cachedAPI.Set(c, a) end)
-            end
-        end}
-    attachRowBinds(row, nil, meta)
-    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
-    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return color, alpha end, _meta = meta}
-end
-
-local function createBanner(section, opts)
-    local holder = new("Frame", {BorderSizePixel = 0,
-        Size = UDim2.new(1,0,0,opts.Height or 90), ClipsDescendants = true}, section.Content)
-    themeBg(holder, "ElementHover"); addCorner(holder, UDim.new(0,8)); addStroke(holder, Theme.Outline, 1, 0.3)
-    markSearch(holder, opts.Title or "banner")
-    new("ImageLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-        Image = opts.Image or "rbxassetid://0", ScaleType = Enum.ScaleType.Crop}, holder)
-    if opts.Title then
-        local titleLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,12,1,-28),
-            Size = UDim2.new(1,-24,0,20), Font = Config.CurrentFontFamily, Text = opts.Title,
-            TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
-            TextStrokeTransparency = 0.4}, holder)
-        themeText(titleLbl, "Text")
-    end
-    if opts.VisibleIf then registerVisibleIf(holder, opts.VisibleIf, section) end
-    return holder
-end
-
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- SECTION
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function createSection(tab, opts)
     local holder = tab.ColumnLeft
     if opts.Side == "Right" then holder = tab.ColumnRight end
-    local section = {Content = nil, Collapsed = false, Name = opts.Name or "Section", Elements = {}}
+    local section = {Content = nil, Collapsed = false, Name = T(opts.Name or ""), Elements = {}, _tKey = opts.Name}
     local frame = new("Frame", {BorderSizePixel = 0,
         Size = UDim2.new(1,0,0,32), AutomaticSize = Enum.AutomaticSize.Y}, holder)
     themeBg(frame, "Section"); regTransparency(frame, "Section", 0)
     addCorner(frame, UDim.new(0,10)); addStroke(frame, Theme.Outline, 1, 0.35)
-    frame:SetAttribute("SearchName", string.lower(section.Name))
+    frame:SetAttribute("SearchName", string.lower(T(opts.Name or "")))
     local header = new("TextButton", {BorderSizePixel = 0,
         Size = UDim2.new(1,0,0,28), Text = "", AutoButtonColor = false}, frame)
     themeBg(header, "Panel"); header.LayoutOrder = 0; addCorner(header, UDim.new(0,10))
     new("Frame", {BackgroundColor3 = Theme.Accent, BorderSizePixel = 0,
         Position = UDim2.new(0,10,0,0), Size = UDim2.new(0,3,0,14)}, header)
     local headerLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,20,0,2),
-        Size = UDim2.new(1,-40,1,0), Font = Config.CurrentFontFamily, Text = section.Name,
+        Size = UDim2.new(1,-40,1,0), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
         TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left}, header)
+    if opts.Name then headerLbl:SetAttribute("_tKey", opts.Name) end
     themeText(headerLbl, "Text")
     local arrow = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-24,0,0),
         Size = UDim2.new(0,16,1,0), Font = Config.CurrentFontFamily, Text = "v",
@@ -2205,32 +2139,27 @@ local function createSection(tab, opts)
     function section:AddSlider(o) return track(createSlider(self, o)) end
     function section:AddButton(o) return track(createButton(self, o)) end
     function section:AddLabel(o) return track(createLabel(self, o)) end
-    function section:AddKeybind(o) return track(createKeybind(self, o)) end
     function section:AddDropdown(o) return track(createDropdown(self, o)) end
     function section:AddColorpicker(o) return track(createColorpicker(self, o)) end
+    function section:AddKeybind(o) return track(createKeybind(self, o)) end
     function section:AddDivider(o) return track(createDivider(self, o)) end
-    function section:AddBanner(o) return track(createBanner(self, o)) end
+    function section:AddInput(o) return track(createInput(self, o)) end
     return section
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- TAB
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function createTab(window, opts)
-    local tab = {Name = opts.Name or "Tab", Sections = {}}
+    local tab = {Name = T(opts.Name or ""), Sections = {}, _nameKey = opts.Name, _icon = opts.Icon}
     local btn = new("TextButton", {BorderSizePixel = 0, Size = UDim2.new(1,-12,0,32),
-        Font = Config.CurrentFontFamily, Text = "  " .. (opts.Icon and opts.Icon .. "  " or "") .. tab.Name,
+        Font = Config.CurrentFontFamily, Text = "  " .. (opts.Icon and opts.Icon .. "  " or "") .. T(opts.Name or ""),
         TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, AutoButtonColor = false}, window.SidebarList)
     addCorner(btn, UDim.new(0,6)); themeBg(btn, "Sidebar"); themeText(btn, "SubText")
     regTransparency(btn, "Tab", 0)
     local dot = new("Frame", {BorderSizePixel = 0,
         Position = UDim2.new(0,4,0.5,-8), Size = UDim2.new(0,3,0,16), Visible = false}, btn)
     themeBg(dot, "Accent"); addCorner(dot, UDim.new(1,0))
-    local badge = new("TextLabel", {BackgroundColor3 = Theme.Accent2, BorderSizePixel = 0,
-        Position = UDim2.new(1,-24,0.5,-8), Size = UDim2.new(0,16,0,16),
-        Font = Config.CurrentFontFamily, Text = "0", TextSize = 8,
-        TextColor3 = Theme.OnAccent, Visible = false, ZIndex = 4}, btn)
-    addCorner(badge, UDim.new(1,0))
     local page = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Visible = false},
         window.PageHolder)
     local sl = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
@@ -2244,7 +2173,7 @@ local function createTab(window, opts)
     new("UIListLayout", {Padding = UDim.new(0,10)}, sl)
     new("UIListLayout", {Padding = UDim.new(0,10)}, sr)
     tab.Page, tab.ColumnLeft, tab.ColumnRight = page, sl, sr
-    tab.Button, tab.AccentDot, tab.MatchBadge = btn, dot, badge
+    tab.Button, tab.AccentDot = btn, dot
     tab._refresh = function()
         if window.ActiveTab == tab then
             btn.BackgroundColor3 = Theme.Panel; btn.TextColor3 = Theme.Accent
@@ -2253,22 +2182,22 @@ local function createTab(window, opts)
             btn.BackgroundColor3 = Theme.Sidebar; btn.TextColor3 = Theme.SubText
         end
     end
+    tab._refreshLang = function()
+        btn.Text = "  " .. (opts.Icon and opts.Icon .. "  " or "") .. T(opts.Name or "")
+        tab.Name = T(opts.Name or "")
+    end
     btn.MouseButton1Click:Connect(function() window:SelectTab(tab) end)
-    btn.MouseEnter:Connect(function()
-        if window.ActiveTab ~= tab then tween(btn, {BackgroundColor3 = Theme.ElementHover, TextColor3 = Theme.Text}) end end)
-    btn.MouseLeave:Connect(function()
-        if window.ActiveTab ~= tab then tween(btn, {BackgroundColor3 = Theme.Sidebar, TextColor3 = Theme.SubText}) end end)
     function tab:CreateSection(o) return createSection(self, o) end
     return tab
 end
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- WINDOW
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 local function createWindow(opts)
     local window
     local parent = getSafeParent()
-    local gui = new("ScreenGui", {Name = "airUI_" .. tostring(math.random(1000,9999)),
+    local gui = new("ScreenGui", {Name = "airhubUI_" .. tostring(math.random(1000,9999)),
         ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         IgnoreGuiInset = true}, parent)
     ensureOverlay(gui)
@@ -2277,8 +2206,7 @@ local function createWindow(opts)
     local HIDDEN_POS = UDim2.new(0.5, 0, 0.5, 30)
 
     local main = new("Frame", {Name = "Main", BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = BASE_POS,
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = BASE_POS,
         Size = UDim2.new(0,Config.WindowWidth,0,Config.WindowHeight),
         ZIndex = 1, BackgroundTransparency = Config.MenuTransparency}, gui)
     themeBg(main, "Background"); regTransparency(main, "Menu", Config.MenuTransparency)
@@ -2291,7 +2219,7 @@ local function createWindow(opts)
     local titlebar = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,40), ZIndex = 2,
         BackgroundTransparency = 1}, main)
     local titleLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,18,0,0),
-        Size = UDim2.new(1,-330,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "airUI",
+        Size = UDim2.new(1,-330,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "airhubUI",
         TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 3}, titlebar)
     themeText(titleLbl, "Text")
     local versionLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,18,0,22),
@@ -2306,17 +2234,16 @@ local function createWindow(opts)
         ZIndex = 3}, titlebar)
     themeBg(searchFrame, "ElementHover"); addCorner(searchFrame, UDim.new(0,6))
     local searchStroke = addStroke(searchFrame, Theme.Outline, 1, 0.4); themeStroke(searchStroke, "Outline")
-    local searchIcon = new("TextLabel", {BackgroundTransparency = 1,
+    new("TextLabel", {BackgroundTransparency = 1,
         Position = UDim2.new(0, 8, 0, 0), Size = UDim2.new(0, 12, 1, 0),
-        Font = Config.CurrentFontFamily, Text = "/", TextSize = 11, ZIndex = 4}, searchFrame)
-    themeText(searchIcon, "Muted")
+        Font = Config.CurrentFontFamily, Text = "/", TextSize = 11,
+        TextColor3 = Theme.Muted, ZIndex = 4}, searchFrame)
     local searchBox = new("TextBox", {BackgroundTransparency = 1,
         Position = UDim2.new(0, 24, 0, 0), Size = UDim2.new(1, -50, 1, 0),
-        Font = Config.CurrentFontFamily, Text = "", PlaceholderText = "Search...",
-        TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, ZIndex = 4}, searchFrame)
+        Font = Config.CurrentFontFamily, Text = "", TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, ZIndex = 4}, searchFrame)
+    tPlaceholder(searchBox, "ph_search")
     themeText(searchBox, "Text")
-    -- Register placeholder color to update with theme
-    searchBox:SetAttribute("_themePlaceholder", "Muted")
     local clearSearchBtn = new("TextButton", {BackgroundTransparency = 1,
         Position = UDim2.new(1, -22, 0, 0), Size = UDim2.new(0, 20, 1, 0),
         Font = Config.CurrentFontFamily, Text = "x", TextSize = 11, Visible = false,
@@ -2326,13 +2253,11 @@ local function createWindow(opts)
     searchBox.FocusLost:Connect(function() tween(searchStroke, {Color = Theme.Outline, Transparency = 0.4}) end)
 
     local searchQuery = ""
-
     local function applySearch()
         local q = searchQuery
         local isActive = (q ~= "")
         if not window or not window.Tabs then return end
         for _, tab in ipairs(window.Tabs) do
-            local tabMatches = 0
             for _, section in ipairs(tab.Sections) do
                 if section.Frame and section.Frame.Parent then
                     local sectionMatches = 0
@@ -2340,14 +2265,12 @@ local function createWindow(opts)
                         if child:IsA("GuiObject") then
                             local nameLbl = RowNameLabels[child]
                             if not isActive then
-                                child.Visible = true
-                                sectionMatches = sectionMatches + 1
+                                child.Visible = true; sectionMatches = sectionMatches + 1
                                 if nameLbl then highlightLabel(nameLbl, "") end
                             else
                                 local sn = child:GetAttribute("SearchName")
                                 if sn and string.find(sn, q, 1, true) then
-                                    child.Visible = true
-                                    sectionMatches = sectionMatches + 1
+                                    child.Visible = true; sectionMatches = sectionMatches + 1
                                     if nameLbl then highlightLabel(nameLbl, q) end
                                 else
                                     child.Visible = false
@@ -2356,34 +2279,19 @@ local function createWindow(opts)
                             end
                         end
                     end
-                    if not isActive then
-                        section.Frame.Visible = true
-                    else
-                        section.Frame.Visible = sectionMatches > 0
-                    end
-                    tabMatches = tabMatches + sectionMatches
-                end
-            end
-            if tab.MatchBadge then
-                if isActive and tabMatches > 0 then
-                    tab.MatchBadge.Visible = true
-                    tab.MatchBadge.Text = tostring(tabMatches)
-                else
-                    tab.MatchBadge.Visible = false
+                    section.Frame.Visible = (not isActive) or sectionMatches > 0
                 end
             end
         end
         if not isActive then reevaluateVisibility() end
     end
-
     searchBox:GetPropertyChangedSignal("Text"):Connect(function()
         searchQuery = string.lower(searchBox.Text or "")
         clearSearchBtn.Visible = (searchQuery ~= "")
         applySearch()
     end)
     clearSearchBtn.MouseButton1Click:Connect(function()
-        searchBox.Text = ""
-        searchBox:ReleaseFocus()
+        searchBox.Text = ""; searchBox:ReleaseFocus()
     end)
 
     local function mkBtn(text, offX, hov)
@@ -2392,10 +2300,6 @@ local function createWindow(opts)
             Font = Config.CurrentFontFamily, Text = text, TextSize = 11,
             AutoButtonColor = false, ZIndex = 3}, titlebar)
         themeBg(b, "ElementHover"); themeText(b, "SubText"); addCorner(b, UDim.new(0,6))
-        b.MouseEnter:Connect(function()
-            tween(b, {BackgroundColor3 = hov or Theme.Element, TextColor3 = Theme.Text}) end)
-        b.MouseLeave:Connect(function()
-            tween(b, {BackgroundColor3 = Theme.ElementHover, TextColor3 = Theme.SubText}) end)
         return b
     end
     local btnClose = mkBtn("x", -32, Theme.Danger)
@@ -2431,7 +2335,6 @@ local function createWindow(opts)
     local statusBar = new("Frame", {BorderSizePixel = 0,
         Position = UDim2.new(0,0,1,-22), Size = UDim2.new(1,0,0,22),
         ZIndex = 5, Visible = Config.StatusBar, BackgroundTransparency = 1}, main)
-    addCorner(statusBar, UDim.new(0,8))
     new("Frame", {BackgroundColor3 = Theme.Outline, BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,1), ZIndex = 6}, statusBar)
     local leftLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,12,0,0),
@@ -2449,13 +2352,11 @@ local function createWindow(opts)
     task.spawn(function()
         local startT = tick()
         while statusBar.Parent do
-            local ok, fps = pcall(function() return math.floor(Stats.FrameRate:GetValue()) end)
-            local okP, ping = pcall(function()
-                return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
-            rightLbl.Text = string.format("fps: %d  ping: %dms", ok and fps or 0, okP and ping or 0)
+            local ping = getPing()
+            rightLbl.Text = string.format("fps: %d  ping: %dms", currentFPS, ping)
             midLbl.Text = string.format("players: %d/%d", #Players:GetPlayers(), Players.MaxPlayers)
             local up = tick() - startT
-            leftLbl.Text = string.format("%s  up: %02d:%02d", opts.Name or "airUI",
+            leftLbl.Text = string.format("%s  up: %02d:%02d", opts.Name or "airhubUI",
                 math.floor(up/60), math.floor(up%60))
             task.wait(0.5)
         end
@@ -2467,11 +2368,40 @@ local function createWindow(opts)
             Position = UDim2.new(0,4+(3-i)*3,1,-4-(i-1)*3), Size = UDim2.new(0,2,0,2), ZIndex = 7}, resizeHandle)
     end
 
+    -- === local applyFontToAll ===
+    local function applyFontToAll()
+        for _, d in ipairs(gui:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextBox") or d:IsA("TextButton") then
+                local base = d:GetAttribute("_baseTextSize")
+                if not base then base = d.TextSize; d:SetAttribute("_baseTextSize", base) end
+                d.Font = Config.CurrentFontFamily
+                d.TextSize = math.clamp(math.floor(base * Config.CurrentFontScale + 0.5), 6, 48)
+            end
+        end
+    end
+
     window = {GUI = gui, Main = main, TitleBar = titlebar, Sidebar = sidebar,
         SidebarList = sidebarScroll, PageHolder = pageInner, Overlay = Overlay,
-        Tabs = {}, ActiveTab = nil, Name = opts.Name or "airUI", OnUnload = opts.OnUnload,
+        Tabs = {}, ActiveTab = nil, Name = opts.Name or "airhubUI", OnUnload = opts.OnUnload,
         Theme = Theme, Config = Config, _animScale = animScale,
-        _hiding = false, _showing = false}
+        _hiding = false, _showing = false, _titleLbl = titleLbl, _statusBar = statusBar}
+
+    function window:SetLanguage(lang)
+        if not L[lang] then return false end
+        Config.Language = lang
+        for _, d in ipairs(gui:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+                local k = d:GetAttribute("_tKey")
+                if k then d.Text = T(k) end
+                local pk = d:GetAttribute("_tPlaceholder")
+                if pk then d.PlaceholderText = T(pk) end
+            end
+        end
+        for _, tab in ipairs(self.Tabs) do
+            if tab._refreshLang then tab._refreshLang() end
+        end
+        return true
+    end
 
     function window:SelectTab(tab)
         if self.ActiveTab == tab then return end
@@ -2479,15 +2409,11 @@ local function createWindow(opts)
         for _, t in ipairs(self.Tabs) do
             t.Page.Visible = false
             if t._refresh then t._refresh() end
-            tween(t.Button, {BackgroundColor3 = Theme.Sidebar, TextColor3 = Theme.SubText})
             if t.AccentDot then t.AccentDot.Visible = false end
         end
         tab.Page.Visible = true
-        tween(tab.Button, {BackgroundColor3 = Theme.Panel, TextColor3 = Theme.Accent})
-        if tab.AccentDot then
-            tab.AccentDot.Visible = true
-            tab.AccentDot.BackgroundColor3 = Theme.Accent
-        end
+        if tab._refresh then tab._refresh() end
+        if tab.AccentDot then tab.AccentDot.Visible = true end
         self.ActiveTab = tab
     end
     function window:AddTab(o)
@@ -2497,180 +2423,133 @@ local function createWindow(opts)
         if #self.Tabs == 1 then self:SelectTab(t) end
         return t
     end
-    function window:RemoveTab(t)
-        local idx
-        for i, tt in ipairs(self.Tabs) do if tt == t or tt.Name == t then idx = i; break end end
-        if not idx then return false end
-        local tt = self.Tabs[idx]
-        table.remove(self.Tabs, idx)
-        if tt.Button then tt.Button:Destroy() end
-        if tt.Page then tt.Page:Destroy() end
-        if self.ActiveTab == tt then
-            self.ActiveTab = nil
-            if self.Tabs[1] then self:SelectTab(self.Tabs[1]) end
-        end
-        return true
-    end
 
-    -- ============================================================
-    -- SMOOTH OPEN / CLOSE ANIMATION
-    -- Slide (Position) + Scale (UIScale) + Fade (Transparency)
-    -- No rotation, no artifacts.
-    -- ============================================================
     function window:Show()
         if self._showing then return end
-        self._hiding = false
-        self._showing = true
-        closeAllPopups()
-        gui.Enabled = true
-
-        -- Prepare start state
+        self._hiding = false; self._showing = true
+        closeAllPopups(); gui.Enabled = true
         main.Position = HIDDEN_POS
         main.BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
         if animScale then animScale.Scale = 0.88 end
-
-        tween(main, {
-            Position = BASE_POS,
-            BackgroundTransparency = Config.MenuTransparency
-        }, Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        tween(main, {Position = BASE_POS, BackgroundTransparency = Config.MenuTransparency},
+            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
         if animScale then
             tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         end
-
-        task.delay(Config.MenuAnim, function()
-            self._showing = false
-        end)
+        task.delay(Config.MenuAnim, function() self._showing = false end)
     end
-
     function window:Hide()
         if not gui.Enabled or self._hiding then return end
-        self._hiding = true
-        closeAllPopups()
-
-        tween(main, {
-            Position = HIDDEN_POS,
-            BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
-        }, Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        self._hiding = true; closeAllPopups()
+        tween(main, {Position = HIDDEN_POS,
+            BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
+            Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         if animScale then
             tween(animScale, {Scale = 0.88}, Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         end
-
         task.delay(Config.MenuCloseAnim + 0.02, function()
             if self._hiding then
                 gui.Enabled = false
                 main.Position = BASE_POS
                 main.BackgroundTransparency = Config.MenuTransparency
                 if animScale then animScale.Scale = 1 end
-                self._hiding = false
-                self._showing = false
+                self._hiding = false; self._showing = false
             end
         end)
     end
-
     function window:Toggle()
-        if gui.Enabled and not self._hiding then
-            self:Hide()
-        else
-            self:Show()
-        end
+        if gui.Enabled and not self._hiding then self:Hide() else self:Show() end
     end
-    function window:SetSearch(q)
-        searchBox.Text = q or ""
-        searchBox:ReleaseFocus()
+    function window:SetSearch(q) searchBox.Text = q or ""; searchBox:ReleaseFocus() end
+    function window:SetTitle(text)
+        if self._titleLbl then self._titleLbl.Text = text end
+        self.Name = text
     end
-    function window:GetSearch() return searchQuery end
 
-    -- ============================================================
-    -- APPLY FONT to all text descendants
-    -- ============================================================
-    local function applyFontToAll(fontFamily, fontScale)
-        for _, d in ipairs(gui:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextBox") or d:IsA("TextButton") then
-                local base = d:GetAttribute("_baseTextSize")
-                if not base then
-                    base = d.TextSize
-                    d:SetAttribute("_baseTextSize", base)
-                end
-                if fontFamily then d.Font = fontFamily end
-                if fontScale then
-                    d.TextSize = math.clamp(math.floor(base * fontScale + 0.5), 6, 48)
-                end
+    function window:ExportSettings()
+        local data = {Theme = {}, Config = {}}
+        for k, v in pairs(Theme) do
+            if typeof(v) == "Color3" then data.Theme[k] = {v.R, v.G, v.B} end
+        end
+        for k, v in pairs(Config) do
+            if type(v) == "number" or type(v) == "string" or type(v) == "boolean" then
+                data.Config[k] = v
             end
         end
+        local ok, str = pcall(function() return HttpService:JSONEncode(data) end)
+        if not ok then return nil end
+        return str
     end
 
-    -- ============================================================
-    -- CORNER RADIUS — delta-based
-    -- ============================================================
-    local function applyCornerDelta(targetVal)
-        local delta = targetVal - Config.BaseCornerRadius
-        for _, d in ipairs(gui:GetDescendants()) do
-            if d:IsA("UICorner") then
-                local baseScale = d:GetAttribute("_baseScale")
-                local baseOff = d:GetAttribute("_baseRadius")
-                if baseScale == nil then
-                    local cur = d.CornerRadius
-                    if typeof(cur) == "UDim2" then cur = UDim.new(cur.X.Scale, cur.X.Offset) end
-                    baseScale = cur.Scale
-                    baseOff = cur.Offset
-                    d:SetAttribute("_baseScale", baseScale)
-                    d:SetAttribute("_baseRadius", baseOff)
-                end
-                if baseScale and baseScale > 0 then
-                    -- pill/circle — don't touch
-                else
-                    local newOff = math.max(0, baseOff + delta)
-                    d.CornerRadius = UDim.new(0, newOff)
-                end
+    function window:ImportSettings(str)
+        if not str or str == "" then return false, "empty" end
+        local ok, data = pcall(function() return HttpService:JSONDecode(str) end)
+        if not ok or type(data) ~= "table" then return false, "invalid JSON" end
+        if data.Theme then
+            for k, v in pairs(data.Theme) do
+                if type(v) == "table" and #v == 3 then Theme[k] = Color3.new(v[1], v[2], v[3]) end
             end
+            refreshTheme()
         end
+        if data.Config then
+            for k, v in pairs(data.Config) do
+                if Config[k] ~= nil then Config[k] = v end
+            end
+            if Config.NotificationPosition then resetNotifHolder() end
+            if statusBar and Config.StatusBar ~= nil then statusBar.Visible = Config.StatusBar end
+            if L[Config.Language] then self:SetLanguage(Config.Language) end
+            applyFontToAll()
+        end
+        for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
+        return true
     end
 
-    -- ============================================================
-    -- APPLY FULL THEME (colors + font)
-    -- ============================================================
+    function window:SaveConfigToDisk(name)
+        local str = self:ExportSettings()
+        if not str then return false, "export failed" end
+        return writeConfigFile(name, str)
+    end
+    function window:LoadConfigFromDisk(name)
+        local str, err = readConfigFile(name)
+        if not str then return false, err or "not found" end
+        return self:ImportSettings(str)
+    end
+    function window:DeleteConfigFromDisk(name) return deleteConfigFile(name) end
+    function window:ListDiskConfigs() return listDiskConfigs() end
+    function window:IsFilesystemAvailable() return fsAvailable() end
+
     function window:ApplyFullTheme(preset)
         if type(preset) ~= "table" then return end
         local newFont = preset.Font
         local newScale = preset.FontSize
         for k, v in pairs(preset) do
-            if k == "Font" or k == "FontSize" then
-                -- handled below
-            elseif Theme[k] ~= nil and typeof(v) == "Color3" then
+            if k ~= "Font" and k ~= "FontSize" and Theme[k] ~= nil and typeof(v) == "Color3" then
                 Theme[k] = v
             end
         end
         refreshTheme()
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
-        if newFont then
-            local fam = FontCatalog[newFont]
-            if fam then
-                Config.CurrentFontName = newFont
-                Config.CurrentFontFamily = fam
-            end
+        if newFont and FontCatalog[newFont] then
+            Config.CurrentFontName = newFont
+            Config.CurrentFontFamily = FontCatalog[newFont]
         end
         if newScale then Config.CurrentFontScale = tonumber(newScale) or 1 end
-        applyFontToAll(Config.CurrentFontFamily, Config.CurrentFontScale)
+        applyFontToAll()
     end
 
     function window:Configure(cfg)
         cfg = cfg or {}
         local needRefresh = false
-        local needFontApply = false
+        local needFont = false
         for k, v in pairs(cfg) do
             if k == "CornerRadius" and type(v) == "number" then
-                Config.CornerRadius = UDim.new(0, v)
-                applyCornerDelta(v)
-            elseif k == "FontFamily" and type(v) == "string" then
-                local fam = FontCatalog[v]
-                if fam then
-                    Config.CurrentFontName = v
-                    Config.CurrentFontFamily = fam
-                    needFontApply = true
+                local delta = v - Config.BaseCornerRadius
+                for _, d in ipairs(gui:GetDescendants()) do
+                    if d:IsA("UICorner") then
+                        local bs = d:GetAttribute("_baseRadius")
+                        if bs and bs >= 0 then d.CornerRadius = UDim.new(0, math.max(0, bs + delta)) end
+                    end
                 end
-            elseif k == "FontScale" and type(v) == "number" then
-                Config.CurrentFontScale = math.clamp(v, 0.6, 2.0)
-                needFontApply = true
             elseif k == "MenuTransparency" or k == "TabTransparency"
                 or k == "SectionTransparency" or k == "ElementTransparency" then
                 Config[k] = math.clamp(tonumber(v) or 0, 0, 1)
@@ -2683,6 +2562,28 @@ local function createWindow(opts)
                 sidebar.Size = UDim2.new(0,w,1,-62)
                 pageHolder.Position = UDim2.new(0,w,0,40)
                 pageHolder.Size = UDim2.new(1,-w,1,-62)
+            elseif k == "MenuAnimSpeed" and type(v) == "number" then
+                Config.MenuAnim = math.clamp(v, 0.1, 1.0)
+            elseif k == "MenuCloseAnimSpeed" and type(v) == "number" then
+                Config.MenuCloseAnim = math.clamp(v, 0.1, 1.0)
+            elseif k == "PopupAnimSpeed" and type(v) == "number" then
+                Config.PopupAnim = math.clamp(v, 0.05, 0.5)
+            elseif k == "NotificationDuration" and type(v) == "number" then
+                Config.NotificationDuration = math.clamp(v, 0.5, 10)
+            elseif k == "NotificationPosition" and type(v) == "string" then
+                Config.NotificationPosition = v; resetNotifHolder()
+            elseif k == "TooltipDelay" and type(v) == "number" then
+                Config.TooltipDelay = math.clamp(v, 0, 1)
+            elseif k == "WindowWidth" and type(v) == "number" then
+                Config.WindowWidth = math.clamp(v, Config.MinWidth, 1400)
+                if not minimized then main.Size = UDim2.new(0, Config.WindowWidth, 0, main.Size.Y.Offset) end
+            elseif k == "WindowHeight" and type(v) == "number" then
+                Config.WindowHeight = math.clamp(v, Config.MinHeight, 1000)
+                if not minimized then main.Size = UDim2.new(0, main.Size.X.Offset, 0, Config.WindowHeight) end
+            elseif k == "FontFamily" and type(v) == "string" then
+                if FontCatalog[v] then Config.CurrentFontFamily = FontCatalog[v]; Config.CurrentFontName = v; needFont = true end
+            elseif k == "FontScale" and type(v) == "number" then
+                Config.CurrentFontScale = math.clamp(v, 0.6, 2.0); needFont = true
             elseif Theme[k] ~= nil then
                 Theme[k] = v; needRefresh = true
             end
@@ -2691,9 +2592,7 @@ local function createWindow(opts)
             refreshTheme()
             for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         end
-        if needFontApply then
-            applyFontToAll(Config.CurrentFontFamily, Config.CurrentFontScale)
-        end
+        if needFont then applyFontToAll() end
     end
     function window:SetTransparency(cat, v)
         v = math.clamp(tonumber(v) or 0, 0, 1)
@@ -2701,6 +2600,7 @@ local function createWindow(opts)
         if Config[key] ~= nil then Config[key] = v; applyTransparencyTo(cat) end
     end
 
+    -- drag
     local drag, dStart, sPos
     titlebar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -2716,6 +2616,7 @@ local function createWindow(opts)
     _T(UserInputService.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end end))
 
+    -- resize
     local rz, rStart, rInit
     resizeHandle.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -2748,60 +2649,55 @@ local function createWindow(opts)
         RainbowControllers = {}
         pcall(function() gui:Destroy() end)
         NotificationHolder = nil; Overlay = nil; Tooltip = nil
-        if getgenv().airUI_Window == window then getgenv().airUI_Window = nil end
-        if getgenv().airUI then getgenv().airUI = nil end
-        print("[airUI] Unloaded.")
     end
     function window:Destroy() self:Unload() end
     return window
 end
 
-local airUILib = {
+-- ══════════════════════════════════════════════════════════════
+-- LIB EXPORT
+-- ══════════════════════════════════════════════════════════════
+local airhubUILib = {
     CreateWindow = createWindow, Notify = Notify, Theme = Theme, Config = Config,
-    ThemePresets = ThemePresets, FontCatalog = FontCatalog,
+    ThemePresets = ThemePresets, FontCatalog = FontCatalog, T = T, L = L,
     BindRegistry = BindRegistry, BindOrder = BindOrder,
     AddBindKey = AddBindKey, RemoveBindKey = RemoveBindKey, ClearBind = ClearBind,
     CloseAllPopups = closeAllPopups, RefreshTheme = refreshTheme,
+    GetFPS = function() return currentFPS end, GetPing = getPing,
+    GetLanguage = function() return Config.Language end,
+    ConfigFolder = CONFIG_FOLDER, ListDiskConfigs = listDiskConfigs,
+    IsFilesystemAvailable = fsAvailable,
 }
 
-function airUILib.LoadTab(code)
-    if type(code) ~= "string" then return false, "code must be string" end
-    local fn, err = loadstring(code)
-    if not fn then
-        warn("[airUI.LoadTab] syntax error: " .. tostring(err))
-        return false, err
-    end
-    local ok, result = pcall(fn)
-    if not ok then
-        warn("[airUI.LoadTab] runtime error: " .. tostring(result))
-        return false, result
-    end
-    return true, result
-end
-
-function airUILib.LoadTabFromURL(url)
-    if type(url) ~= "string" then return false, "url must be string" end
-    local ok, code = pcall(function() return game:HttpGet(url) end)
-    if not ok or not code then
-        warn("[airUI.LoadTabFromURL] fetch failed: " .. tostring(code))
-        return false, code
-    end
-    return airUILib.LoadTab(code)
-end
-
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- MAIN WINDOW
--- ============================================================
-local Window = airUILib.CreateWindow({Name = "airUI"})
-airUILib.Window = Window
+-- ══════════════════════════════════════════════════════════════
+local Window = airhubUILib.CreateWindow({Name = "airhubUI"})
+airhubUILib.Window = Window
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
 -- SETTINGS TAB
--- ============================================================
-local tabSettings = Window:AddTab({Name = "Settings", Icon = ">"})
+-- ══════════════════════════════════════════════════════════════
+local tabSettings = Window:AddTab({Name = "tab_settings", Icon = ">"})
 
-local secTheme = tabSettings:CreateSection({Name = "Theme Presets"})
-secTheme:AddDropdown({Name = "Preset", Value = "airUI Light",
+local secGeneral = tabSettings:CreateSection({Name = "sec_general"})
+local langLabelToCode = { ["English"] = "en", ["Русский"] = "ru" }
+local codeToLangLabel = { en = "English", ru = "Русский" }
+
+secGeneral:AddDropdown({
+    Name = "lbl_language",
+    Value = codeToLangLabel[Config.Language] or "English",
+    List = { L.en.lang_en, L.ru.lang_ru },
+    Callback = function(v)
+        local code = langLabelToCode[v] or "en"
+        Window:SetLanguage(code)
+        Notify("airhubUI", T("n_lang_changed", L[code].lang_en), "success")
+    end,
+    Tooltip = "tt_language",
+})
+
+local secTheme = tabSettings:CreateSection({Name = "sec_theme"})
+secTheme:AddDropdown({Name = "lbl_preset", Value = "airhubUI Light",
     List = (function()
         local t = {}
         for k in pairs(ThemePresets) do t[#t+1] = k end
@@ -2812,127 +2708,284 @@ secTheme:AddDropdown({Name = "Preset", Value = "airUI Light",
         local p = ThemePresets[v]
         if not p then return end
         Window:ApplyFullTheme(p)
-        Notify("Theme", "Applied: " .. v, "success")
+        Notify("airhubUI", T("n_theme_applied", v), "success")
     end,
-    Tooltip = "Меняет ВСЕ цвета + шрифт + размер текста"})
+    Tooltip = "tt_preset"})
 
-local secFont = tabSettings:CreateSection({Name = "Font", Side = "Right"})
-secFont:AddDropdown({Name = "Font Family", Value = Config.CurrentFontName,
+local secWindowSize = tabSettings:CreateSection({Name = "sec_window", Side = "Right"})
+secWindowSize:AddInput({Name = "lbl_title", Placeholder = "ph_airhubui", Value = "airhubUI",
+    Callback = function(v) Window:SetTitle(v or "airhubUI") end, Tooltip = "tt_title"})
+secWindowSize:AddSlider({Name = "lbl_width", Value = 720, Min = 520, Max = 1200, Decimals = 0,
+    Callback = function(v) Window:Configure({WindowWidth = v}) end, Tooltip = "tt_width"})
+secWindowSize:AddSlider({Name = "lbl_height", Value = 500, Min = 380, Max = 900, Decimals = 0,
+    Callback = function(v) Window:Configure({WindowHeight = v}) end, Tooltip = "tt_height"})
+secWindowSize:AddSlider({Name = "lbl_sidebar_width", Value = 168, Min = 100, Max = 260,
+    Callback = function(v) Window:Configure({SidebarWidth = v}) end, Tooltip = "tt_sidebar_width"})
+secWindowSize:AddSlider({Name = "lbl_corner_radius", Value = 8, Min = 0, Max = 24,
+    Callback = function(v) Window:Configure({CornerRadius = v}) end, Tooltip = "tt_corner_radius"})
+secWindowSize:AddToggle({Name = "lbl_status_bar", Value = true,
+    Callback = function(v) Window:Configure({StatusBar = v}) end, Tooltip = "tt_status_bar"})
+
+local secFont = tabSettings:CreateSection({Name = "sec_font", Side = "Right"})
+secFont:AddDropdown({Name = "lbl_font_family", Value = Config.CurrentFontName,
     List = (function()
         local t = {}
         for k in pairs(FontCatalog) do t[#t+1] = k end
         table.sort(t)
         return t
     end)(),
-    Callback = function(v)
-        Window:Configure({FontFamily = v})
-        Notify("Font", "Applied: " .. v, "success")
-    end,
-    Tooltip = "Меняет шрифт всего меню"})
-secFont:AddSlider({Name = "Font Size", Value = 1.0, Min = 0.6, Max = 1.8, Decimals = 2,
-    Callback = function(v) Window:Configure({FontScale = v}) end,
-    Tooltip = "Множитель размера текста (0.6x – 1.8x)"})
+    Callback = function(v) Window:Configure({FontFamily = v}) end, Tooltip = "tt_font_family"})
+secFont:AddSlider({Name = "lbl_font_size", Value = 1.0, Min = 0.6, Max = 1.8, Decimals = 2,
+    Callback = function(v) Window:Configure({FontScale = v}) end, Tooltip = "tt_font_size"})
 
-local secWindow = tabSettings:CreateSection({Name = "Menu Colors", Side = "Right"})
-secWindow:AddColorpicker({Name = "Menu Background", Default = Theme.Background,
-    Callback = function(c) Window:Configure({Background = c}) end})
-secWindow:AddColorpicker({Name = "Sidebar", Default = Theme.Sidebar,
-    Callback = function(c) Window:Configure({Sidebar = c}) end})
-secWindow:AddColorpicker({Name = "Panel", Default = Theme.Panel,
-    Callback = function(c) Window:Configure({Panel = c}) end})
-secWindow:AddColorpicker({Name = "Section Background", Default = Theme.Section,
-    Callback = function(c) Window:Configure({Section = c}) end})
-secWindow:AddColorpicker({Name = "Element", Default = Theme.Element,
-    Callback = function(c) Window:Configure({Element = c}) end})
-secWindow:AddColorpicker({Name = "Element Hover", Default = Theme.ElementHover,
-    Callback = function(c) Window:Configure({ElementHover = c}) end})
-secWindow:AddColorpicker({Name = "Outline / Border", Default = Theme.Outline,
-    Callback = function(c) Window:Configure({Outline = c}) end})
+local secAnim = tabSettings:CreateSection({Name = "sec_anim"})
+secAnim:AddSlider({Name = "lbl_menu_open", Value = Config.MenuAnim, Min = 0.1, Max = 1.0, Decimals = 2,
+    Callback = function(v) Window:Configure({MenuAnimSpeed = v}) end, Tooltip = "tt_menu_open"})
+secAnim:AddSlider({Name = "lbl_menu_close", Value = Config.MenuCloseAnim, Min = 0.1, Max = 1.0, Decimals = 2,
+    Callback = function(v) Window:Configure({MenuCloseAnimSpeed = v}) end, Tooltip = "tt_menu_close"})
+secAnim:AddSlider({Name = "lbl_popup_speed", Value = Config.PopupAnim, Min = 0.05, Max = 0.5, Decimals = 2,
+    Callback = function(v) Window:Configure({PopupAnimSpeed = v}) end, Tooltip = "tt_popup_speed"})
 
-local secText = tabSettings:CreateSection({Name = "Text Colors"})
-secText:AddColorpicker({Name = "Text", Default = Theme.Text,
-    Callback = function(c) Window:Configure({Text = c}) end})
-secText:AddColorpicker({Name = "SubText", Default = Theme.SubText,
-    Callback = function(c) Window:Configure({SubText = c}) end})
-secText:AddColorpicker({Name = "Muted", Default = Theme.Muted,
-    Callback = function(c) Window:Configure({Muted = c}) end})
+local secWindowColors = tabSettings:CreateSection({Name = "sec_menu_colors", Side = "Right"})
+secWindowColors:AddColorpicker({Name = "lbl_menu_bg", Default = Theme.Background,
+    Callback = function(c) Window:Configure({Background = c}) end, Tooltip = "tt_menu_bg"})
+secWindowColors:AddColorpicker({Name = "lbl_sidebar", Default = Theme.Sidebar,
+    Callback = function(c) Window:Configure({Sidebar = c}) end, Tooltip = "tt_sidebar"})
+secWindowColors:AddColorpicker({Name = "lbl_panel", Default = Theme.Panel,
+    Callback = function(c) Window:Configure({Panel = c}) end, Tooltip = "tt_panel"})
+secWindowColors:AddColorpicker({Name = "lbl_section_bg", Default = Theme.Section,
+    Callback = function(c) Window:Configure({Section = c}) end, Tooltip = "tt_section_bg"})
+secWindowColors:AddColorpicker({Name = "lbl_element", Default = Theme.Element,
+    Callback = function(c) Window:Configure({Element = c}) end, Tooltip = "tt_element"})
+secWindowColors:AddColorpicker({Name = "lbl_element_hover", Default = Theme.ElementHover,
+    Callback = function(c) Window:Configure({ElementHover = c}) end, Tooltip = "tt_element_hover"})
+secWindowColors:AddColorpicker({Name = "lbl_outline", Default = Theme.Outline,
+    Callback = function(c) Window:Configure({Outline = c}) end, Tooltip = "tt_outline"})
 
-local secAccent = tabSettings:CreateSection({Name = "Accent Colors", Side = "Right"})
-secAccent:AddColorpicker({Name = "Accent", Default = Theme.Accent,
-    Callback = function(c) Window:Configure({Accent = c}) end,
-    Tooltip = "Включи Rainbow — переливается"})
-secAccent:AddColorpicker({Name = "Accent 2", Default = Theme.Accent2,
-    Callback = function(c) Window:Configure({Accent2 = c}) end})
-secAccent:AddColorpicker({Name = "Success", Default = Theme.Success,
-    Callback = function(c) Window:Configure({Success = c}) end})
-secAccent:AddColorpicker({Name = "Danger", Default = Theme.Danger,
-    Callback = function(c) Window:Configure({Danger = c}) end})
-secAccent:AddColorpicker({Name = "Warning", Default = Theme.Warning,
-    Callback = function(c) Window:Configure({Warning = c}) end})
-secAccent:AddColorpicker({Name = "On Accent", Default = Theme.OnAccent,
-    Callback = function(c) Window:Configure({OnAccent = c}) end})
+local secText = tabSettings:CreateSection({Name = "sec_text_colors"})
+secText:AddColorpicker({Name = "lbl_text", Default = Theme.Text,
+    Callback = function(c) Window:Configure({Text = c}) end, Tooltip = "tt_text"})
+secText:AddColorpicker({Name = "lbl_subtext", Default = Theme.SubText,
+    Callback = function(c) Window:Configure({SubText = c}) end, Tooltip = "tt_subtext"})
+secText:AddColorpicker({Name = "lbl_muted", Default = Theme.Muted,
+    Callback = function(c) Window:Configure({Muted = c}) end, Tooltip = "tt_muted"})
 
-local secTrans = tabSettings:CreateSection({Name = "Transparency"})
-secTrans:AddSlider({Name = "Menu", Value = Config.MenuTransparency, Min = 0, Max = 0.5, Decimals = 2,
-    Callback = function(v) Window:SetTransparency("Menu", v) end})
-secTrans:AddSlider({Name = "Tabs", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
-    Callback = function(v) Window:SetTransparency("Tab", v) end})
-secTrans:AddSlider({Name = "Sections", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
-    Callback = function(v) Window:SetTransparency("Section", v) end})
-secTrans:AddSlider({Name = "Elements", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
-    Callback = function(v) Window:SetTransparency("Element", v) end})
+local secAccent = tabSettings:CreateSection({Name = "sec_accent", Side = "Right"})
+secAccent:AddColorpicker({Name = "lbl_accent", Default = Theme.Accent,
+    Callback = function(c) Window:Configure({Accent = c}) end, Tooltip = "tt_accent"})
+secAccent:AddColorpicker({Name = "lbl_accent2", Default = Theme.Accent2,
+    Callback = function(c) Window:Configure({Accent2 = c}) end, Tooltip = "tt_accent2"})
+secAccent:AddColorpicker({Name = "lbl_success", Default = Theme.Success,
+    Callback = function(c) Window:Configure({Success = c}) end, Tooltip = "tt_success"})
+secAccent:AddColorpicker({Name = "lbl_danger", Default = Theme.Danger,
+    Callback = function(c) Window:Configure({Danger = c}) end, Tooltip = "tt_danger"})
+secAccent:AddColorpicker({Name = "lbl_warning", Default = Theme.Warning,
+    Callback = function(c) Window:Configure({Warning = c}) end, Tooltip = "tt_warning"})
+secAccent:AddColorpicker({Name = "lbl_on_accent", Default = Theme.OnAccent,
+    Callback = function(c) Window:Configure({OnAccent = c}) end, Tooltip = "tt_on_accent"})
 
-local secMenu = tabSettings:CreateSection({Name = "Menu", Side = "Right"})
-secMenu:AddLabel({Text = "Toggle Key: RightShift (фиксировано)"})
-secMenu:AddSlider({Name = "Sidebar Width", Value = 168, Min = 100, Max = 260,
-    Callback = function(v) Window:Configure({SidebarWidth = v}) end})
-secMenu:AddSlider({Name = "Corner Radius", Value = 8, Min = 0, Max = 24,
-    Callback = function(v) Window:Configure({CornerRadius = v}) end,
-    Tooltip = "Можно уменьшать и увеличивать"})
-secMenu:AddToggle({Name = "Status Bar", Value = true,
-    Callback = function(v) Window:Configure({StatusBar = v}) end})
+local secTrans = tabSettings:CreateSection({Name = "sec_transparency"})
+secTrans:AddSlider({Name = "lbl_transparency_menu", Value = Config.MenuTransparency, Min = 0, Max = 0.5, Decimals = 2,
+    Callback = function(v) Window:SetTransparency("Menu", v) end, Tooltip = "tt_transparency_menu"})
+secTrans:AddSlider({Name = "lbl_transparency_tabs", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
+    Callback = function(v) Window:SetTransparency("Tab", v) end, Tooltip = "tt_transparency_tabs"})
+secTrans:AddSlider({Name = "lbl_transparency_sections", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
+    Callback = function(v) Window:SetTransparency("Section", v) end, Tooltip = "tt_transparency_sections"})
+secTrans:AddSlider({Name = "lbl_transparency_elements", Value = 0, Min = 0, Max = 0.5, Decimals = 2,
+    Callback = function(v) Window:SetTransparency("Element", v) end, Tooltip = "tt_transparency_elements"})
 
-local secActions = tabSettings:CreateSection({Name = "Actions"})
-secActions:AddButton({Name = "Reset to airUI Light", Callback = function()
-    Window:ApplyFullTheme(ThemePresets["airUI Light"])
-    Notify("Theme", "Reset to airUI Light", "success")
-end})
-secActions:AddButton({Name = "Reset to airUI Dark", Callback = function()
-    Window:ApplyFullTheme(ThemePresets["airUI Dark"])
-    Notify("Theme", "Reset to airUI Dark", "success")
-end})
-secActions:AddButton({Name = "Unload Menu", Callback = function()
-    Notify("airUI", "Unloading...", "warning", 1.5)
+local secNotif = tabSettings:CreateSection({Name = "sec_notifications", Side = "Right"})
+secNotif:AddSlider({Name = "lbl_duration", Value = Config.NotificationDuration, Min = 0.5, Max = 10, Decimals = 1,
+    Callback = function(v) Window:Configure({NotificationDuration = v}) end, Tooltip = "tt_duration"})
+secNotif:AddDropdown({Name = "lbl_position", Value = "top-right",
+    List = {"top-right", "top-left", "bottom-right", "bottom-left"},
+    Callback = function(v) Window:Configure({NotificationPosition = v}) end, Tooltip = "tt_position"})
+secNotif:AddButton({Name = "btn_test_notif", Callback = function()
+    Notify(T("n_test_notif_title"), T("n_test_notif_text"), "success", 2)
+end, Tooltip = "tt_test_notif"})
+
+local secTooltip = tabSettings:CreateSection({Name = "sec_tooltips"})
+secTooltip:AddSlider({Name = "lbl_delay", Value = Config.TooltipDelay, Min = 0, Max = 1, Decimals = 2,
+    Callback = function(v) Window:Configure({TooltipDelay = v}) end, Tooltip = "tt_delay"})
+
+local secActions = tabSettings:CreateSection({Name = "sec_actions", Side = "Right"})
+secActions:AddButton({Name = "btn_reset_light", Callback = function()
+    Window:ApplyFullTheme(ThemePresets["airhubUI Light"])
+    Notify("airhubUI", T("n_theme_reset_light"), "success")
+end, Tooltip = "tt_reset_light"})
+secActions:AddButton({Name = "btn_reset_dark", Callback = function()
+    Window:ApplyFullTheme(ThemePresets["airhubUI Dark"])
+    Notify("airhubUI", T("n_theme_reset_dark"), "success")
+end, Tooltip = "tt_reset_dark"})
+secActions:AddButton({Name = "btn_unload", Callback = function()
+    Notify("airhubUI", T("n_unloading"), "warning", 1.5)
     task.wait(0.5)
     Window:Unload()
-end})
-secActions:AddButton({Name = "Re-show Window", Callback = function() Window:Show() end})
-secActions:AddButton({Name = "Clear Search", Callback = function() Window:SetSearch("") end})
+end, Tooltip = "tt_unload"})
+secActions:AddButton({Name = "btn_reshow", Callback = function() Window:Show() end, Tooltip = "tt_reshow"})
 
--- ============================================================
+-- ══════════════════════════════════════════════════════════════
+-- CONFIGS TAB
+-- ══════════════════════════════════════════════════════════════
+local tabConfigs = Window:AddTab({Name = "tab_configs", Icon = ">"})
+
+local secFileConfigs = tabConfigs:CreateSection({Name = "sec_file_configs"})
+secFileConfigs:AddLabel({Text = T("lbl_folder_path", CONFIG_FOLDER, ROOT_PREFIX)})
+secFileConfigs:AddLabel({
+    Text = fsAvailable() and T("lbl_fs_available") or T("lbl_fs_unavailable"),
+    Color = fsAvailable() and Theme.Success or Theme.Warning,
+})
+
+local fileNameRef = secFileConfigs:AddInput({
+    Name = "lbl_config_name", Placeholder = "ph_my_config", Value = "",
+    Tooltip = "tt_config_name",
+})
+
+local configsList = listDiskConfigs()
+local configDropdownRef = secFileConfigs:AddDropdown({
+    Name = "lbl_saved_configs",
+    Value = (#configsList > 0) and configsList[1] or "",
+    List = configsList,
+    Tooltip = "tt_saved_configs",
+})
+
+local function refreshConfigDropdown()
+    local list = listDiskConfigs()
+    if configDropdownRef and configDropdownRef._setList then
+        configDropdownRef._setList(list)
+    end
+    if configDropdownRef then
+        configDropdownRef._setValue(#list > 0 and list[1] or "")
+    end
+end
+
+secFileConfigs:AddDivider({Text = "lbl_actions"})
+
+secFileConfigs:AddButton({Name = "btn_save_file", Callback = function()
+    local name = fileNameRef:Get()
+    if not name or name == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    if not fsAvailable() then
+        local str = Window:ExportSettings()
+        if str and trySetClipboard(str) then
+            Notify("airhubUI", T("n_fs_unavail_clipboard"), "warning", 5)
+        elseif str then
+            print("[airhubUI Config] " .. str)
+            Notify("airhubUI", T("n_fs_unavail_console"), "warning", 5)
+        end
+        return
+    end
+    local ok, err = Window:SaveConfigToDisk(name)
+    if ok then
+        Notify("airhubUI", T("n_saved_to", name), "success", 5)
+        refreshConfigDropdown()
+    else
+        Notify("airhubUI", T("n_save_failed", tostring(err)), "error", 8)
+    end
+end, Tooltip = "tt_save_file"})
+
+secFileConfigs:AddButton({Name = "btn_load_file", Callback = function()
+    local name = configDropdownRef:Get() or fileNameRef:Get()
+    if not name or name == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    if not fsAvailable() then
+        local str = tryGetClipboard()
+        if str and str ~= "" then
+            local ok, err = Window:ImportSettings(str)
+            if ok then Notify("airhubUI", T("n_loaded_clipboard"), "success")
+            else Notify("airhubUI", T("n_invalid", tostring(err)), "error") end
+        else Notify("airhubUI", T("n_clipboard_empty"), "error") end
+        return
+    end
+    local ok, err = Window:LoadConfigFromDisk(name)
+    if ok then Notify("airhubUI", T("n_loaded", name), "success")
+    else Notify("airhubUI", T("n_load_failed", tostring(err)), "error", 8) end
+end, Tooltip = "tt_load_file"})
+
+secFileConfigs:AddButton({Name = "btn_delete_file", Callback = function()
+    local name = configDropdownRef:Get() or fileNameRef:Get()
+    if not name or name == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    if not canDelete() then Notify("airhubUI", T("n_delfile_missing"), "error"); return end
+    local ok, err = Window:DeleteConfigFromDisk(name)
+    if ok then
+        Notify("airhubUI", T("n_deleted", name), "warning")
+        refreshConfigDropdown()
+    else
+        Notify("airhubUI", T("n_delete_failed", tostring(err or "?")), "error", 8)
+    end
+end, Tooltip = "tt_delete_file"})
+
+secFileConfigs:AddButton({Name = "btn_refresh_list", Callback = function()
+    refreshConfigDropdown()
+    Notify("airhubUI", T("n_list_refreshed"), "info", 1.5)
+end, Tooltip = "tt_refresh_list"})
+
+local secClipboard = tabConfigs:CreateSection({Name = "sec_clipboard", Side = "Right"})
+secClipboard:AddLabel({Text = "lbl_clipboard_fallback_hint"})
+secClipboard:AddButton({Name = "btn_copy_clipboard", Callback = function()
+    local str = Window:ExportSettings()
+    if not str then Notify("airhubUI", "Export failed", "error"); return end
+    local ok = trySetClipboard(str)
+    if ok then Notify("airhubUI", T("n_copied"), "success")
+    else
+        print("[airhubUI Config] " .. str)
+        Notify("airhubUI", T("n_fs_unavail_console"), "warning")
+    end
+end, Tooltip = "tt_copy_clipboard"})
+secClipboard:AddButton({Name = "btn_paste_clipboard", Callback = function()
+    local str = tryGetClipboard()
+    if not str or str == "" then Notify("airhubUI", T("n_clipboard_empty"), "error"); return end
+    local ok, err = Window:ImportSettings(str)
+    if ok then Notify("airhubUI", T("n_loaded_clipboard"), "success")
+    else Notify("airhubUI", T("n_invalid", tostring(err)), "error") end
+end, Tooltip = "tt_paste_clipboard"})
+
+local secCustom = tabConfigs:CreateSection({Name = "sec_inmemory"})
+secCustom:AddLabel({Text = "lbl_inmemory_hint"})
+local presetNameRef = secCustom:AddInput({
+    Name = "lbl_preset_name", Placeholder = "ph_my_preset", Value = "",
+    Tooltip = "tt_preset_name"})
+local customPresets = {}
+secCustom:AddButton({Name = "btn_save_preset", Callback = function()
+    local n = presetNameRef:Get()
+    if not n or n == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    local str = Window:ExportSettings()
+    if not str then Notify("airhubUI", "Export failed", "error"); return end
+    customPresets[n] = str
+    Notify("airhubUI", T("n_preset_saved", n), "success")
+end, Tooltip = "tt_save_preset"})
+secCustom:AddButton({Name = "btn_load_preset", Callback = function()
+    local n = presetNameRef:Get()
+    if not n or n == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    if not customPresets[n] then Notify("airhubUI", T("n_preset_not_found", n), "error"); return end
+    local ok, err = Window:ImportSettings(customPresets[n])
+    if ok then Notify("airhubUI", T("n_loaded", n), "success")
+    else Notify("airhubUI", T("n_load_failed", tostring(err)), "error") end
+end, Tooltip = "tt_load_preset"})
+secCustom:AddButton({Name = "btn_delete_preset", Callback = function()
+    local n = presetNameRef:Get()
+    if not n or n == "" then Notify("airhubUI", T("n_enter_name"), "warning"); return end
+    customPresets[n] = nil
+    Notify("airhubUI", T("n_preset_deleted", n), "warning")
+end, Tooltip = "tt_delete_preset"})
+
+-- ══════════════════════════════════════════════════════════════
 -- BINDS TAB
--- ============================================================
-local tabBinds = Window:AddTab({Name = "Binds", Icon = ">"})
-local secBindsList = tabBinds:CreateSection({Name = "Active Binds"})
-secBindsList:AddLabel({Text = "MMB (клик колесом) на любую строку — открыть меню биндов."})
-secBindsList:AddLabel({Text = "Кейбинды работают через свою клавишу, независимо от меню."})
-secBindsList:AddDivider({Text = "LIVE STATUS"})
+-- ══════════════════════════════════════════════════════════════
+local tabBinds = Window:AddTab({Name = "tab_binds", Icon = ">"})
+local secBindsList = tabBinds:CreateSection({Name = "sec_active_binds"})
+secBindsList:AddLabel({Text = "lbl_binds_hint1"})
+secBindsList:AddLabel({Text = "lbl_binds_hint2"})
+secBindsList:AddLabel({Text = "lbl_binds_hint3", Color = Theme.Muted})
+secBindsList:AddDivider({Text = "lbl_live_status"})
 
 local lf = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,0,0),
     AutomaticSize = Enum.AutomaticSize.Y}, secBindsList.Content)
 new("UIListLayout", {Padding = UDim.new(0,4)}, lf)
-
 local liveBindEntries = {}
-
-local refreshingBinds = false
 local function refreshBinds()
-    if refreshingBinds then return end
-    refreshingBinds = true
     for _, c in ipairs(lf:GetChildren()) do
         if not c:IsA("UIListLayout") then c:Destroy() end
     end
     liveBindEntries = {}
-
     local any = false
     for _, id in ipairs(BindOrder) do
         local b = BindRegistry[id]
@@ -2940,75 +2993,48 @@ local function refreshBinds()
             any = true
             local r = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,34)}, lf)
             themeBg(r, "Element"); addCorner(r, UDim.new(0,8)); addStroke(r, Theme.Outline, 1, 0.35)
-            r:SetAttribute("SearchName", string.lower(b.name or ""))
-
-            local firstMode = b.keys[1].mode
-            local strip = new("Frame", {BackgroundColor3 = MODE_COLORS[firstMode] or Theme.Accent,
+            local strip = new("Frame", {BackgroundColor3 = MODE_COLORS[b.keys[1].mode] or Theme.Accent,
                 BorderSizePixel = 0, Position = UDim2.new(0,10,0.5,-8),
                 Size = UDim2.new(0,3,0,16)}, r)
             addCorner(strip, UDim.new(1,0))
-
             local dot = new("Frame", {BackgroundColor3 = Theme.Muted, BorderSizePixel = 0,
                 Position = UDim2.new(0,22,0.5,-5), Size = UDim2.new(0,10,0,10)}, r)
             addCorner(dot, UDim.new(1,0))
-
             local nameLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,42,0,0),
                 Size = UDim2.new(0.5,-46,1,0), Font = Config.CurrentFontFamily, Text = b.name,
                 TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
                 TextTruncate = Enum.TextTruncate.AtEnd}, r)
             themeText(nameLbl, "Text")
-
-            local ks = ""
-            for i, e in ipairs(b.keys) do
-                ks = ks .. (i>1 and "  " or "") .. keyName(e.key) .. " [" .. (MODE_SHORT[e.mode] or "?") .. "]"
-            end
-            local keysLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0.5,0,0,0),
-                Size = UDim2.new(0.3,-10,1,0), Font = Config.CurrentFontFamily, Text = ks,
-                TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd}, r)
-            themeText(keysLbl, "SubText")
-
             local statusLbl = new("TextLabel", {BackgroundTransparency = 1,
                 Position = UDim2.new(1,-76,0,0), Size = UDim2.new(0,42,1,0),
                 Font = Config.CurrentFontFamily, Text = "OFF", TextSize = 11,
                 TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Right}, r)
-
             local del = new("TextButton", {BackgroundColor3 = Theme.Danger, BackgroundTransparency = 0.85,
                 BorderSizePixel = 0, Position = UDim2.new(1,-30,0.5,-10), Size = UDim2.new(0,20,0,20),
                 Font = Config.CurrentFontFamily, Text = "x", TextColor3 = Theme.Danger,
                 TextSize = 11, AutoButtonColor = false}, r)
             addCorner(del, UDim.new(0,6))
-            del.MouseEnter:Connect(function() tween(del, {BackgroundTransparency = 0, TextColor3 = Theme.OnAccent}) end)
-            del.MouseLeave:Connect(function() tween(del, {BackgroundTransparency = 0.85, TextColor3 = Theme.Danger}) end)
-            del.MouseButton1Click:Connect(function()
-                ClearBind(id, true); refreshBinds()
-            end)
-
-            liveBindEntries[id] = {row = r, dot = dot, statusLbl = statusLbl, bind = b, strip = strip}
+            del.MouseButton1Click:Connect(function() ClearBind(id); refreshBinds() end)
+            liveBindEntries[id] = {row = r, dot = dot, statusLbl = statusLbl, bind = b}
         end
     end
     if not any then
         local empty = new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,0,22),
-            Font = Config.CurrentFontFamily, Text = "Пусто. Наведи MMB на любой компонент.",
+            Font = Config.CurrentFontFamily, Text = T("lbl_binds_empty"),
             TextSize = 10, TextWrapped = true}, lf)
         themeText(empty, "Muted")
     end
-    refreshingBinds = false
 end
-
-secBindsList:AddButton({Name = "Refresh", Callback = refreshBinds})
-secBindsList:AddButton({Name = "Clear All (Reset)", Callback = function()
+secBindsList:AddButton({Name = "btn_binds_refresh", Callback = refreshBinds, Tooltip = "tt_binds_refresh"})
+secBindsList:AddButton({Name = "btn_binds_clear", Callback = function()
     for _, id in ipairs(BindOrder) do
-        if BindRegistry[id] then ClearBind(id, true) end
+        if BindRegistry[id] then ClearBind(id) end
     end
     refreshBinds()
-    Notify("Binds", "All binds cleared", "warning")
-end})
+    Notify("airhubUI", T("n_binds_cleared"), "warning")
+end, Tooltip = "tt_binds_clear"})
 refreshBinds()
 
--- ============================================================
--- LIVE STATE UPDATER
--- ============================================================
 task.spawn(function()
     while true do
         for id, entry in pairs(liveBindEntries) do
@@ -3029,7 +3055,10 @@ task.spawn(function()
     end
 end)
 
-getgenv().airUI = airUILib
-getgenv().airUI_Window = Window
+-- ══════════════════════════════════════════════════════════════
+-- EXPORT
+-- ══════════════════════════════════════════════════════════════
+getgenv().airhubUI = airhubUILib
+getgenv().airhubUI_Window = Window
 
-return airUILib
+return airhubUILib
