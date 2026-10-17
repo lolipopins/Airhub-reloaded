@@ -1,13 +1,11 @@
---// AirHub - 04_wallhack.lua v3 (merged with ServerPosition)
---// CHANGES v3:
---//  - Glow → Chams section (renamed + expanded with all modes)
---//  - Chams now supports: Fill | Outline | Both | Pulse | Texture | Wireframe
---//  - Chams settings: FillColor/FillTransparency + OutlineColor/OutlineTransparency
---//    + AlwaysOnTop + TextureId/Transparency/Faces
---//  - Enemy texture chams via per-part Decals (like self)
---//  - Self ESP: dividers "Chams" / "China Hat" + clean names (Mode, Fill Color, ...)
---//  - Backward compat: GlowSettings alias kept; old Color/Transparency still read
---//  - RU + tooltips for all new keys
+--// AirHub - 04_wallhack.lua v4 (merged with ServerPosition)
+--// CHANGES v4:
+--//  - China Hat: real cone from stacked CylinderParts (materials apply per-part)
+--//    No more SpecialMesh file mesh (rbxassetid://1033714).
+--//  - Texture Chams: preset dropdown with built-in patterns + Custom ID fallback
+--//    Presets: Studs/Inlet/Smooth (rbxasset:// bundled), Grid/Checker/Carbon/
+--    Hexagon/Camo/Holographic (community asset IDs), None, Custom.
+--//  - Migration: old TextureId → TexturePreset = "Custom" (or "None" if empty)
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -32,13 +30,12 @@ WallHack.Visuals.BoxSettings = WallHack.Visuals.BoxSettings or {
     Transparency = 0.7, Thickness = 1, Filled = false, Increase = 1,
 }
 
--- CHANGED: GlowSettings → ChamsSettings (with alias for compat)
+-- Enemy Chams (was Glow) with texture preset
 do
     local existing = WallHack.Visuals.ChamsSettings or WallHack.Visuals.GlowSettings
     if existing and existing.FillColor then
         WallHack.Visuals.ChamsSettings = existing
     else
-        -- Migrate old GlowSettings → ChamsSettings, or create fresh
         local old = existing or {}
         WallHack.Visuals.ChamsSettings = {
             Enabled = old.Enabled ~= false,
@@ -48,12 +45,19 @@ do
             OutlineColor = old.OutlineColor or old.Color or Color3.fromRGB(0, 255, 255),
             OutlineTransparency = old.OutlineTransparency or old.Transparency or 0.5,
             AlwaysOnTop = old.AlwaysOnTop ~= false,
-            TextureId = old.TextureId or "",
-            TextureTransparency = old.TextureTransparency or 0.3,
-            TextureFaces = old.TextureFaces or "Front",
+            TexturePreset = "None",
+            TextureId = "",
+            TextureTransparency = 0.3,
+            TextureFaces = "Front",
         }
     end
-    -- Backward compat alias
+    -- Migration: old TextureId → TexturePreset
+    local C = WallHack.Visuals.ChamsSettings
+    if C.TexturePreset == nil then
+        local tid = C.TextureId or ""
+        C.TexturePreset = (tid == "" or tid == "rbxassetid://0") and "None" or "Custom"
+    end
+    if C.TextureId == nil then C.TextureId = "" end
     WallHack.Visuals.GlowSettings = WallHack.Visuals.ChamsSettings
 end
 local Chams = WallHack.Visuals.ChamsSettings
@@ -75,6 +79,7 @@ WallHack.Visuals.NameSettings = WallHack.Visuals.NameSettings or {
     Enabled = false, Color = Color3.fromRGB(255, 255, 255),
     Size = 14, ShowDistance = true, ShowHealth = true,
 }
+
 WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
     Enabled = false,
     Chams = {
@@ -82,7 +87,8 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         FillColor = Color3.fromRGB(90, 140, 255), FillTransparency = 0.4,
         OutlineColor = Color3.fromRGB(255, 255, 255), OutlineTransparency = 0.0,
         AlwaysOnTop = true,
-        TextureId = "rbxassetid://0",
+        TexturePreset = "None",
+        TextureId = "",
         TextureTransparency = 0.3,
         TextureFaces = "Front",
     },
@@ -91,11 +97,24 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
         Size = 4, OffsetY = 1.8, Transparency = 0, Rotation = 0,
-        UseMesh = true,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
     },
 }
+-- Migration: SelfESP.Chams texture
+do
+    local C = WallHack.Visuals.SelfESP.Chams
+    if C.TexturePreset == nil then
+        local tid = C.TextureId or ""
+        C.TexturePreset = (tid == "" or tid == "rbxassetid://0") and "None" or "Custom"
+    end
+    if C.TextureId == nil then C.TextureId = "" end
+    -- Remove obsolete UseMesh from ChinaHat (no longer relevant)
+    if WallHack.Visuals.SelfESP.ChinaHat.UseMesh ~= nil then
+        WallHack.Visuals.SelfESP.ChinaHat.UseMesh = nil
+    end
+end
+
 WallHack.Internal = WallHack.Internal or {
     HUD = {
         Elements = {}, Conn = nil, Frames = 0,
@@ -105,7 +124,7 @@ WallHack.Internal = WallHack.Internal or {
     },
     SelfESP = {
         Highlight = nil, TextureDecals = {},
-        HatPart = nil, HatHead = nil,
+        HatData = nil, HatHead = nil,
         HatConn = nil, CharConn = nil, HatFolder = nil,
         ResolvedMaterial = Enum.Material.Neon,
         LastSchemaMaterial = nil, LastAppliedMaterial = nil,
@@ -157,6 +176,42 @@ local okInit, errInit = pcall(function()
         return true
     end
 
+    -- ========================================================================
+    -- TEXTURE PRESETS — built-in patterns for Texture Chams
+    -- ========================================================================
+    -- rbxasset:// paths are bundled with the Roblox client (no moderation risk)
+    -- rbxassetid:// IDs are community-sourced; may need replacing if moderated
+    local TEXTURE_PRESETS = {
+        ["None"]        = "",
+        ["Studs"]       = "rbxasset://textures/SurfacesDefault/StudsTop.png",
+        ["Inlet"]       = "rbxasset://textures/SurfacesDefault/InletTop.png",
+        ["Smooth"]      = "rbxasset://textures/SurfacesDefault/SmoothTop.png",
+        ["Grid"]        = "rbxassetid://4146655767",
+        ["Checker"]     = "rbxassetid://6475342416",
+        ["Carbon"]      = "rbxassetid://4029816438",
+        ["Hexagon"]     = "rbxassetid://5288955706",
+        ["Camo"]        = "rbxassetid://6454509901",
+        ["Holographic"] = "rbxassetid://9791343999",
+        ["Custom"]      = "custom",
+    }
+    local TEXTURE_PRESET_LIST = {
+        "None", "Studs", "Inlet", "Smooth",
+        "Grid", "Checker", "Carbon", "Hexagon", "Camo", "Holographic", "Custom",
+    }
+
+    local function resolveTexture(C)
+        local preset = C.TexturePreset or "None"
+        if preset == "Custom" then
+            local id = C.TextureId or ""
+            if id == "" or id == "rbxassetid://0" then return "" end
+            return id
+        end
+        return TEXTURE_PRESETS[preset] or ""
+    end
+
+    -- ========================================================================
+    -- MATERIALS
+    -- ========================================================================
     local VALID_PART_MATERIALS = {
         "Plastic", "SmoothPlastic", "Neon", "Wood", "WoodPlanks",
         "Marble", "Slate", "Concrete", "Granite", "Brick",
@@ -208,25 +263,20 @@ local okInit, errInit = pcall(function()
         if sa then pcall(function() sa:Destroy() end) end
     end
 
-    local function ensureMeshNeutral(part)
-        if not part then return end
-        local mesh = part:FindFirstChildOfClass("SpecialMesh")
-        if mesh then
-            pcall(function()
-                mesh.TextureId = ""
-                mesh.VertexColor = Vector3.new(1, 1, 1)
-            end)
-        end
-    end
-
     local function applyMaterialToPart(part, materialEnum)
         if not part or not part.Parent then return end
         if not materialEnum or typeof(materialEnum) ~= "EnumItem" then return end
         if materialEnum.EnumType ~= Enum.Material then return end
         stripMaterialOverrides(part)
-        ensureMeshNeutral(part)
         if part.Material ~= materialEnum then
             pcall(function() part.Material = materialEnum end)
+        end
+    end
+
+    local function applyMaterialToHatLayers(hatData, materialEnum)
+        if not hatData or not hatData.layers then return end
+        for _, part in ipairs(hatData.layers) do
+            applyMaterialToPart(part, materialEnum)
         end
     end
 
@@ -242,8 +292,8 @@ local okInit, errInit = pcall(function()
         WallHack.Visuals.SelfESP.ChinaHat.Material = resolved.Name
         WallHack.Internal.SelfESP.ResolvedMaterial = resolved
         local Se = WallHack.Internal.SelfESP
-        if Se.HatPart then
-            applyMaterialToPart(Se.HatPart, resolved)
+        if Se.HatData then
+            applyMaterialToHatLayers(Se.HatData, resolved)
             Se.LastAppliedMaterial = resolved
         end
         return resolved
@@ -401,7 +451,7 @@ local okInit, errInit = pcall(function()
     }
 
     -- ========================================================================
-    -- SELF ESP — Highlight Chams + Texture + Wireframe
+    -- SELF ESP
     -- ========================================================================
     local function applyChamsProps(hl)
         local C = WallHack.Visuals.SelfESP.Chams
@@ -436,14 +486,15 @@ local okInit, errInit = pcall(function()
             end
         end
     end
+
     local function applySelfTextureChams(char)
         local Se = WallHack.Internal.SelfESP
         local C  = WallHack.Visuals.SelfESP.Chams
-        local texId = C.TextureId or ""
+        local texPath = resolveTexture(C)
         local texTrans = math.clamp(tonumber(C.TextureTransparency) or 0.3, 0, 1)
         local faces = (C.TextureFaces == "AllFaces") and TEXTURE_FACES_ALL or TEXTURE_FACES_FRONT
 
-        if not texId or texId == "" or texId == "rbxassetid://0" then
+        if texPath == "" then
             removeSelfTextureChams(char)
             return
         end
@@ -455,7 +506,7 @@ local okInit, errInit = pcall(function()
                 for _, face in ipairs(faces) do
                     local decal = Instance.new("Decal")
                     decal.Name = "AirHubTC__" .. face.Name
-                    decal.Texture = texId
+                    decal.Texture = texPath
                     decal.Face = face
                     decal.Transparency = texTrans
                     decal.Parent = part
@@ -514,9 +565,10 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- CHINA HAT
+    -- CHINA HAT — real cone from stacked CylinderParts
     -- ========================================================================
-    local HAT_CONE_MESH = "rbxassetid://1033714"
+    local HAT_LAYERS = 10
+    local HAT_HEIGHT_RATIO = 0.7  -- total height = baseSize * ratio
 
     local function getHatFolder()
         local Se = WallHack.Internal.SelfESP
@@ -530,42 +582,103 @@ local okInit, errInit = pcall(function()
         return existing
     end
 
+    local function computeLayerRadius(i, baseSize, N)
+        local t0 = (i - 1) / N
+        local t1 = i / N
+        local rBottom = baseSize * (1 - t0)
+        local rTop    = baseSize * (1 - t1)
+        -- slight overlap so layers visually merge into a smooth cone
+        return math.max((rBottom + rTop) * 0.5, rBottom * 0.98), (rBottom + rTop) * 0.5
+    end
+
     local function buildHat(head)
         local C  = WallHack.Visuals.SelfESP.ChinaHat
         local Se = WallHack.Internal.SelfESP
         local resolved = setChinaHatMaterialInternal(C.Material, true)
         Se.LastSchemaMaterial = C.Material
 
-        local hat = Instance.new("Part")
-        hat.Name = "AirHubChinaHat"
-        if not C.UseMesh then hat.Shape = Enum.PartType.Ball end
-        hat.Size  = Vector3.new(1, 1, 1)
-        hat.Anchored   = true
-        hat.CanCollide = false
-        hat.CanQuery   = false
-        hat.CanTouch   = false
-        hat.Massless   = true
-        hat.CastShadow = false
-        hat.Color      = SafeColor(C.Color, Color3.fromRGB(255,60,60))
-        hat.Transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
-        hat.LocalTransparencyModifier = 0
-        hat.CFrame = head.CFrame * CFrame.new(0, C.OffsetY, 0)
-        hat.Parent = getHatFolder()
+        local folder = Instance.new("Folder")
+        folder.Name = "AirHubChinaHat"
+        folder.Parent = getHatFolder()
 
-        if C.UseMesh then
-            local mesh = Instance.new("SpecialMesh")
-            mesh.Name     = "AirHubHatMesh"
-            mesh.MeshType = Enum.MeshType.FileMesh
-            mesh.MeshId   = HAT_CONE_MESH
-            pcall(function() mesh.TextureId = "" end)
-            pcall(function() mesh.VertexColor = Vector3.new(1, 1, 1) end)
-            mesh.Scale    = Vector3.new(C.Size, C.Size * 0.7, C.Size)
-            mesh.Parent = hat
+        local baseSize = tonumber(C.Size) or 4
+        local totalHeight = baseSize * HAT_HEIGHT_RATIO
+        local layerH = totalHeight / HAT_LAYERS
+        local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
+        local transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
+
+        local layers = {}
+        for i = 1, HAT_LAYERS do
+            local _, rForPart = computeLayerRadius(i, baseSize, HAT_LAYERS)
+            local yPos = (i - 0.5) * layerH
+
+            local part = Instance.new("Part")
+            part.Name = "AirHubHatLayer" .. i
+            part.Anchored = true
+            part.CanCollide = false
+            part.CanQuery = false
+            part.CanTouch = false
+            part.Massless = true
+            part.CastShadow = false
+            part.Shape = Enum.PartType.Cylinder
+            part.Color = color
+            part.Transparency = transparency
+            part.LocalTransparencyModifier = 0
+            part.Material = resolved
+            -- Cylinder axis is X; rotate by Z 90° to make it vertical
+            part.Size = Vector3.new(layerH * 1.02, rForPart * 2, rForPart * 2)
+            part.CFrame = head.CFrame
+                * CFrame.new(0, C.OffsetY + yPos, 0)
+                * CFrame.Angles(0, 0, math.pi / 2)
+            part.Parent = folder
+            table.insert(layers, part)
         end
 
-        applyMaterialToPart(hat, resolved)
         Se.LastAppliedMaterial = resolved
-        return hat
+        return { folder = folder, layers = layers }
+    end
+
+    local function updateHatFrame(hatData, head, C, resolved)
+        if not hatData or not hatData.folder or not hatData.folder.Parent then return end
+        local baseSize = tonumber(C.Size) or 4
+        local totalHeight = baseSize * HAT_HEIGHT_RATIO
+        local N = #hatData.layers
+        if N == 0 then return end
+        local layerH = totalHeight / N
+
+        local color
+        if C.Rainbow then
+            local hue = (os.clock() * (C.RainbowSpeed or 0.5)) % 1
+            color = Color3.fromHSV(hue, 1, 1)
+        else
+            color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
+        end
+        local transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
+
+        local angle
+        if C.AutoRotate then
+            angle = (os.clock() * (C.RotateSpeed or 90)) % 360
+        else
+            angle = C.Rotation or 0
+        end
+
+        for i, part in ipairs(hatData.layers) do
+            if part and part.Parent then
+                local _, rForPart = computeLayerRadius(i, baseSize, N)
+                local yPos = (i - 0.5) * layerH
+
+                part.Size = Vector3.new(layerH * 1.02, rForPart * 2, rForPart * 2)
+                part.Color = color
+                part.Transparency = transparency
+                part.LocalTransparencyModifier = 0
+                part.Material = resolved
+
+                part.CFrame = head.CFrame
+                    * CFrame.new(0, C.OffsetY + yPos, 0)
+                    * CFrame.Angles(0, math.rad(angle), 0)
+                    * CFrame.Angles(0, 0, math.pi / 2)
+            end
+        end
     end
 
     local function stopHatLoop()
@@ -577,7 +690,10 @@ local okInit, errInit = pcall(function()
     local function removeChinaHat()
         stopHatLoop()
         local Se = WallHack.Internal.SelfESP
-        if Se.HatPart then pcall(function() Se.HatPart:Destroy() end); Se.HatPart = nil end
+        if Se.HatData and Se.HatData.folder then
+            pcall(function() Se.HatData.folder:Destroy() end)
+        end
+        Se.HatData = nil
         Se.HatHead = nil
         Se.LastAppliedMaterial = nil
     end
@@ -592,68 +708,30 @@ local okInit, errInit = pcall(function()
                 local head = char and char:FindFirstChild("Head")
                 if head then Se.HatHead = head else return end
             end
-            if not Se.HatPart or not Se.HatPart.Parent then
-                Se.HatPart = buildHat(Se.HatHead)
+            if not Se.HatData or not Se.HatData.folder or not Se.HatData.folder.Parent then
+                Se.HatData = buildHat(Se.HatHead)
             end
-            local hat  = Se.HatPart
-            local head = Se.HatHead
-            local C    = WallHack.Visuals.SelfESP.ChinaHat
 
+            local C = WallHack.Visuals.SelfESP.ChinaHat
+
+            -- Material change detection
             if Se.LastSchemaMaterial ~= C.Material then
                 local newResolved = setChinaHatMaterialInternal(C.Material, true)
                 Se.LastSchemaMaterial = C.Material
-                if hat and newResolved then
-                    applyMaterialToPart(hat, newResolved)
+                if Se.HatData and newResolved then
+                    applyMaterialToHatLayers(Se.HatData, newResolved)
                     Se.LastAppliedMaterial = newResolved
                 end
             end
 
-            local mesh = hat:FindFirstChild("AirHubHatMesh")
-            if C.UseMesh then
-                if not mesh then
-                    mesh = Instance.new("SpecialMesh")
-                    mesh.Name = "AirHubHatMesh"
-                    mesh.MeshType = Enum.MeshType.FileMesh
-                    mesh.MeshId = HAT_CONE_MESH
-                    pcall(function() mesh.TextureId = "" end)
-                    pcall(function() mesh.VertexColor = Vector3.new(1, 1, 1) end)
-                    mesh.Parent = hat
-                end
-                local wantScale = Vector3.new(C.Size, C.Size * 0.7, C.Size)
-                if mesh.Scale ~= wantScale then mesh.Scale = wantScale end
-                if hat.Shape ~= Enum.PartType.Block then hat.Shape = Enum.PartType.Block end
-            else
-                if mesh then pcall(function() mesh:Destroy() end); mesh = nil end
-                if hat.Shape ~= Enum.PartType.Ball then hat.Shape = Enum.PartType.Ball end
-                local wantSize = Vector3.new(C.Size * 1.6, C.Size * 0.55, C.Size * 1.6)
-                if hat.Size ~= wantSize then hat.Size = wantSize end
-            end
-
-            hat.LocalTransparencyModifier = 0
-            hat.Transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
-            if C.Rainbow then
-                local hue = (os.clock() * (C.RainbowSpeed or 0.5)) % 1
-                hat.Color = Color3.fromHSV(hue, 1, 1)
-            else
-                hat.Color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
-            end
-
+            -- Ensure ResolvedMaterial in sync
             local resolved = Se.ResolvedMaterial or Enum.Material.Neon
-            if Se.LastAppliedMaterial ~= resolved or hat.Material ~= resolved then
-                applyMaterialToPart(hat, resolved)
+            if Se.LastAppliedMaterial ~= resolved then
+                applyMaterialToHatLayers(Se.HatData, resolved)
                 Se.LastAppliedMaterial = resolved
             end
 
-            if not hat.Anchored then hat.Anchored = true end
-            local angle
-            if C.AutoRotate then
-                angle = (os.clock() * (C.RotateSpeed or 90)) % 360
-            else
-                angle = C.Rotation or 0
-            end
-            hat.CFrame = head.CFrame
-                * CFrame.new(0, C.OffsetY, 0)
-                * CFrame.Angles(0, math.rad(angle), 0)
+            updateHatFrame(Se.HatData, Se.HatHead, C, resolved)
         end)
     end
 
@@ -666,11 +744,13 @@ local okInit, errInit = pcall(function()
         end
         local head = char:FindFirstChild("Head")
         if head then
-            if Se.HatPart and Se.HatPart.Parent then
+            if Se.HatData and Se.HatData.folder and Se.HatData.folder.Parent then
                 Se.HatHead = head
             else
-                if Se.HatPart then pcall(function() Se.HatPart:Destroy() end); Se.HatPart = nil end
-                Se.HatPart = buildHat(head)
+                if Se.HatData and Se.HatData.folder then
+                    pcall(function() Se.HatData.folder:Destroy() end)
+                end
+                Se.HatData = buildHat(head)
                 Se.HatHead = head
             end
         end
@@ -709,15 +789,15 @@ local okInit, errInit = pcall(function()
         local C  = WallHack.Visuals.SelfESP.ChinaHat
         local resolved = setChinaHatMaterialInternal(C.Material, false)
         Se.LastSchemaMaterial = C.Material
-        if Se.HatPart then
-            applyMaterialToPart(Se.HatPart, resolved)
+        if Se.HatData then
+            applyMaterialToHatLayers(Se.HatData, resolved)
             Se.LastAppliedMaterial = resolved
         end
         return resolved.Name
     end
 
     -- ========================================================================
-    -- ENEMY CHAMS (was Glow) — full modes
+    -- ENEMY CHAMS (was Glow)
     -- ========================================================================
     local function removeEnemyTextureChams(data)
         if not data.TextureDecals then return end
@@ -728,11 +808,11 @@ local okInit, errInit = pcall(function()
     end
     local function applyEnemyTextureChams(data, char)
         local C = WallHack.Visuals.ChamsSettings
-        local texId = C.TextureId or ""
+        local texPath = resolveTexture(C)
         local texTrans = math.clamp(tonumber(C.TextureTransparency) or 0.3, 0, 1)
         local faces = (C.TextureFaces == "AllFaces") and TEXTURE_FACES_ALL or TEXTURE_FACES_FRONT
 
-        if not texId or texId == "" or texId == "rbxassetid://0" then
+        if texPath == "" then
             removeEnemyTextureChams(data)
             return
         end
@@ -744,7 +824,7 @@ local okInit, errInit = pcall(function()
                 for _, face in ipairs(faces) do
                     local decal = Instance.new("Decal")
                     decal.Name = "AirHubETC__" .. face.Name
-                    decal.Texture = texId
+                    decal.Texture = texPath
                     decal.Face = face
                     decal.Transparency = texTrans
                     decal.Parent = part
@@ -774,7 +854,6 @@ local okInit, errInit = pcall(function()
 
         local mode = C.Mode or "Outline"
 
-        -- Texture mode branch
         if mode == "Texture" then
             if data.Glow and data.Glow.Parent then
                 pcall(function() data.Glow:Destroy() end)
@@ -786,7 +865,6 @@ local okInit, errInit = pcall(function()
             removeEnemyTextureChams(data)
         end
 
-        -- Highlight-based modes
         if not data.Glow or not data.Glow.Parent or data.Glow.Adornee ~= char then
             if data.Glow then pcall(function() data.Glow:Destroy() end) end
             local hl = Instance.new("Highlight")
@@ -1195,6 +1273,11 @@ local okInit, errInit = pcall(function()
         for i, n in ipairs(VALID_PART_MATERIALS) do out[i] = n end
         return out
     end
+    WallHack.Functions.ListTexturePresets = function()
+        local out = {}
+        for i, n in ipairs(TEXTURE_PRESET_LIST) do out[i] = n end
+        return out
+    end
     WallHack.Functions.ForceMaterialRefresh = ForceMaterialRefresh
 
     for _, materialName in ipairs(VALID_PART_MATERIALS) do
@@ -1210,6 +1293,7 @@ local okInit, errInit = pcall(function()
     WallHack.ApplyGlowToAll     = ApplyGlowToAll
     WallHack.ApplyGlowForPlayer = ApplyGlowForPlayer
     WallHack.SafeColor          = SafeColor
+    WallHack.ResolveTexture     = resolveTexture
 end)
 
 if not okInit then
@@ -1226,10 +1310,12 @@ if not okInit then
     WallHack.Functions.GetSelfESPEnabled   = WallHack.Functions.GetSelfESPEnabled   or function() return false end
     WallHack.Functions.GetChinaHatMaterial = WallHack.Functions.GetChinaHatMaterial or function() return nil end
     WallHack.Functions.ListValidMaterials  = WallHack.Functions.ListValidMaterials  or function() return {} end
+    WallHack.Functions.ListTexturePresets  = WallHack.Functions.ListTexturePresets  or function() return {"None"} end
     WallHack.SafeColor = function(c, fb) return fb or Color3.fromRGB(255,255,255) end
+    WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v3" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v4" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1408,7 +1494,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v3")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v4")
 end
 
 -- ============================================================================
@@ -1436,8 +1522,6 @@ do
             vis_hud_enabled = "Enable HUD", vis_hud_pos = "Position",
             vis_hud_players = "Show Players count", vis_hud_fps = "Show FPS",
             vis_hud_ping = "Show Ping", vis_hud_session = "Show Session time",
-
-            -- Chams (enemy)
             vis_chams_enabled = "Enabled",
             vis_chams_mode = "Mode",
             vis_chams_fill_color = "Fill Color",
@@ -1445,11 +1529,10 @@ do
             vis_chams_outline_color = "Outline Color",
             vis_chams_outline_transparency = "Outline Transparency",
             vis_chams_always_top = "Always on top",
-            vis_chams_texture_id = "Texture ID",
+            vis_chams_texture_preset = "Texture Preset",
+            vis_chams_texture_id = "Custom Texture ID",
             vis_chams_texture_transparency = "Texture Transparency",
             vis_chams_texture_faces = "Texture Faces",
-
-            -- Self ESP
             vis_se_enabled = "Enable Self ESP",
             vis_se_group_chams = "Chams",
             vis_se_group_hat = "China Hat",
@@ -1460,7 +1543,8 @@ do
             vis_se_outline_color = "Outline Color",
             vis_se_outline_transparency = "Outline Transparency",
             vis_se_always_top = "Always on top",
-            vis_se_texture_id = "Texture ID",
+            vis_se_texture_preset = "Texture Preset",
+            vis_se_texture_id = "Custom Texture ID",
             vis_se_texture_transparency = "Texture Transparency",
             vis_se_texture_faces = "Texture Faces",
             vis_se_hat_enabled = "Enabled",
@@ -1474,8 +1558,6 @@ do
             vis_se_hat_rainbow_speed = "Rainbow Speed",
             vis_se_hat_transparency = "Transparency",
             vis_se_hat_material = "Material",
-            vis_se_hat_usemesh = "Use Mesh",
-
             vis_sp_enabled = "Enabled", vis_sp_rgb = "RGB Color",
             vis_sp_strength = "Strength", vis_sp_maxlimb = "Max Limb Distance",
             vis_tracer_enabled = "Enabled", vis_tracer_color = "Color",
@@ -1502,8 +1584,6 @@ do
             tt_vis_hud_fps = "Show FPS",
             tt_vis_hud_ping = "Show ping in ms",
             tt_vis_hud_session = "Show session uptime",
-
-            -- Chams (enemy)
             tt_vis_chams_enabled = "Apply visual effect to enemy characters",
             tt_vis_chams_mode = "Fill = solid color | Outline = edges | Both | Pulse = animated | Texture = custom image | Wireframe = edges only",
             tt_vis_chams_fill_color = "Interior fill color",
@@ -1511,10 +1591,10 @@ do
             tt_vis_chams_outline_color = "Edge color",
             tt_vis_chams_outline_transparency = "Edge transparency",
             tt_vis_chams_always_top = "Render through walls",
-            tt_vis_chams_texture_id = "Roblox asset ID (rbxassetid://...) for texture chams on enemies",
+            tt_vis_chams_texture_preset = "Built-in pattern. Studs/Inlet/Smooth use bundled Roblox textures; Grid/Checker/Carbon/Hexagon/Camo/Holographic use community IDs. Custom = use your own rbxassetid below",
+            tt_vis_chams_texture_id = "Only used when preset = Custom. Paste rbxassetid://... here",
             tt_vis_chams_texture_transparency = "Texture image transparency",
             tt_vis_chams_texture_faces = "Front = 1 decal per part | AllFaces = 6 decals (heavier)",
-            -- Self ESP
             tt_vis_se_enabled = "Master switch for self chams and china hat",
             tt_vis_se_chams_enabled = "Apply visual effect to your own character",
             tt_vis_se_chams_mode = "Fill = solid | Outline = edges | Both | Texture = custom image | Wireframe = edges only",
@@ -1523,21 +1603,21 @@ do
             tt_vis_se_outline_color = "Edge color",
             tt_vis_se_outline_transparency = "Edge transparency",
             tt_vis_se_always_top = "Render through walls",
-            tt_vis_se_texture_id = "Roblox asset ID (rbxassetid://...) for texture chams",
+            tt_vis_se_texture_preset = "Built-in pattern. Studs/Inlet/Smooth use bundled Roblox textures; other presets use community IDs",
+            tt_vis_se_texture_id = "Only used when preset = Custom. Paste rbxassetid://... here",
             tt_vis_se_texture_transparency = "Texture image transparency",
             tt_vis_se_texture_faces = "Front = 1 decal per part | AllFaces = 6 decals",
             tt_vis_se_hat_enabled = "Show china hat above your head",
             tt_vis_se_hat_color = "Hat base color",
             tt_vis_se_hat_size = "Hat scale",
             tt_vis_se_hat_offset = "Vertical offset from head",
-            tt_vis_se_hat_rotation = "Fixed rotation (degrees, when Auto Rotate is OFF)",
-            tt_vis_se_hat_autoro = "Continuously rotate the hat",
+            tt_vis_se_hat_rotation = "Fixed rotation (degrees, when Auto Rotate is OFF). Note: smooth cylinder cone is radially symmetric — rotation has no visible effect",
+            tt_vis_se_hat_autoro = "Continuously rotate. Note: smooth cylinder cone is radially symmetric — rotation is not visually apparent",
             tt_vis_se_hat_rotospeed = "Rotation speed (degrees per second)",
             tt_vis_se_hat_rainbow = "Cycle through rainbow colors",
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
-            tt_vis_se_hat_material = "Roblox material for the hat",
-            tt_vis_se_hat_usemesh = "ON = cone mesh | OFF = ball (materials display better)",
+            tt_vis_se_hat_material = "Roblox material for each cone layer (materials apply to every part)",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
             tt_vis_sp_strength = "Prediction strength",
@@ -1572,7 +1652,8 @@ do
             vis_chams_outline_color = "Цвет обводки",
             vis_chams_outline_transparency = "Прозрачность обводки",
             vis_chams_always_top = "Сквозь стены",
-            vis_chams_texture_id = "ID текстуры",
+            vis_chams_texture_preset = "Пресет текстуры",
+            vis_chams_texture_id = "Свой ID текстуры",
             vis_chams_texture_transparency = "Прозрачность текстуры",
             vis_chams_texture_faces = "Грани текстуры",
             vis_se_enabled = "Включить сам ESP",
@@ -1585,7 +1666,8 @@ do
             vis_se_outline_color = "Цвет обводки",
             vis_se_outline_transparency = "Прозрачность обводки",
             vis_se_always_top = "Сквозь стены",
-            vis_se_texture_id = "ID текстуры",
+            vis_se_texture_preset = "Пресет текстуры",
+            vis_se_texture_id = "Свой ID текстуры",
             vis_se_texture_transparency = "Прозрачность текстуры",
             vis_se_texture_faces = "Грани текстуры",
             vis_se_hat_enabled = "Включена",
@@ -1599,7 +1681,6 @@ do
             vis_se_hat_rainbow_speed = "Скорость радуги",
             vis_se_hat_transparency = "Прозрачность",
             vis_se_hat_material = "Материал",
-            vis_se_hat_usemesh = "Использовать меш",
             vis_sp_enabled = "Включено", vis_sp_rgb = "RGB цвет",
             vis_sp_strength = "Сила", vis_sp_maxlimb = "Макс. дистанция конечности",
             vis_tracer_enabled = "Включены", vis_tracer_color = "Цвет",
@@ -1627,38 +1708,39 @@ do
             tt_vis_hud_ping = "Показывать пинг в мс",
             tt_vis_hud_session = "Показывать время работы",
             tt_vis_chams_enabled = "Применить визуальный эффект к врагам",
-            tt_vis_chams_mode = "Fill = сплошной | Outline = края | Both | Pulse = пульсация | Texture = картинка | Wireframe = только контур",
+            tt_vis_chams_mode = "Fill = сплошной | Outline = края | Both | Pulse = пульсация | Texture = картинка | Wireframe = контур",
             tt_vis_chams_fill_color = "Цвет внутренней заливки",
             tt_vis_chams_fill_transparency = "Прозрачность заливки",
             tt_vis_chams_outline_color = "Цвет краёв",
             tt_vis_chams_outline_transparency = "Прозрачность краёв",
             tt_vis_chams_always_top = "Отрисовывать сквозь стены",
-            tt_vis_chams_texture_id = "ID ассета Roblox (rbxassetid://...) для текстурных чамсов на врагах",
+            tt_vis_chams_texture_preset = "Встроенный паттерн. Studs/Inlet/Smooth — бандл Roblox; Grid/Checker/Carbon/Hexagon/Camo/Holographic — community IDs. Custom = свой rbxassetid ниже",
+            tt_vis_chams_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://... сюда",
             tt_vis_chams_texture_transparency = "Прозрачность картинки",
             tt_vis_chams_texture_faces = "Front = 1 decal на часть | AllFaces = 6 decals",
             tt_vis_se_enabled = "Главный выключатель чамсов и шляпы",
-            tt_vis_se_chams_enabled = "Применить визуальный эффект к своему персонажу",
-            tt_vis_se_chams_mode = "Fill = сплошной | Outline = края | Both | Texture = картинка | Wireframe = только контур",
+            tt_vis_se_chams_enabled = "Применить эффект к своему персонажу",
+            tt_vis_se_chams_mode = "Fill = сплошной | Outline = края | Both | Texture = картинка | Wireframe = контур",
             tt_vis_se_fill_color = "Цвет внутренней заливки",
             tt_vis_se_fill_transparency = "Прозрачность заливки",
             tt_vis_se_outline_color = "Цвет краёв",
             tt_vis_se_outline_transparency = "Прозрачность краёв",
-            tt_vis_se_always_top = "Отрисовывать сквозь стены",
-            tt_vis_se_texture_id = "ID ассета Roblox (rbxassetid://...) для текстурных чамсов",
+            tt_vis_se_always_top = "Сквозь стены",
+            tt_vis_se_texture_preset = "Встроенный паттерн. Studs/Inlet/Smooth — бандл Roblox; остальные — community IDs",
+            tt_vis_se_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://... сюда",
             tt_vis_se_texture_transparency = "Прозрачность картинки",
             tt_vis_se_texture_faces = "Front = 1 decal на часть | AllFaces = 6 decals",
             tt_vis_se_hat_enabled = "Показывать китайскую шляпу над головой",
             tt_vis_se_hat_color = "Базовый цвет шляпы",
             tt_vis_se_hat_size = "Масштаб шляпы",
             tt_vis_se_hat_offset = "Вертикальное смещение от головы",
-            tt_vis_se_hat_rotation = "Фиксированный поворот (градусы, при выкл. авто-вращении)",
-            tt_vis_se_hat_autoro = "Постоянно вращать шляпу",
+            tt_vis_se_hat_rotation = "Фиксированный поворот. Конус из цилиндров радиально симметричен — вращение визуально не заметно",
+            tt_vis_se_hat_autoro = "Постоянное вращение. Внимание: конус из цилиндров радиально симметричен — вращение не видно",
             tt_vis_se_hat_rotospeed = "Скорость вращения (градусов в секунду)",
             tt_vis_se_hat_rainbow = "Циклическая смена цветов",
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_hat_transparency = "Прозрачность шляпы",
-            tt_vis_se_hat_material = "Материал Roblox для шляпы",
-            tt_vis_se_hat_usemesh = "ВКЛ = конус-меш | ВЫКЛ = шар (материалы видны лучше)",
+            tt_vis_se_hat_material = "Материал Roblox для каждого слоя конуса (материалы применяются к каждой части)",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
             tt_vis_sp_strength = "Сила предсказания",
@@ -1717,6 +1799,10 @@ local tracerOrigins = { "Bottom", "Mouse", "Top" }
 local hatMaterials = WallHack.Functions.ListValidMaterials()
 if not hatMaterials or #hatMaterials == 0 then
     hatMaterials = { "Neon", "ForceField", "Glass", "Plastic", "SmoothPlastic", "Metal" }
+end
+local texturePresetList = WallHack.Functions.ListTexturePresets()
+if not texturePresetList or #texturePresetList == 0 then
+    texturePresetList = { "None", "Custom" }
 end
 
 -- ===================== LEFT COLUMN =====================
@@ -1811,7 +1897,7 @@ visNames:AddToggle({ Name = "vis_name_distance", Value = WallHack.Visuals.NameSe
 visNames:AddToggle({ Name = "vis_name_health", Value = WallHack.Visuals.NameSettings.ShowHealth ~= false,
     Callback = function(v) setName("ShowHealth", v) end, Tooltip = "tt_vis_name_health" })
 
--- CHAMS (was Glow) — enemy chams with full settings
+-- CHAMS (enemy)
 local chamsSec = VisualsTab:CreateSection({ Name = "vis_chams", Side = "Right" })
 chamsSec:AddToggle({ Name = "vis_chams_enabled", Value = Chams.Enabled,
     Callback = function(v) Chams.Enabled = v; refreshChams() end,
@@ -1837,6 +1923,10 @@ chamsSec:AddSlider({ Name = "vis_chams_outline_transparency", Value = Chams.Outl
 chamsSec:AddToggle({ Name = "vis_chams_always_top", Value = Chams.AlwaysOnTop ~= false,
     Callback = function(v) Chams.AlwaysOnTop = v; refreshChams() end,
     Tooltip = "tt_vis_chams_always_top" })
+chamsSec:AddDropdown({ Name = "vis_chams_texture_preset", Value = Chams.TexturePreset or "None",
+    List = texturePresetList,
+    Callback = function(v) Chams.TexturePreset = v; refreshChams() end,
+    Tooltip = "tt_vis_chams_texture_preset" })
 chamsSec:AddInput({ Name = "vis_chams_texture_id", Value = Chams.TextureId or "",
     Callback = function(v) Chams.TextureId = v or ""; refreshChams() end,
     Tooltip = "tt_vis_chams_texture_id" })
@@ -1849,7 +1939,7 @@ chamsSec:AddDropdown({ Name = "vis_chams_texture_faces", Value = Chams.TextureFa
     Callback = function(v) Chams.TextureFaces = v; refreshChams() end,
     Tooltip = "tt_vis_chams_texture_faces" })
 
--- SELF ESP — with clean group names via dividers
+-- SELF ESP
 local seSec = VisualsTab:CreateSection({ Name = "vis_selfesp", Side = "Right" })
 seSec:AddToggle({ Name = "vis_se_enabled", Value = WallHack.Visuals.SelfESP.Enabled,
     Callback = function(v)
@@ -1883,6 +1973,11 @@ seSec:AddSlider({ Name = "vis_se_outline_transparency", Value = WallHack.Visuals
 seSec:AddToggle({ Name = "vis_se_always_top", Value = WallHack.Visuals.SelfESP.Chams.AlwaysOnTop ~= false,
     Callback = function(v) setChamsSelf("AlwaysOnTop", v); refreshSelfESP() end,
     Tooltip = "tt_vis_se_always_top" })
+seSec:AddDropdown({ Name = "vis_se_texture_preset",
+    Value = WallHack.Visuals.SelfESP.Chams.TexturePreset or "None",
+    List = texturePresetList,
+    Callback = function(v) setChamsSelf("TexturePreset", v); refreshSelfESP() end,
+    Tooltip = "tt_vis_se_texture_preset" })
 seSec:AddInput({ Name = "vis_se_texture_id", Value = WallHack.Visuals.SelfESP.Chams.TextureId or "",
     Callback = function(v) setChamsSelf("TextureId", v or ""); refreshSelfESP() end,
     Tooltip = "tt_vis_se_texture_id" })
@@ -1942,9 +2037,6 @@ seSec:AddDropdown({ Name = "vis_se_hat_material",
         end
         refreshSelfESP()
     end, Tooltip = "tt_vis_se_hat_material" })
-seSec:AddToggle({ Name = "vis_se_hat_usemesh", Value = WallHack.Visuals.SelfESP.ChinaHat.UseMesh ~= false,
-    Callback = function(v) setHat("UseMesh", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_usemesh" })
 
 local spSec = VisualsTab:CreateSection({ Name = "vis_sp", Side = "Right" })
 local spInitEnabled = (SP and SP.Settings and SP.Settings.Enabled) == true
@@ -1969,4 +2061,4 @@ spSec:AddSlider({ Name = "vis_sp_maxlimb",
     Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end,
     Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v3 (Chams + Texture + Wireframe + clean Self ESP names)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v4 (Part-cone China Hat + Texture Presets)")
