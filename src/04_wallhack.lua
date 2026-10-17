@@ -1,10 +1,14 @@
---// AirHub - 04_wallhack.lua (airhubUI build)
---// Logic: unchanged. UI: airhubUI (Visuals tab).
+--// AirHub - 04_wallhack.lua (merged with ServerPosition)
+--// Merged: WallHack + Boxes + HUD + Glow + Self ESP + China Hat + ServerPosition (Ghost)
+--// UI: airhubUI Visuals tab.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
 if H.WallHack and H.WallHack._Loaded then return end
 
+-- ============================================================================
+-- PART 1 — WALLHACK SCHEMA
+-- ============================================================================
 H.WallHack = H.WallHack or {}
 local WallHack = H.WallHack
 WallHack._Loaded = true
@@ -96,7 +100,7 @@ local DEFAULT_SELFESP = {
     },
     ChinaHat = {
         Enabled = false,
-        Color = Color3.fromRGB(255, 60, 60),
+        Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
         Size = 4, OffsetY = 1.8, Transparency = 0, Rotation = 0,
         UseMesh = true,
@@ -105,6 +109,9 @@ local DEFAULT_SELFESP = {
     },
 }
 
+-- ============================================================================
+-- PART 2 — WALLHACK INIT (pcall wrapped)
+-- ============================================================================
 local okInit, errInit = pcall(function()
 
     local Util = H.Util
@@ -115,9 +122,7 @@ local okInit, errInit = pcall(function()
     local LocalPlayer   = Util.LocalPlayer
     local SanitizeColor = Util.SanitizeColor or function(c) return c end
 
-    --// ------------------------------------------------------------------------
-    --// Team check из Aimbot — единый источник правил.
-    --// ------------------------------------------------------------------------
+    -- Team check — single source of truth (Aimbot)
     local function IsEnemyByAimbot(plr)
         if not plr or plr == LocalPlayer then return false end
         local A = H.Aimbot
@@ -140,9 +145,7 @@ local okInit, errInit = pcall(function()
         return true
     end
 
-    --// ------------------------------------------------------------------------
-    --// Material handling
-    --// ------------------------------------------------------------------------
+    -- Materials
     local VALID_PART_MATERIALS = {
         "Plastic", "SmoothPlastic", "Neon", "Wood", "WoodPlanks",
         "Marble", "Slate", "Concrete", "Granite", "Brick",
@@ -176,9 +179,7 @@ local okInit, errInit = pcall(function()
             if name.EnumType == Enum.Material then return name end
             name = tostring(name)
         end
-        if type(name) ~= "string" or name == "" then
-            return Enum.Material.Neon
-        end
+        if type(name) ~= "string" or name == "" then return Enum.Material.Neon end
         local ok, m = pcall(function() return Enum.Material[name] end)
         if ok and m then return m end
         local canonical = MATERIAL_LOOKUP[name:lower()]
@@ -201,9 +202,7 @@ local okInit, errInit = pcall(function()
         if not part or not part.Parent then return end
         if not materialEnum or typeof(materialEnum) ~= "EnumItem" then return end
         if materialEnum.EnumType ~= Enum.Material then return end
-
         stripMaterialOverrides(part)
-
         if part.Material ~= materialEnum then
             local ok = pcall(function() part.Material = materialEnum end)
             if not ok then
@@ -215,7 +214,6 @@ local okInit, errInit = pcall(function()
     local function setChinaHatMaterialInternal(name, silent)
         local resolved = resolveMaterial(name)
         local nameStr  = resolved.Name
-
         if not MATERIAL_SET[nameStr] then
             resolved = Enum.Material.Neon
             if not silent then
@@ -224,10 +222,8 @@ local okInit, errInit = pcall(function()
                     "Use ListValidMaterials() for the allowed set.", tostring(name)))
             end
         end
-
         WallHack.Visuals.SelfESP.ChinaHat.Material = resolved.Name
         WallHack.Internal.SelfESP.ResolvedMaterial = resolved
-
         local Se = WallHack.Internal.SelfESP
         if Se.HatPart then
             applyMaterialToPart(Se.HatPart, resolved)
@@ -265,7 +261,7 @@ local okInit, errInit = pcall(function()
         end
     end
 
-    --// HUD --------------------------------------------------------------
+    -- HUD
     local function hudNewText(size, font)
         local t = Drawing.new("Text")
         t.Font = font or 2; t.Size = size or 14
@@ -396,7 +392,7 @@ local okInit, errInit = pcall(function()
         HUD.Elements = {}; HUD.Visible = false
     end
 
-    --// Chams -----------------------------------------------------------
+    -- Chams
     local function applyChamsProps(hl)
         local C = WallHack.Visuals.SelfESP.Chams
         hl.FillColor = C.FillColor; hl.OutlineColor = C.OutlineColor
@@ -423,7 +419,7 @@ local okInit, errInit = pcall(function()
         if Se.Highlight then pcall(function() Se.Highlight:Destroy() end); Se.Highlight = nil end
     end
 
-    --// ChinaHat --------------------------------------------------------
+    -- China Hat
     local HAT_CONE_MESH = "rbxassetid://1033714"
 
     local function getHatFolder()
@@ -441,15 +437,11 @@ local okInit, errInit = pcall(function()
     local function buildHat(head)
         local C  = WallHack.Visuals.SelfESP.ChinaHat
         local Se = WallHack.Internal.SelfESP
-
         local resolved = setChinaHatMaterialInternal(C.Material, true)
         Se.LastSchemaMaterial = C.Material
-
         local hat = Instance.new("Part")
         hat.Name = "AirHubChinaHat"
-        if not C.UseMesh then
-            hat.Shape = Enum.PartType.Ball
-        end
+        if not C.UseMesh then hat.Shape = Enum.PartType.Ball end
         hat.Size  = Vector3.new(1, 1, 1)
         hat.Anchored   = true
         hat.CanCollide = false
@@ -462,7 +454,6 @@ local okInit, errInit = pcall(function()
         hat.LocalTransparencyModifier = 0
         hat.CFrame = head.CFrame * CFrame.new(0, C.OffsetY, 0)
         hat.Parent = getHatFolder()
-
         if C.UseMesh then
             local mesh = Instance.new("SpecialMesh")
             mesh.Name     = "AirHubHatMesh"
@@ -472,10 +463,8 @@ local okInit, errInit = pcall(function()
             mesh.Scale    = Vector3.new(C.Size, C.Size * 0.7, C.Size)
             mesh.Parent = hat
         end
-
         applyMaterialToPart(hat, resolved)
         Se.LastAppliedMaterial = resolved
-
         return hat
     end
 
@@ -498,21 +487,17 @@ local okInit, errInit = pcall(function()
         if Se.HatConn then return end
         Se.HatConn = RunService.RenderStepped:Connect(function()
             if H.ShuttingDown then return end
-
             if not Se.HatHead or not Se.HatHead.Parent then
                 local char = LocalPlayer.Character
                 local head = char and char:FindFirstChild("Head")
                 if head then Se.HatHead = head else return end
             end
-
             if not Se.HatPart or not Se.HatPart.Parent then
                 Se.HatPart = buildHat(Se.HatHead)
             end
-
             local hat  = Se.HatPart
             local head = Se.HatHead
             local C    = WallHack.Visuals.SelfESP.ChinaHat
-
             if Se.LastSchemaMaterial ~= C.Material then
                 local newResolved = setChinaHatMaterialInternal(C.Material, true)
                 Se.LastSchemaMaterial = C.Material
@@ -521,7 +506,6 @@ local okInit, errInit = pcall(function()
                     Se.LastAppliedMaterial = newResolved
                 end
             end
-
             local mesh = hat:FindFirstChild("AirHubHatMesh")
             if C.UseMesh then
                 if not mesh then
@@ -539,25 +523,20 @@ local okInit, errInit = pcall(function()
                 local wantSize = Vector3.new(C.Size * 1.6, C.Size * 0.55, C.Size * 1.6)
                 if hat.Size ~= wantSize then hat.Size = wantSize end
             end
-
             hat.LocalTransparencyModifier = 0
             hat.Transparency = C.Transparency
-
             if C.Rainbow then
                 local hue = (os.clock() * (C.RainbowSpeed or 0.5)) % 1
                 hat.Color = Color3.fromHSV(hue, 1, 1)
             else
                 hat.Color = C.Color
             end
-
             local resolved = Se.ResolvedMaterial or Enum.Material.Neon
             if Se.LastAppliedMaterial ~= resolved or hat.Material ~= resolved then
                 applyMaterialToPart(hat, resolved)
                 Se.LastAppliedMaterial = resolved
             end
-
             if not hat.Anchored then hat.Anchored = true end
-
             local angle
             if C.AutoRotate then
                 angle = (os.clock() * (C.RotateSpeed or 90)) % 360
@@ -576,7 +555,6 @@ local okInit, errInit = pcall(function()
         local head = char:FindFirstChild("Head")
         if not head then return end
         local Se = WallHack.Internal.SelfESP
-
         if Se.HatPart and Se.HatPart.Parent then
             Se.HatHead = head; startHatLoop(); return
         end
@@ -649,7 +627,7 @@ local okInit, errInit = pcall(function()
         print("[AirHub][Hat] LTM:               ", hat.LocalTransparencyModifier)
     end
 
-    --// Glow ------------------------------------------------------------
+    -- Glow
     local function ApplyGlowForPlayer(plr)
         local data = WallHack.WrappedPlayers[plr.Name]
         if not data then return end
@@ -709,7 +687,7 @@ local okInit, errInit = pcall(function()
         end
     end
 
-    --// Boxes -----------------------------------------------------------
+    -- Boxes
     local function AddBox(plr)
         local t = WallHack.WrappedPlayers[plr.Name]
         if not t then return end
@@ -798,7 +776,6 @@ local okInit, errInit = pcall(function()
                 else
                     t.Checks.Alive = true
                 end
-
                 if not WallHack.Settings.TeamCheck then
                     t.Checks.Team = true
                 else
@@ -891,7 +868,7 @@ local okInit, errInit = pcall(function()
     end
     LoadWH()
 
-    --// Public API -------------------------------------------------------
+    -- Public API
     WallHack.Functions.Exit = function()
         ReWrapToken += 1
         for _, v in pairs(WHConnections) do pcall(function() v:Disconnect() end) end
@@ -1000,16 +977,224 @@ if not okInit then
     WallHack.Functions.ListValidMaterials  = WallHack.Functions.ListValidMaterials  or function() return {} end
 end
 
-print(okInit and "[AirHub] 04_wallhack: loaded OK" or "[AirHub] 04_wallhack: loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
---// ===========================================================================
---// UI — Tab "Visuals"
---// ===========================================================================
-if not okInit then
-    warn("[AirHub] 04_wallhack: skipping UI (logic init failed)")
-    return
+-- ============================================================================
+-- PART 3 — SERVERPOSITION (was 05_serverposition.lua)
+-- ============================================================================
+if H.ServerPosition then
+    warn("[AirHub] 04_wallhack: ServerPosition already loaded")
+else
+    local Util        = H.Util
+    local RunService  = Util.RunService
+    local LocalPlayer = Util.LocalPlayer
+    local Track       = Util.Track
+
+    H.ServerPosition = {
+        Settings = {
+            Enabled  = false,
+            RGB      = true,
+            Strength = 1,
+            MaxLimb  = 6,
+        },
+        Internal = {
+            Connection = nil,
+            Ghosts     = {},
+        },
+    }
+    local ServerPosition = H.ServerPosition
+
+    local part_names = {
+        "HumanoidRootPart", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+        "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm", "LeftHand", "RightHand",
+        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg", "LeftFoot", "RightFoot",
+    }
+
+    local function rgb(t)
+        return Color3.fromHSV((t % 5) / 5, 1, 1)
+    end
+
+    local function make_ghost(real)
+        local g = Instance.new("Part")
+        g.Name        = real.Name .. "_ghost"
+        g.Size        = real.Size
+        g.Anchored    = true
+        g.CanCollide  = false
+        g.CanQuery    = false
+        g.CanTouch    = false
+        g.CastShadow  = false
+        g.Transparency = 1
+        g.CFrame      = real.CFrame
+        g.Parent      = workspace
+
+        local box = Instance.new("SelectionBox")
+        box.Adornee       = g
+        box.LineThickness = 0.04
+        box.SurfaceTransparency = 1
+        box.Parent = g
+
+        local adorn = Instance.new("BoxHandleAdornment")
+        adorn.Name         = "GhostAdornment"
+        adorn.Adornee      = g
+        adorn.AlwaysOnTop  = true
+        adorn.Color3       = Color3.fromRGB(255, 255, 255)
+        adorn.Transparency = 0.4
+        adorn.Size         = g.Size
+        adorn.ZIndex       = 5
+        adorn.Parent       = g
+
+        return { real = real, ghost = g, box = box, adornment = adorn }
+    end
+
+    local function is_replicate(p)
+        return p and not p.Anchored
+    end
+
+    local function StartServerPosition()
+        if ServerPosition.Internal.Connection then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp then return end
+
+        for _, g in pairs(ServerPosition.Internal.Ghosts) do
+            if g.ghost then pcall(function() g.ghost:Destroy() end) end
+        end
+        ServerPosition.Internal.Ghosts = {}
+
+        for _, n in ipairs(part_names) do
+            local p = char:FindFirstChild(n)
+            if p and p:IsA("BasePart") then
+                ServerPosition.Internal.Ghosts[n] = make_ghost(p)
+            end
+        end
+
+        local server_cf = hrp.CFrame
+        local lin_vel   = Vector3.new(0, 0, 0)
+        local last      = os.clock()
+        local acc       = 0
+        local frames    = {}
+
+        ServerPosition.Internal.Connection = RunService.Heartbeat:Connect(function(dt)
+            if H.ShuttingDown then return end
+
+            if not hrp or not hrp.Parent then
+                for _, g in pairs(ServerPosition.Internal.Ghosts) do
+                    if g.ghost then pcall(function() g.ghost:Destroy() end) end
+                end
+                ServerPosition.Internal.Ghosts = {}
+                if ServerPosition.Internal.Connection then
+                    ServerPosition.Internal.Connection:Disconnect()
+                    ServerPosition.Internal.Connection = nil
+                end
+                return
+            end
+
+            local now   = os.clock()
+            local delta = now - last
+            last = now
+            local ping = LocalPlayer.GetNetworkPing and LocalPlayer:GetNetworkPing() or 0.08
+
+            if is_replicate(hrp) then
+                lin_vel = hrp.AssemblyLinearVelocity
+                if acc >= ping then
+                    server_cf = hrp.CFrame
+                    acc = 0
+                else
+                    acc = acc + delta
+                end
+            end
+
+            local hrp_cf = server_cf
+            local rel = {}
+            for n, g in pairs(ServerPosition.Internal.Ghosts) do
+                if g.real and g.real.Parent then
+                    rel[n] = hrp_cf:ToObjectSpace(g.real.CFrame)
+                end
+            end
+
+            table.insert(frames, {
+                t   = now,
+                cf  = hrp_cf,
+                pos = hrp_cf.Position,
+                vel = lin_vel,
+                rel = rel,
+            })
+            if #frames > 240 then
+                for i = 1, 60 do table.remove(frames, 1) end
+            end
+
+            local target_t = now - ping
+            local f
+            for i = #frames, 1, -1 do
+                if frames[i].t <= target_t then f = frames[i]; break end
+            end
+            if not f then f = frames[1] end
+            if not f then return end
+
+            local td = math.min(target_t - f.t, 0.06)
+            local pred_pos = f.pos + f.vel * td * ServerPosition.Settings.Strength
+            local pred_cf  = CFrame.new(pred_pos) * (f.cf - f.cf.Position)
+
+            for n, g in pairs(ServerPosition.Internal.Ghosts) do
+                local ghost = g.ghost
+                local box   = g.box
+                local adorn = g.adornment
+                if ghost and ghost.Parent then
+                    local r = f.rel[n]
+                    local tgt = r and pred_cf * r or (g.real and g.real.CFrame or ghost.CFrame)
+                    local d = (tgt.Position - pred_cf.Position).Magnitude
+                    if d > ServerPosition.Settings.MaxLimb then
+                        local dir = (tgt.Position - pred_cf.Position).Unit
+                        local p = pred_cf.Position + dir * ServerPosition.Settings.MaxLimb
+                        local rx, ry, rz = tgt:ToEulerAnglesXYZ()
+                        tgt = CFrame.new(p) * CFrame.Angles(rx, ry, rz)
+                    end
+                    ghost.CFrame = ghost.CFrame:Lerp(tgt, math.min(delta * 18, 1))
+
+                    local c
+                    if ServerPosition.Settings.RGB then
+                        c = rgb(now)
+                    else
+                        c = Color3.new(1, 1, 1)
+                    end
+                    if box   then box.Color3   = c end
+                    if adorn then adorn.Color3 = c end
+                end
+            end
+        end)
+    end
+
+    local function StopServerPosition()
+        if ServerPosition.Internal.Connection then
+            ServerPosition.Internal.Connection:Disconnect()
+            ServerPosition.Internal.Connection = nil
+        end
+        for _, g in pairs(ServerPosition.Internal.Ghosts) do
+            if g.ghost then pcall(function() g.ghost:Destroy() end) end
+        end
+        ServerPosition.Internal.Ghosts = {}
+    end
+
+    Track(LocalPlayer.CharacterAdded:Connect(function()
+        if ServerPosition.Settings.Enabled then
+            task.wait(0.2)
+            if H.ShuttingDown then return end
+            StopServerPosition()
+            StartServerPosition()
+        end
+    end))
+
+    ServerPosition.Start = StartServerPosition
+    ServerPosition.Stop  = StopServerPosition
+
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK")
 end
 
+-- ============================================================================
+-- PART 4 — UI (Visuals tab)
+-- ============================================================================
 local Window = getgenv().airhubUI_Window
 if not Window then
     warn("[AirHub] 04_wallhack: airhubUI Window missing — Visuals tab not created")
@@ -1025,7 +1210,6 @@ local Util             = H.Util
 local SanitizeColor    = Util.SanitizeColor or function(c) return c end
 local LocalPlayer      = Util.LocalPlayer
 
--- lazy wrappers (protect against any missed export)
 local function refreshGlow()
     if WallHack.ApplyGlowToAll then pcall(WallHack.ApplyGlowToAll) end
 end
@@ -1045,14 +1229,15 @@ local function stopSelfESP()
     if WallHack.Functions.StopSelfESP then pcall(WallHack.Functions.StopSelfESP) end
 end
 
--- setters
-local function setWall(k, v) WallHack.Settings[k] = v end
 local function setBox(k, v)  WallHack.Visuals.BoxSettings[k] = v end
-local function setGlow(k, v) WallHack.Visuals.GlowSettings[k] = v end
 local function setHUD(k, v)  WallHack.Visuals.HUDSettings[k] = v end
-local function setSelf(k, v) WallHack.Visuals.SelfESP[k] = v end
 local function setChams(k, v) WallHack.Visuals.SelfESP.Chams[k] = v end
 local function setHat(k, v)   WallHack.Visuals.SelfESP.ChinaHat[k] = v end
+
+-- Direct refs to ServerPosition (no lazy binding needed - loaded above)
+local SP = H.ServerPosition
+local function spStart() if SP and SP.Start then pcall(SP.Start) end end
+local function spStop()  if SP and SP.Stop  then pcall(SP.Stop)  end end
 
 local glowModes   = { "Outline", "Fill", "Both", "Pulse" }
 local chamsModes  = { "Fill", "Outline", "Both" }
@@ -1062,9 +1247,7 @@ if not hatMaterials or #hatMaterials == 0 then
     hatMaterials = { "Neon", "ForceField", "Glass", "Plastic", "SmoothPlastic", "Metal" }
 end
 
--- // ==========================================================
--- // LEFT column
--- // ==========================================================
+-- // Left column
 local visWH = VisualsTab:CreateSection({ Name = "WallHack" })
 visWH:AddToggle({ Name = "Enabled", Value = WallHack.Settings.Enabled,
     Callback = function(v) WallHack.Settings.Enabled = v; refreshGlow() end })
@@ -1119,9 +1302,7 @@ hudSec:AddToggle({ Name = "Show Session time",
     Value = WallHack.Visuals.HUDSettings.ShowSession ~= false,
     Callback = function(v) setHUD("ShowSession", v) end })
 
--- // ==========================================================
--- // RIGHT column
--- // ==========================================================
+-- // Right column
 local glowSec = VisualsTab:CreateSection({ Name = "Glow", Side = "Right" })
 glowSec:AddToggle({ Name = "Enabled", Value = WallHack.Visuals.GlowSettings.Enabled,
     Callback = function(v)
@@ -1213,57 +1394,38 @@ seSec:AddDropdown({ Name = "  China Hat: Material",
         refreshSelfESP()
     end })
 
--- Server Position (Ghost) — lazy bind to H.ServerPosition (loaded in 05)
+-- Server Position (Ghost) — now direct refs, no lazy bind
 local spSec = VisualsTab:CreateSection({ Name = "Server Position (Ghost)", Side = "Right" })
-local spInitEnabled = false
-do
-    local Sp = H.ServerPosition
-    if Sp and Sp.Settings then spInitEnabled = Sp.Settings.Enabled == true end
-end
-
-local function ghostStart()
-    local Sp = H.ServerPosition
-    if not Sp then return end
-    if type(Sp.Start) == "function" then pcall(Sp.Start) end
-end
-local function ghostStop()
-    local Sp = H.ServerPosition
-    if not Sp then return end
-    if type(Sp.Stop) == "function" then pcall(Sp.Stop) end
-end
+local spInitEnabled = (SP and SP.Settings and SP.Settings.Enabled) == true
 
 spSec:AddToggle({ Name = "Enabled", Value = spInitEnabled,
     Callback = function(v)
-        local Sp = H.ServerPosition
-        if not Sp or not Sp.Settings then
-            warn("[AirHub] 04_wallhack: ServerPosition not loaded yet")
+        if not SP or not SP.Settings then
+            warn("[AirHub] 04_wallhack: ServerPosition missing")
             return
         end
-        Sp.Settings.Enabled = v
-        if v then ghostStop(); ghostStart() else ghostStop() end
+        SP.Settings.Enabled = v
+        if v then spStop(); spStart() else spStop() end
     end })
 
 spSec:AddToggle({ Name = "RGB Color",
-    Value = (H.ServerPosition and H.ServerPosition.Settings and H.ServerPosition.Settings.RGB) ~= false,
+    Value = (SP and SP.Settings and SP.Settings.RGB) ~= false,
     Callback = function(v)
-        local Sp = H.ServerPosition
-        if Sp and Sp.Settings then Sp.Settings.RGB = v end
+        if SP and SP.Settings then SP.Settings.RGB = v end
     end })
 
 spSec:AddSlider({ Name = "Strength",
-    Value = (H.ServerPosition and H.ServerPosition.Settings and H.ServerPosition.Settings.Strength) or 1,
+    Value = (SP and SP.Settings and SP.Settings.Strength) or 1,
     Min = 0, Max = 5, Decimals = 1,
     Callback = function(v)
-        local Sp = H.ServerPosition
-        if Sp and Sp.Settings then Sp.Settings.Strength = v end
+        if SP and SP.Settings then SP.Settings.Strength = v end
     end })
 
 spSec:AddSlider({ Name = "Max Limb Distance",
-    Value = (H.ServerPosition and H.ServerPosition.Settings and H.ServerPosition.Settings.MaxLimb) or 6,
+    Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20,
     Callback = function(v)
-        local Sp = H.ServerPosition
-        if Sp and Sp.Settings then Sp.Settings.MaxLimb = v end
+        if SP and SP.Settings then SP.Settings.MaxLimb = v end
     end })
 
 print("[AirHub] 04_wallhack: UI 'Visuals' tab created")
