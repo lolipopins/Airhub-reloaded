@@ -1,11 +1,9 @@
---// AirHub - 04_wallhack.lua v6
---// CHANGES v6:
---//  - China Hat: VERTICAL TRIANGULAR facets (not horizontal circles!)
---//    Each facet = vertical stepped triangle from ~6 thin rectangular slices.
---//    8 facets form a full cone. Materials apply per-slice.
---//  - Tiers slider now controls vertical slices per facet (2-12)
---//    Higher = smoother triangle silhouette. Sides = facets around cone.
---//  - Texture chams fix from v5 preserved (Texture instance, rbxassetid only, AllFaces default)
+--// AirHub - 04_wallhack.lua v7
+--// CHANGES v7:
+--//  - China Hat: FIXED gaps between segments (width now divides by cosSlope + 15% overlap)
+--//  - China Hat: Added adjustable Height slider
+--//  - Increased part thickness to 0.15 (prevents see-through edges)
+--//  - Texture chams preserved from v5/v6
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -95,11 +93,13 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         Enabled = false,
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
-        Size = 4, OffsetY = 1.8, Transparency = 0, Rotation = 0,
+        Size = 4,          -- base diameter
+        Height = 7.6,      -- NEW: explicit height
+        OffsetY = 1.8, Transparency = 0, Rotation = 0,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
-        Tiers = 6,   -- vertical slices per facet (2-12)
-        Sides = 8,   -- facets around cone (3-16)
+        Tiers = 6,         -- vertical slices per facet
+        Sides = 8,         -- facets around cone
     },
 }
 do
@@ -118,6 +118,9 @@ do
     end
     if WallHack.Visuals.SelfESP.ChinaHat.Sides == nil then
         WallHack.Visuals.SelfESP.ChinaHat.Sides = 8
+    end
+    if WallHack.Visuals.SelfESP.ChinaHat.Height == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Height = (WallHack.Visuals.SelfESP.ChinaHat.Size or 4) * 1.9
     end
 end
 
@@ -569,12 +572,9 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- CHINA HAT — VERTICAL TRIANGULAR CONE (stepped facets)
+    -- CHINA HAT — VERTICAL TRIANGULAR CONE
     -- ========================================================================
-    -- Each facet of the cone is built from stacked horizontal slices.
-    -- Each slice is a thin rectangular Part. Slices narrow toward the apex,
-    -- producing a TRIANGULAR silhouette (vertical triangle).
-    -- Materials apply per-slice (all BaseParts).
+    local SLICE_MIN_WIDTH = 0.03
 
     local function getHatFolder()
         local Se = WallHack.Internal.SelfESP
@@ -588,9 +588,6 @@ local okInit, errInit = pcall(function()
         return existing
     end
 
-    local HAT_HEIGHT_MULT = 1.9
-    local SLICE_MIN_WIDTH = 0.03
-
     local function buildHat(head)
         local C  = WallHack.Visuals.SelfESP.ChinaHat
         local Se = WallHack.Internal.SelfESP
@@ -603,15 +600,16 @@ local okInit, errInit = pcall(function()
 
         local baseSize = tonumber(C.Size) or 4
         local baseR = baseSize / 2
-        local H = baseSize * HAT_HEIGHT_MULT
+        local H = tonumber(C.Height) or (baseSize * 1.9)
         local sides = math.clamp(tonumber(C.Sides) or 8, 3, 16)
         local slices = math.clamp(tonumber(C.Tiers) or 6, 2, 12)
         local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
         local trans = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
+        -- Slope compensation math
         local slopeAngle = math.atan2(baseR, H)
         local cosSlope = math.cos(slopeAngle)
+        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
 
         local parts = {}
         for i = 1, sides do
@@ -631,6 +629,9 @@ local okInit, errInit = pcall(function()
                 local rMid = baseR * (1 - tMid)
                 local sliceH = (H / slices) / cosSlope * 1.12
 
+                -- Fix gaps: divide by cosSlope and add 15% overlap
+                local finalW = (wAvg / cosSlope) * 1.15
+
                 local p = Instance.new("Part")
                 p.Name = string.format("AirHubHat_%d_%d", i, k)
                 p.Anchored = true
@@ -643,7 +644,7 @@ local okInit, errInit = pcall(function()
                 p.Transparency = trans
                 p.LocalTransparencyModifier = 0
                 p.Material = resolved
-                p.Size = Vector3.new(wAvg, sliceH, 0.05)
+                p.Size = Vector3.new(finalW, sliceH, 0.15) -- Increased thickness
                 p.CFrame = head.CFrame
                     * CFrame.new(0, C.OffsetY, 0)
                     * CFrame.Angles(0, angle, 0)
@@ -663,13 +664,13 @@ local okInit, errInit = pcall(function()
 
         local baseSize = tonumber(C.Size) or 4
         local baseR = baseSize / 2
-        local H = baseSize * HAT_HEIGHT_MULT
+        local H = tonumber(C.Height) or (baseSize * 1.9)
         local sides = hatData.sides
         local slices = hatData.slices
 
-        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
         local slopeAngle = math.atan2(baseR, H)
         local cosSlope = math.cos(slopeAngle)
+        local edgeLen = 2 * baseR * math.sin(math.pi / sides)
 
         local color
         if C.Rainbow then
@@ -709,8 +710,9 @@ local okInit, errInit = pcall(function()
                         local yMid = tMid * H
                         local rMid = baseR * (1 - tMid)
                         local sliceH = (H / slices) / cosSlope * 1.12
+                        local finalW = (wAvg / cosSlope) * 1.15
 
-                        p.Size = Vector3.new(wAvg, sliceH, 0.05)
+                        p.Size = Vector3.new(finalW, sliceH, 0.15)
                         p.Color = color
                         p.Transparency = trans
                         p.LocalTransparencyModifier = 0
@@ -1356,7 +1358,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v6 (vertical triangular China Hat)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v7 (fixed gaps + height slider)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1535,7 +1537,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v6")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v7")
 end
 
 -- ============================================================================
@@ -1589,7 +1591,8 @@ do
             vis_se_texture_faces = "Texture Faces",
             vis_se_hat_enabled = "Enabled",
             vis_se_hat_color = "Color",
-            vis_se_hat_size = "Size",
+            vis_se_hat_size = "Base Size",
+            vis_se_hat_height = "Height",
             vis_se_hat_offset = "Offset Y",
             vis_se_hat_rotation = "Rotation",
             vis_se_hat_autoro = "Auto Rotate",
@@ -1598,7 +1601,7 @@ do
             vis_se_hat_rainbow_speed = "Rainbow Speed",
             vis_se_hat_transparency = "Transparency",
             vis_se_hat_material = "Material",
-            vis_se_hat_tiers = "Vertical Slices per Facet",
+            vis_se_hat_tiers = "Vertical Slices",
             vis_se_hat_sides = "Facets Around Cone",
             vis_sp_enabled = "Enabled", vis_sp_rgb = "RGB Color",
             vis_sp_strength = "Strength", vis_sp_maxlimb = "Max Limb Distance",
@@ -1651,7 +1654,8 @@ do
             tt_vis_se_texture_faces = "Front = only front | AllFaces = all 6 faces (recommended)",
             tt_vis_se_hat_enabled = "Show triangular cone hat above your head (vertical triangles)",
             tt_vis_se_hat_color = "Hat base color",
-            tt_vis_se_hat_size = "Hat base diameter (studs)",
+            tt_vis_se_hat_size = "Base diameter (studs)",
+            tt_vis_se_hat_height = "Total height of the cone",
             tt_vis_se_hat_offset = "Vertical offset from head",
             tt_vis_se_hat_rotation = "Fixed rotation angle (when Auto Rotate OFF)",
             tt_vis_se_hat_autoro = "Continuously rotate the cone",
@@ -1716,7 +1720,8 @@ do
             vis_se_texture_faces = "Грани текстуры",
             vis_se_hat_enabled = "Включена",
             vis_se_hat_color = "Цвет",
-            vis_se_hat_size = "Размер",
+            vis_se_hat_size = "Размер основания",
+            vis_se_hat_height = "Высота",
             vis_se_hat_offset = "Смещение Y",
             vis_se_hat_rotation = "Поворот",
             vis_se_hat_autoro = "Авто-вращение",
@@ -1725,7 +1730,7 @@ do
             vis_se_hat_rainbow_speed = "Скорость радуги",
             vis_se_hat_transparency = "Прозрачность",
             vis_se_hat_material = "Материал",
-            vis_se_hat_tiers = "Вертикальных срезов на фасет",
+            vis_se_hat_tiers = "Вертикальных срезов",
             vis_se_hat_sides = "Фасетов по кругу",
             vis_sp_enabled = "Включено", vis_sp_rgb = "RGB цвет",
             vis_sp_strength = "Сила", vis_sp_maxlimb = "Макс. дистанция конечности",
@@ -1779,6 +1784,7 @@ do
             tt_vis_se_hat_enabled = "Показывать треугольный конус над головой (вертикальные треугольники)",
             tt_vis_se_hat_color = "Базовый цвет шляпы",
             tt_vis_se_hat_size = "Диаметр основания (studs)",
+            tt_vis_se_hat_height = "Общая высота конуса",
             tt_vis_se_hat_offset = "Вертикальное смещение от головы",
             tt_vis_se_hat_rotation = "Фиксированный поворот (при выкл. авто-вращении)",
             tt_vis_se_hat_autoro = "Постоянное вращение конуса",
@@ -1975,6 +1981,8 @@ seSec:AddColorpicker({ Name = "vis_se_hat_color", Default = WallHack.Visuals.Sel
     Callback = function(v) WallHack.Visuals.SelfESP.ChinaHat.Color = SafeColor(v, Color3.fromRGB(255,60,60)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_color" })
 seSec:AddSlider({ Name = "vis_se_hat_size", Value = WallHack.Visuals.SelfESP.ChinaHat.Size,
     Min = 1, Max = 10, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_size" })
+seSec:AddSlider({ Name = "vis_se_hat_height", Value = WallHack.Visuals.SelfESP.ChinaHat.Height,
+    Min = 2, Max = 20, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
 seSec:AddSlider({ Name = "vis_se_hat_offset", Value = WallHack.Visuals.SelfESP.ChinaHat.OffsetY,
     Min = 0, Max = 5, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
 seSec:AddSlider({ Name = "vis_se_hat_tiers", Value = WallHack.Visuals.SelfESP.ChinaHat.Tiers or 6,
@@ -2014,4 +2022,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v6 (vertical triangular China Hat)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v7 (fixed gaps + height)")
