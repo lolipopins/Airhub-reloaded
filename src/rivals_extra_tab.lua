@@ -1,9 +1,17 @@
 --// ============================================================================
---// AirHub — rivals extra tab (airhubUI build) — ULTRA SEARCH
+--// AirHub — rivals extra tab (airhubUI build)
+--// Ported from Rivals Mini: No Spread / No Recoil / Rapid Fire
+--// + Поддержка классов ClientItem (Rivals) и авто-регистрация оружия
 --// ============================================================================
 local H = getgenv().AirHub
-if not H or not H._CoreLoaded then warn("[AirHub] rivals extra tab: core not loaded") return end
-if H.Rivals and H.Rivals._Loaded then warn("[AirHub] rivals extra tab: already loaded") return end
+if not H or not H._CoreLoaded then 
+    warn("[AirHub] rivals extra tab: core not loaded") 
+    return 
+end
+if H.Rivals and H.Rivals._Loaded then 
+    warn("[AirHub] rivals extra tab: already loaded") 
+    return 
+end
 
 local Util        = H.Util
 local Players     = Util.Players
@@ -41,82 +49,13 @@ R.Functions = R.Functions or {}
 local function log(msg) print("[AirHub] rivals: " .. tostring(msg)) end
 local function logwarn(msg) warn("[AirHub] rivals: " .. tostring(msg)) end
 
+local SPREAD_KEYS = { "ShootSpread", "Spread", "WeaponSpread", "Inaccuracy" }
+local RECOIL_KEYS = { "ShootRecoil", "Recoil", "RecoilHorizontal", "RecoilVertical", "CameraRecoil" }
+local RATE_KEYS   = { "ShootCooldown", "QuickShotCooldown", "Cooldown" }
+
 --// ============================================================================
---// ULTRA SEARCH: ищем любые таблицы с оружейными полями
+--// CLIENT ITEM FINDER
 --// ============================================================================
-local GUN_FIELDS = {
-    "ShootRecoil", "ShootSpread", "FireRate", "Damage", "Cooldown",
-    "Ammo", "ReloadTime", "Spread", "Recoil", "Inaccuracy",
-    "WeaponSpread", "CameraRecoil", "ShootCooldown", "QuickShotCooldown"
-}
-
-local function hasGunFields(tbl)
-    if type(tbl) ~= "table" then return false end
-    local count = 0
-    for _, field in ipairs(GUN_FIELDS) do
-        if tbl[field] ~= nil then
-            count = count + 1
-        end
-    end
-    return count >= 3 -- минимум 3 оружейных поля
-end
-
-local function isClientItem(tbl)
-    if type(tbl) ~= "table" then return false end
-    if tbl.Input then return true end
-    -- Если есть куча вложенных таблиц с Info — это тоже ClientItem
-    local infoCount = 0
-    for _, v in pairs(tbl) do
-        if type(v) == "table" and v.Info then
-            infoCount = infoCount + 1
-        end
-    end
-    return infoCount >= 3
-end
-
--- Поиск через getgc
-local function findTablesInGC()
-    local found = {}
-    local ok, gc = pcall(function()
-        if type(getgc) ~= "function" then return nil end
-        return getgc(true)
-    end)
-    if not ok or type(gc) ~= "table" then return found end
-
-    for _, obj in ipairs(gc) do
-        if type(obj) == "table" then
-            if isClientItem(obj) then
-                table.insert(found, { type = "ClientItem", tbl = obj })
-            elseif hasGunFields(obj) then
-                table.insert(found, { type = "GunTable", tbl = obj })
-            end
-        end
-    end
-    return found
-end
-
--- Поиск через getloadedmodules
-local function findTablesInModules()
-    local found = {}
-    local ok, modules = pcall(function()
-        if type(getloadedmodules) ~= "function" then return nil end
-        return getloadedmodules()
-    end)
-    if not ok or type(modules) ~= "table" then return found end
-
-    for _, m in ipairs(modules) do
-        if type(m) == "table" then
-            if isClientItem(m) then
-                table.insert(found, { type = "ClientItem", tbl = m })
-            elseif hasGunFields(m) then
-                table.insert(found, { type = "GunTable", tbl = m })
-            end
-        end
-    end
-    return found
-end
-
--- Поиск по путям (стандартные)
 local function findClientItemByPaths()
     local candidates = {
         { "PlayerScripts", "Modules", "ClientReplicatedClasses", "ClientFighter", "ClientItem" },
@@ -132,53 +71,76 @@ local function findClientItemByPaths()
         local ok = true
         for _, name in ipairs(path) do
             local child = node and node:FindFirstChild(name)
-            if not child then ok = false; break end
+            if not child then 
+                ok = false 
+                break 
+            end
             node = child
         end
         if ok and node then
             local rok, mod = pcall(require, node)
             if rok and type(mod) == "table" then
-                if isClientItem(mod) or hasGunFields(mod) then
-                    log("found via path: " .. table.concat(path, "/"))
-                    return mod, path
-                end
+                log("found via path: " .. table.concat(path, "/"))
+                return mod, path
             end
         end
     end
     return nil, nil
 end
 
--- Главный поиск
+local function findClientItemByLoadedModules()
+    local ok, modules = pcall(function()
+        if type(getloadedmodules) ~= "function" then return nil end
+        return getloadedmodules()
+    end)
+    if not ok or type(modules) ~= "table" then return nil end
+    
+    for _, m in ipairs(modules) do
+        if type(m) == "table" then
+            local nm = tostring(m):lower()
+            if nm:find("clientitem") or nm:find("clientweapon") then
+                if m.Input then
+                    log("found via getloadedmodules: " .. tostring(m))
+                    return m
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function findClientItemByGc()
+    local ok, gc = pcall(function()
+        if type(getgc) ~= "function" then return nil end
+        return getgc(true)
+    end)
+    if not ok or type(gc) ~= "table" then return nil end
+    
+    for _, obj in ipairs(gc) do
+        if type(obj) == "table" and obj.Input then
+            log("found via getgc")
+            return obj
+        end
+    end
+    return nil
+end
+
 local function findClientItem()
-    -- 1. Стандартные пути
     local mod, path = findClientItemByPaths()
-    if mod then
+    if mod then 
         R.Internal.FoundBy = "paths"
-        return mod, path
+        return mod, path 
     end
-
-    -- 2. getloadedmodules
-    local found = findTablesInModules()
-    if #found > 0 then
-        log("Found " .. #found .. " table(s) in loaded modules:")
-        for i, f in ipairs(found) do
-            log("  " .. i .. ": " .. f.type .. " (" .. tostring(f.tbl) .. ")")
-        end
+    mod = findClientItemByLoadedModules()
+    if mod then 
         R.Internal.FoundBy = "getloadedmodules"
-        return found[1].tbl
+        return mod 
     end
-
-    -- 3. getgc
-    found = findTablesInGC()
-    if #found > 0 then
-        log("Found " .. #found .. " table(s) in GC:")
-        for i, f in ipairs(found) do
-            log("  " .. i .. ": " .. f.type .. " (" .. tostring(f.tbl) .. ")")
-        end
+    mod = findClientItemByGc()
+    if mod then 
         R.Internal.FoundBy = "getgc"
-        return found[1].tbl
+        return mod 
     end
-
     return nil
 end
 
@@ -193,8 +155,18 @@ local function ensureClientItem()
 end
 
 --// ============================================================================
---// GUN REGISTRY (агрессивный сбор)
+--// GUN REGISTRY (Рекурсивный поиск)
 --// ============================================================================
+local function hasGunFields(tbl)
+    if type(tbl) ~= "table" then return false end
+    local count = 0
+    for _, k in ipairs(SPREAD_KEYS) do if tbl[k] ~= nil then count = count + 1 end end
+    for _, k in ipairs(RECOIL_KEYS) do if tbl[k] ~= nil then count = count + 1 end end
+    for _, k in ipairs(RATE_KEYS) do if tbl[k] ~= nil then count = count + 1 end end
+    if tbl.FireRate ~= nil then count = count + 1 end
+    return count >= 2
+end
+
 local function scanGuns()
     local ClientItem = ensureClientItem()
     if not ClientItem then return 0 end
@@ -202,67 +174,49 @@ local function scanGuns()
     local before = 0
     for _ in pairs(registry) do before = before + 1 end
 
-    -- Если это ClientItem с вложенными Info
-    if isClientItem(ClientItem) then
-        for key, value in pairs(ClientItem) do
-            if type(value) == "table" and value.Info and type(value.Info) == "table" then
-                registry[tostring(key)] = registry[tostring(key)] or { Info = value.Info, Original = {}, Instance = value }
-            end
-        end
-    end
-
-    -- Если это одиночная таблица с полями
-    if hasGunFields(ClientItem) then
-        local name = "Gun_" .. tostring(math.random(1000, 9999))
-        registry[name] = registry[name] or { Info = ClientItem, Original = {}, Instance = ClientItem }
-    end
-
-    -- Рекурсивный обход
-    local function walk(t, depth, visited)
+    local function walk(t, depth, visited, namePrefix)
         if depth > 5 or type(t) ~= "table" then return end
         visited = visited or {}
         if visited[t] then return end
         visited[t] = true
 
+        if hasGunFields(t) then
+            local name = namePrefix .. "_" .. tostring(math.random(1000, 9999))
+            registry[name] = registry[name] or { Info = t, Original = {}, Instance = t }
+        end
+
         for k, v in pairs(t) do
             if type(k) == "string" and type(v) == "table" then
-                if v.Info and type(v.Info) == "table" then
+                if v.Info and type(v.Info) == "table" and hasGunFields(v.Info) then
                     registry[k] = registry[k] or { Info = v.Info, Original = {}, Instance = v }
-                elseif hasGunFields(v) then
-                    registry[k] = registry[k] or { Info = v, Original = {}, Instance = v }
                 end
-                walk(v, depth + 1, visited)
+                walk(v, depth + 1, visited, namePrefix .. "_" .. tostring(k))
             end
         end
     end
-    walk(ClientItem, 0)
+
+    walk(ClientItem, 0, nil, "CI")
+
+    -- Дополнительный поиск в ReplicatedStorage (например, папка Weapons)
+    if ReplicatedStorage then
+        for _, child in ipairs(ReplicatedStorage:GetDescendants()) do
+            if child:IsA("ModuleScript") then
+                local ok, mod = pcall(require, child)
+                if ok and type(mod) == "table" and hasGunFields(mod) then
+                    registry[child.Name] = registry[child.Name] or { Info = mod, Original = {}, Instance = mod }
+                end
+            end
+        end
+    end
 
     local after = 0
     for _ in pairs(registry) do after = after + 1 end
-
-    -- Если ничего не нашли — выводим ключи ClientItem
-    if after == 0 and ClientItem then
-        local keys = {}
-        local i = 0
-        for k, v in pairs(ClientItem) do
-            i = i + 1
-            if i <= 30 then
-                keys[#keys + 1] = tostring(k) .. "(" .. type(v) .. ")"
-            end
-        end
-        logwarn("ClientItem found, but no guns. Keys: " .. table.concat(keys, ", "))
-    end
-
     return after - before
 end
 
 --// ============================================================================
 --// APPLY MODS
 --// ============================================================================
-local SPREAD_KEYS = { "ShootSpread", "Spread", "WeaponSpread", "Inaccuracy" }
-local RECOIL_KEYS = { "ShootRecoil", "Recoil", "RecoilHorizontal", "RecoilVertical", "CameraRecoil" }
-local RATE_KEYS   = { "ShootCooldown", "QuickShotCooldown", "Cooldown" }
-
 local function applyToGun(name, entry)
     local info = entry.Info
     if not info then return end
@@ -346,10 +300,16 @@ local function installHook()
                         break
                     end
                 end
-                if not matched and self.Info then
-                    local name = tostring(self.Name or ("UnknownGun_" .. tostring(math.random(1000, 9999))))
-                    R.Internal.GunRegistry[name] = { Info = self.Info, Original = {}, Instance = self }
-                    applyToGun(name, R.Internal.GunRegistry[name])
+                
+                -- Если оружие не найдено в реестре, пробуем найти статы в self
+                if not matched then
+                    local targetTable = self.Info or self
+                    if hasGunFields(targetTable) then
+                        local name = tostring(self.Name or ("UnknownGun_" .. tostring(math.random(1000, 9999))))
+                        R.Internal.GunRegistry[name] = { Info = targetTable, Original = {}, Instance = self }
+                        applyToGun(name, R.Internal.GunRegistry[name])
+                        log("Auto-registered gun from hook: " .. name)
+                    end
                 end
             end)
         end
@@ -514,14 +474,8 @@ task.spawn(function()
                 .. " hooked=" .. tostring(R.Internal.Hooked)
                 .. " guns=" .. tostring(count)
                 .. " foundBy=" .. tostring(R.Internal.FoundBy or "?"))
-            if R.Internal.ClientItem then
-                local i = 0
-                for k, v in pairs(R.Internal.ClientItem) do
-                    i = i + 1
-                    if i <= 15 then log("  key: " .. tostring(k) .. " (" .. type(v) .. ")") end
-                end
-                if i == 0 then log("  ClientItem is empty table") end
-                if i > 15 then log("  ... (" .. tostring(i - 15) .. " more)") end
+            for name, entry in pairs(R.Internal.GunRegistry) do
+                log(" - Registered gun: " .. tostring(name))
             end
         end,
     })
