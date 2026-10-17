@@ -2,10 +2,17 @@
 --// AirHub — rivals extra tab (airhubUI build)
 --// Ported from Rivals Mini: No Spread / No Recoil / Rapid Fire
 --// + расширенный поиск ClientItem (getloadedmodules / getgc / рекурсия)
+--// + исправлены предупреждения Luau LSP (Type Checking & Semicolons)
 --// ============================================================================
 local H = getgenv().AirHub
-if not H or not H._CoreLoaded then warn("[AirHub] rivals extra tab: core not loaded") return end
-if H.Rivals and H.Rivals._Loaded then warn("[AirHub] rivals extra tab: already loaded") return end
+if not H or not H._CoreLoaded then 
+    warn("[AirHub] rivals extra tab: core not loaded") 
+    return 
+end
+if H.Rivals and H.Rivals._Loaded then 
+    warn("[AirHub] rivals extra tab: already loaded") 
+    return 
+end
 
 local Util        = H.Util
 local Players     = Util.Players
@@ -46,6 +53,7 @@ R.Functions = R.Functions or {}
 local function log(msg)
     print("[AirHub] rivals: " .. tostring(msg))
 end
+
 local function logwarn(msg)
     warn("[AirHub] rivals: " .. tostring(msg))
 end
@@ -65,13 +73,20 @@ local function findClientItemByPaths()
         { "PlayerScripts", "Modules", "Weapons", "ClientItem" },
         { "PlayerScripts", "Modules", "ClientWeapons", "ClientItem" },
     }
+    
     for _, path in ipairs(candidates) do
-        local node, ok = LocalPlayer, true
+        local node = LocalPlayer
+        local ok = true
+        
         for _, name in ipairs(path) do
             local child = node and node:FindFirstChild(name)
-            if not child then ok = false; break end
+            if not child then
+                ok = false
+                break
+            end
             node = child
         end
+        
         if ok and node then
             local rok, mod = pcall(require, node)
             if rok and type(mod) == "table" then
@@ -91,11 +106,14 @@ local function findClientItemByLoadedModules()
         end
         return getloadedmodules()
     end)
-    if not ok or type(modules) ~= "table" then return nil end
+    
+    if not ok or type(modules) ~= "table" then 
+        return nil 
+    end
+    
     for _, m in ipairs(modules) do
         if type(m) == "table" then
             local nm = tostring(m):lower()
-            -- модуль ClientItem обычно имеет .Input и .Info-подобные структуры
             if nm:find("clientitem") or nm:find("clientweapon") then
                 if m.Input or m.ShootRecoil then
                     log("found via getloadedmodules: " .. tostring(m))
@@ -104,12 +122,15 @@ local function findClientItemByLoadedModules()
             end
         end
     end
+    
     -- Ещё одна попытка: ищем любой модуль с .Input и кучей оружейных полей
     for _, m in ipairs(modules) do
         if type(m) == "table" and m.Input then
             local infoCount = 0
             for _, v in pairs(m) do
-                if type(v) == "table" and v.Info then infoCount = infoCount + 1 end
+                if type(v) == "table" and v.Info then 
+                    infoCount = infoCount + 1 
+                end
             end
             if infoCount >= 3 then
                 log("found via getloadedmodules (heuristic): " .. tostring(m))
@@ -117,21 +138,31 @@ local function findClientItemByLoadedModules()
             end
         end
     end
+    
     return nil
 end
 
 -- Стратегия 3: getgc(true) — только таблицы, в которых есть Input и Info-структуры
 local function findClientItemByGc()
     local ok, gc = pcall(function()
-        if type(getgc) ~= "function" then return nil end
+        if type(getgc) ~= "function" then 
+            return nil 
+        end
         return getgc(true)
     end)
-    if not ok or type(gc) ~= "table" then return nil end
+    
+    if not ok or type(gc) ~= "table" then 
+        return nil 
+    end
+    
     for _, obj in ipairs(gc) do
         if type(obj) == "table" and obj.Input then
             local hasInfo = false
             for _, v in pairs(obj) do
-                if type(v) == "table" and v.Info then hasInfo = true; break end
+                if type(v) == "table" and v.Info then 
+                    hasInfo = true
+                    break 
+                end
             end
             if hasInfo then
                 log("found via getgc")
@@ -139,24 +170,37 @@ local function findClientItemByGc()
             end
         end
     end
+    
     return nil
 end
 
 -- Стратегия 4: рекурсивный обход контейнера на поиск ModuleScript по имени
 local function deepFindModule(root, name, depth, visited)
-    if depth > 6 or not root then return nil end
+    if depth > 6 or not root then 
+        return nil 
+    end
+    
     visited = visited or {}
-    if visited[root] then return nil end
+    if visited[root] then 
+        return nil 
+    end
     visited[root] = true
+    
     local child = root:FindFirstChild(name)
     if child and child:IsA("ModuleScript") then
         local rok, mod = pcall(require, child)
-        if rok and type(mod) == "table" then return mod, child end
+        if rok and type(mod) == "table" then 
+            return mod, child 
+        end
     end
+    
     for _, c in ipairs(root:GetChildren()) do
         local found, instance = deepFindModule(c, name, depth + 1, visited)
-        if found then return found, instance end
+        if found then 
+            return found, instance 
+        end
     end
+    
     return nil
 end
 
@@ -166,6 +210,7 @@ local function findClientItemByRecursiveScan()
         { ReplicatedStorage, "ReplicatedStorage" },
     }
     local namesToTry = { "ClientItem", "ClientWeapon", "WeaponClient", "ClientWeapons" }
+    
     for _, rootInfo in ipairs(roots) do
         local root, rootName = rootInfo[1], rootInfo[2]
         if root then
@@ -183,22 +228,36 @@ end
 
 local function findClientItem()
     local mod, path = findClientItemByPaths()
-    if mod then R.Internal.FoundBy = "paths"; return mod, path end
+    if mod then 
+        R.Internal.FoundBy = "paths"
+        return mod, path 
+    end
 
     mod = findClientItemByLoadedModules()
-    if mod then R.Internal.FoundBy = "getloadedmodules"; return mod end
+    if mod then 
+        R.Internal.FoundBy = "getloadedmodules"
+        return mod 
+    end
 
     mod = findClientItemByGc()
-    if mod then R.Internal.FoundBy = "getgc"; return mod end
+    if mod then 
+        R.Internal.FoundBy = "getgc"
+        return mod 
+    end
 
     mod = findClientItemByRecursiveScan()
-    if mod then R.Internal.FoundBy = "recursive"; return mod end
+    if mod then 
+        R.Internal.FoundBy = "recursive"
+        return mod 
+    end
 
     return nil
 end
 
 local function ensureClientItem()
-    if R.Internal.ClientItem then return R.Internal.ClientItem end
+    if R.Internal.ClientItem then 
+        return R.Internal.ClientItem 
+    end
     local mod, path = findClientItem()
     if mod then
         R.Internal.ClientItem = mod
@@ -212,11 +271,15 @@ end
 --// ============================================================================
 local function scanGuns()
     local ClientItem = ensureClientItem()
-    if not ClientItem then return 0 end
+    if not ClientItem then 
+        return 0 
+    end
+    
     local registry = R.Internal.GunRegistry
-    -- Не сбрасываем, если уже что-то есть — просто досоздаём недостающие
     local before = 0
-    for _ in pairs(registry) do before = before + 1 end
+    for _ in pairs(registry) do 
+        before = before + 1 
+    end
 
     for key, value in pairs(ClientItem) do
         if type(value) == "table" then
@@ -229,10 +292,16 @@ local function scanGuns()
     end
 
     local function walk(t, depth, visited)
-        if depth > 4 or type(t) ~= "table" then return end
+        if depth > 4 or type(t) ~= "table" then 
+            return 
+        end
+        
         visited = visited or {}
-        if visited[t] then return end
+        if visited[t] then 
+            return 
+        end
         visited[t] = true
+        
         for k, v in pairs(t) do
             if type(k) == "string" and type(v) == "table" then
                 if v.Info and type(v.Info) == "table" and not registry[k] then
@@ -245,7 +314,9 @@ local function scanGuns()
     walk(ClientItem, 0)
 
     local after = 0
-    for _ in pairs(registry) do after = after + 1 end
+    for _ in pairs(registry) do 
+        after = after + 1 
+    end
 
     -- Если ClientItem найден, но ничего не нашли — логируем структуру
     if after == 0 and ClientItem then
@@ -260,7 +331,7 @@ local function scanGuns()
         logwarn("ClientItem found, but no guns. Structure keys: " .. table.concat(keys, ", "))
     end
 
-    return after - before -- сколько добавили за этот скан
+    return after - before
 end
 
 --// ============================================================================
@@ -272,7 +343,9 @@ local RATE_KEYS   = { "ShootCooldown", "QuickShotCooldown", "Cooldown" }
 
 local function applyToGun(name, entry)
     local info = entry.Info
-    if not info then return end
+    if not info then 
+        return 
+    end
 
     if not next(entry.Original) then
         for k, v in pairs(info) do
@@ -285,14 +358,19 @@ local function applyToGun(name, entry)
     local function setKeys(keys, value)
         for _, k in ipairs(keys) do
             if info[k] ~= nil then
-                pcall(function() info[k] = value end)
+                pcall(function()
+                    info[k] = value
+                end)
             end
         end
     end
+    
     local function restoreKeys(keys)
         for _, k in ipairs(keys) do
             if entry.Original[k] ~= nil then
-                pcall(function() info[k] = entry.Original[k] end)
+                pcall(function()
+                    info[k] = entry.Original[k]
+                end)
             end
         end
     end
@@ -312,12 +390,16 @@ local function applyToGun(name, entry)
     if R.Settings.Enabled and R.Settings.RapidFire then
         setKeys(RATE_KEYS, 0)
         if info.FireRate ~= nil then
-            pcall(function() info.FireRate = R.Settings.FireRateValue end)
+            pcall(function()
+                info.FireRate = R.Settings.FireRateValue
+            end)
         end
     else
         restoreKeys(RATE_KEYS)
         if entry.Original.FireRate ~= nil then
-            pcall(function() info.FireRate = entry.Original.FireRate end)
+            pcall(function()
+                info.FireRate = entry.Original.FireRate
+            end)
         end
     end
 end
@@ -332,11 +414,18 @@ end
 --// HOOK ClientItem.Input
 --// ============================================================================
 local function installHook()
-    if R.Internal.Hooked then return true end
+    if R.Internal.Hooked then 
+        return true 
+    end
+    
     local ClientItem = ensureClientItem()
-    if not ClientItem then return false end
-    if not ClientItem.Input then
-        logwarn("ClientItem has no .Input field — cannot hook")
+    if not ClientItem then 
+        return false 
+    end
+    
+    -- Проверяем, что Input это функция (убирает ошибку Expected this to be '(...any) -> (...any)')
+    if type(ClientItem.Input) ~= "function" then
+        logwarn("ClientItem has no valid .Input function — cannot hook")
         return false
     end
 
@@ -364,7 +453,8 @@ local function installHook()
 
     local ok = pcall(function()
         if hookfunction then
-            R.Internal.OriginalInput = hookfunction(ClientItem.Input, hookedInput)
+            local targetFn = ClientItem.Input :: any -- Каст для LSP, чтобы не ругался на тип
+            R.Internal.OriginalInput = hookfunction(targetFn, hookedInput)
         elseif hookmetamethod then
             R.Internal.OriginalInput = ClientItem.Input
             ClientItem.Input = hookedInput
@@ -390,7 +480,11 @@ local function startRivals()
     R.Internal._t = 0
     local added = scanGuns()
     local count = 0
-    for _ in pairs(R.Internal.GunRegistry) do count = count + 1 end
+    
+    for _ in pairs(R.Internal.GunRegistry) do 
+        count = count + 1 
+    end
+    
     log("scan: +" .. tostring(added) .. " (total " .. tostring(count) .. ") foundBy=" .. tostring(R.Internal.FoundBy or "?"))
     installHook()
     applyAll()
@@ -398,12 +492,20 @@ local function startRivals()
     if not R.Internal.ReapplyActive then
         R.Internal.ReapplyActive = true
         R.Internal.Conns.reapply = RunService.Heartbeat:Connect(function()
-            if H.ShuttingDown then return end
-            if not R.Settings.Enabled then return end
+            if H.ShuttingDown then 
+                return 
+            end
+            if not R.Settings.Enabled then 
+                return 
+            end
+            
             R.Internal._t = (R.Internal._t or 0) + 1
             if R.Internal._t % 120 == 0 then
                 local before = 0
-                for _ in pairs(R.Internal.GunRegistry) do before = before + 1 end
+                for _ in pairs(R.Internal.GunRegistry) do 
+                    before = before + 1 
+                end
+                
                 if before == 0 then
                     scanGuns()
                     installHook()
@@ -420,7 +522,9 @@ local function stopRivals()
     R.Settings.Enabled = false
     applyAll()
     if R.Internal.Conns.reapply then
-        pcall(function() R.Internal.Conns.reapply:Disconnect() end)
+        pcall(function() 
+            R.Internal.Conns.reapply:Disconnect() 
+        end)
         R.Internal.Conns.reapply = nil
     end
     R.Internal.ReapplyActive = false
@@ -432,11 +536,18 @@ local function fullRescan()
     R.Internal.Path = nil
     R.Internal.FoundBy = nil
     R.Internal.GunRegistry = {}
+    
     local added = scanGuns()
     local count = 0
-    for _ in pairs(R.Internal.GunRegistry) do count = count + 1 end
+    for _ in pairs(R.Internal.GunRegistry) do 
+        count = count + 1 
+    end
+    
     log("rescan: +" .. tostring(added) .. " (total " .. tostring(count) .. ") foundBy=" .. tostring(R.Internal.FoundBy or "?"))
-    if not R.Internal.Hooked then installHook() end
+    
+    if not R.Internal.Hooked then 
+        installHook() 
+    end
     applyAll()
 end
 
@@ -446,8 +557,12 @@ end
 task.spawn(function()
     local deadline = tick() + 30
     while tick() < deadline do
-        if H.ShuttingDown then return end
-        if getgenv().airhubUI_Window then break end
+        if H.ShuttingDown then 
+            return 
+        end
+        if getgenv().airhubUI_Window then 
+            break 
+        end
         task.wait(0.25)
     end
 
@@ -458,7 +573,6 @@ task.spawn(function()
     end
 
     local tab = Window:AddTab({ Name = "rivals", Icon = "R" })
-
     local secMain = tab:CreateSection({ Name = "Rivals Mods" })
 
     secMain:AddToggle({
@@ -466,69 +580,107 @@ task.spawn(function()
         Value = R.Settings.Enabled,
         Callback = function(v)
             R.Settings.Enabled = v
-            if v then startRivals() else stopRivals() end
+            if v then
+                startRivals()
+            else
+                stopRivals()
+            end
         end,
     })
 
     secMain:AddToggle({
         Name = "No Spread",
         Value = R.Settings.NoSpread,
-        Callback = function(v) R.Settings.NoSpread = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.NoSpread = v
+            applyAll() 
+        end,
     })
+    
     secMain:AddSlider({
         Name = "Spread Value",
         Value = R.Settings.SpreadValue,
         Min = 0, Max = 10, Decimals = 2,
-        Callback = function(v) R.Settings.SpreadValue = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.SpreadValue = v
+            applyAll() 
+        end,
     })
 
     secMain:AddToggle({
         Name = "No Recoil",
         Value = R.Settings.NoRecoil,
-        Callback = function(v) R.Settings.NoRecoil = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.NoRecoil = v
+            applyAll() 
+        end,
     })
+    
     secMain:AddSlider({
         Name = "Recoil Value",
         Value = R.Settings.RecoilValue,
         Min = 0, Max = 10, Decimals = 2,
-        Callback = function(v) R.Settings.RecoilValue = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.RecoilValue = v
+            applyAll() 
+        end,
     })
 
     secMain:AddToggle({
         Name = "Rapid Fire",
         Value = R.Settings.RapidFire,
-        Callback = function(v) R.Settings.RapidFire = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.RapidFire = v
+            applyAll() 
+        end,
     })
+    
     secMain:AddSlider({
         Name = "Fire Rate Value",
         Value = R.Settings.FireRateValue,
         Min = 0.001, Max = 0.5, Decimals = 3,
-        Callback = function(v) R.Settings.FireRateValue = v; applyAll() end,
+        Callback = function(v) 
+            R.Settings.FireRateValue = v
+            applyAll() 
+        end,
     })
 
     --// Debug section
     local secDbg = tab:CreateSection({ Name = "Debug" })
     secDbg:AddButton({
         Name = "Rescan ClientItem",
-        Callback = function() fullRescan() end,
+        Callback = function() 
+            fullRescan() 
+        end,
     })
+    
     secDbg:AddButton({
         Name = "Print Status",
         Callback = function()
             local count = 0
-            for _ in pairs(R.Internal.GunRegistry) do count = count + 1 end
+            for _ in pairs(R.Internal.GunRegistry) do 
+                count = count + 1 
+            end
+            
             log("ClientItem=" .. tostring(R.Internal.ClientItem ~= nil)
                 .. " hooked=" .. tostring(R.Internal.Hooked)
                 .. " guns=" .. tostring(count)
                 .. " foundBy=" .. tostring(R.Internal.FoundBy or "?"))
+                
             if R.Internal.ClientItem then
                 local i = 0
                 for k, v in pairs(R.Internal.ClientItem) do
                     i = i + 1
-                    if i <= 15 then log("  key: " .. tostring(k) .. " (" .. type(v) .. ")") end
+                    if i <= 15 then 
+                        log("  key: " .. tostring(k) .. " (" .. type(v) .. ")") 
+                    end
                 end
-                if i == 0 then log("  ClientItem is empty table") end
-                if i > 15 then log("  ... (" .. tostring(i - 15) .. " more)") end
+                if i == 0 then 
+                    log("  ClientItem is empty table") 
+                end
+                if i > 15 then 
+                    log("  ... (" .. tostring(i - 15) .. " more)") 
+                end
             end
         end,
     })
