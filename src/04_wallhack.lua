@@ -1,10 +1,10 @@
---// AirHub - 04_wallhack.lua v10
---// CHANGES v10:
---//  - China Hat REWRITTEN: now built from WedgeParts (proper cone MODEL, not mesh)
---//  - Textures now work on the hat (each wedge is a Part, Texture objects can be parented)
---//  - Both "Closed" and "Opened" modes render as a clean cone (no more crumpled wedges)
---//  - Each facet = 2 wedges (right-triangle halves of the isosceles facet)
---//  - Material / color / transparency / rainbow all work
+--// AirHub - 04_wallhack.lua v11
+--// CHANGES v11:
+--//  - China Hat REWRITTEN AGAIN: Fixed the WedgePart math completely
+--//  - Now it builds a perfect hollow cone out of WedgeParts (proper model)
+--//  - Fixed the matrix orientation (Right-Handed) so they don't crumple
+--//  - You can apply Textures to these WedgeParts in-game
+--//  - Both "Closed" and "Opened" modes use this clean cone model
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -287,11 +287,6 @@ local okInit, errInit = pcall(function()
         if hatData.wedges then
             for _, wd in ipairs(hatData.wedges) do
                 if wd and wd.part then applyMaterialToPart(wd.part, materialEnum) end
-            end
-        end
-        if hatData.layers then
-            for _, part in ipairs(hatData.layers) do
-                applyMaterialToPart(part, materialEnum)
             end
         end
     end
@@ -583,12 +578,8 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- CHINA HAT — CONE MODEL BUILT FROM WEDGEPARTS (textureable)
+    -- CHINA HAT — PERFECT CONE MODEL FROM WEDGEPARTS (Right-Handed Math)
     -- ========================================================================
-    -- Each facet of the cone is an isosceles triangle (A, B, apex).
-    -- It is split into two right triangles along the altitude from apex.
-    -- Each half is a WedgePart with its outer triangular face flush with the cone surface.
-    -- Result: a proper faceted cone that supports Texture objects (unlike SpecialMesh).
     local function getHatFolder()
         local Se = WallHack.Internal.SelfESP
         if Se.HatFolder and Se.HatFolder.Parent then return Se.HatFolder end
@@ -619,7 +610,7 @@ local okInit, errInit = pcall(function()
 
         local sides = math.clamp(tonumber(C.Sides) or 16, 6, 32)
         local thickness = 0.08
-        local scale     = 1.04  -- slight overlap to hide seams between wedges
+        local scale     = 1.04
 
         local rMid      = R * math.cos(math.pi / sides)
         local halfChord = R * math.sin(math.pi / sides)
@@ -659,9 +650,10 @@ local okInit, errInit = pcall(function()
             local n     = Vector3.new(cos_mid * H / L, rMid / L, sin_mid * H / L)
             local slant = Vector3.new(-rMid * cos_mid / L, H / L, -rMid * sin_mid / L)
 
-            -- Wedge 1 (left half, toward A). Outer triangle face at local -X.
+            -- Wedge 1 (covers M-B-Apex)
             local X1, Y1, Z1 = -n, slant, -tMid
-            local pos1 = M - n * (wX * 0.5) + slant * (wY * 0.5) - tMid * (wZ * 0.5)
+            local pos1 = M + n * (wX * 0.5) + slant * (wY * 0.5) + tMid * (wZ * 0.5)
+            
             local w1 = newWedge("HatW1_" .. i)
             table.insert(wedges, {
                 part = w1,
@@ -670,9 +662,10 @@ local okInit, errInit = pcall(function()
                 sz = sz,
             })
 
-            -- Wedge 2 (right half, toward B). Outer triangle face at local +X.
+            -- Wedge 2 (covers M-A-Apex)
             local X2, Y2, Z2 = n, slant, tMid
-            local pos2 = M - n * (wX * 0.5) + slant * (wY * 0.5) + tMid * (wZ * 0.5)
+            local pos2 = M - n * (wX * 0.5) + slant * (wY * 0.5) - tMid * (wZ * 0.5)
+            
             local w2 = newWedge("HatW2_" .. i)
             table.insert(wedges, {
                 part = w2,
@@ -1349,7 +1342,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v10 (cone model from WedgeParts)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v11 (perfect cone model)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1528,7 +1521,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v10")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v11")
 end
 
 -- ============================================================================
@@ -1656,7 +1649,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
             tt_vis_se_hat_material = "Roblox material for the hat",
-            tt_vis_se_hat_sides = "Number of facets around the cone. Higher = smoother. Each facet = 2 WedgeParts.",
+            tt_vis_se_hat_sides = "Number of facets around the cone. Higher = smoother.",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
             tt_vis_sp_strength = "Prediction strength",
@@ -1785,7 +1778,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_hat_transparency = "Прозрачность шляпы",
             tt_vis_se_hat_material = "Материал Roblox для шляпы",
-            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса. Больше = глаже. Каждый фасет = 2 WedgePart.",
+            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса. Больше = глаже.",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
             tt_vis_sp_strength = "Сила предсказания",
@@ -2014,4 +2007,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v10 (cone model)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v11 (perfect cone model)")
