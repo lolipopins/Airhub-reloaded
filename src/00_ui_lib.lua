@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.7.2 — Added: element state persistence in configs (incl. loadstring tabs)
+-- airhubUI v1.7.3 — Fixed: config save crash (Elements in pcall), NaN guards
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -11,11 +11,11 @@ local HttpService      = game:GetService("HttpService")
 local LocalPlayer      = Players.LocalPlayer
 
 -- ══════════════════════════════════════════════════════════════
--- CONFIG (объявить ДО T — иначе замыкание видит старую)
+-- CONFIG
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.7.2",
+    Version = "1.7.3",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -261,7 +261,7 @@ local L = {
 }
 
 -- ══════════════════════════════════════════════════════════════
--- T() — with format crash protection
+-- T()
 -- ══════════════════════════════════════════════════════════════
 local function T(key, ...)
     if not key then return "" end
@@ -383,6 +383,9 @@ local function tryRead(path)
 end
 local function writeConfigFile(name, jsonStr)
     if not canReadWrite() then return false, "writefile/readfile missing" end
+    if type(jsonStr) ~= "string" or jsonStr == "" then
+        return false, "empty json string"
+    end
     ensureFolder()
     local errors = {}
     for _, path in ipairs(tryPaths(name)) do
@@ -2000,7 +2003,6 @@ end
 
 local function createKeybind(section, opts)
     local value = opts.Value or Enum.KeyCode.F
-    if typeof(value) == "Enum" then value = Enum.KeyCode.F end
     local modes = opts.Modes or {}
     local state = getSectionState(section)
     local stateId = opts.Key or opts.Name or "kb"
@@ -2482,13 +2484,12 @@ local function createWindow(opts)
     end
 
     -- ────────────────────────────────────────────────────────────
-    -- v1.7.2: Element state persistence helpers
+    -- v1.7.3: Element state persistence (robust)
     -- ────────────────────────────────────────────────────────────
-    -- Встроенные вкладки, чьё состояние уже покрыто Theme/Config — их элементы
-    -- не сохраняем в Elements, иначе при импорте они откатят текущую тему.
     local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
 
     local function serializeElemKey(v)
+        if v == nil then return "" end
         if typeof(v) == "EnumItem" then return tostring(v) end
         if type(v) == "string" then return v end
         return tostring(v)
@@ -2496,6 +2497,7 @@ local function createWindow(opts)
 
     local function deserializeElemKey(s)
         if type(s) ~= "string" then return s end
+        if s == "" or s == "nil" then return nil end
         local enumType, enumName = s:match("^Enum%.(%w+)%.(%w+)$")
         if enumType and enumName then
             local ok, val = pcall(function() return Enum[enumType][enumName] end)
@@ -2504,56 +2506,74 @@ local function createWindow(opts)
         return s
     end
 
+    local function isFiniteNum(n)
+        return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
+    end
+
     function window:ExportSettings()
-        local data = {Theme = {}, Config = {}, Elements = {}}
+        local data = {Theme = {}, Config = {}}
         for k, v in pairs(Theme) do
             if typeof(v) == "Color3" then data.Theme[k] = {v.R, v.G, v.B} end
         end
         for k, v in pairs(Config) do
-            if type(v) == "number" or type(v) == "string" or type(v) == "boolean" then
-                data.Config[k] = v
-            end
+            if isFiniteNum(v) then data.Config[k] = v
+            elseif type(v) == "string" or type(v) == "boolean" then data.Config[k] = v end
         end
-        -- v1.7.2: сохраняем значения элементов со всех НЕ-встроенных вкладок.
-        -- Это покрывает и вкладки, созданные через loadstring()-скрипты.
-        for _, tab in ipairs(self.Tabs) do
-            local tabId = tab._nameKey or tab.Name
-            if tabId and not BUILTIN_TABS[tabId] then
-                local tabData = {}
-                for _, section in ipairs(tab.Sections) do
-                    local secId = section._tKey or section.Name
-                    if secId then
-                        local secData = {}
-                        for _, el in ipairs(section.Elements) do
-                            local elId = el._rawName
-                            local elType = (el._meta and el._meta.Type) or el._type
-                            if elId and el.Get and elType then
-                                if elType == "Colorpicker" then
-                                    local ok, c, a = pcall(el.Get)
-                                    if ok and typeof(c) == "Color3" then
-                                        secData[elId] = {r = c.R, g = c.G, b = c.B, alpha = a or 0}
-                                    end
-                                elseif elType == "Keybind" then
-                                    local ok, v = pcall(el.Get)
-                                    if ok then secData[elId] = serializeElemKey(v) end
-                                elseif elType == "Button" then
-                                    -- Кнопки не хранят состояние — пропускаем
-                                else
-                                    local ok, v = pcall(el.Get)
-                                    if ok and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
-                                        secData[elId] = v
+        -- Elements (wrapped in pcall; if it fails, config still saves)
+        local elemsOk, elems = pcall(function()
+            local elems = {}
+            for _, tab in ipairs(self.Tabs) do
+                local tabId = tab._nameKey or tab.Name
+                if tabId and not BUILTIN_TABS[tabId] then
+                    local tabData = {}
+                    for _, section in ipairs(tab.Sections) do
+                        local secId = section._tKey or section.Name
+                        if secId then
+                            local secData = {}
+                            for _, el in ipairs(section.Elements) do
+                                local elId = el._rawName
+                                local elType = (el._meta and el._meta.Type) or el._type
+                                if elId and el.Get and elType then
+                                    if elType == "Colorpicker" then
+                                        local ok, c, a = pcall(el.Get)
+                                        if ok and typeof(c) == "Color3" then
+                                            secData[elId] = {r = c.R, g = c.G, b = c.B, alpha = isFiniteNum(a) and a or 0}
+                                        end
+                                    elseif elType == "Keybind" then
+                                        local ok, v = pcall(el.Get)
+                                        if ok then secData[elId] = serializeElemKey(v) end
+                                    elseif elType == "Button" then
+                                        -- skip (no persistent state)
+                                    else
+                                        local ok, v = pcall(el.Get)
+                                        if ok then
+                                            if type(v) == "boolean" or type(v) == "string" then
+                                                secData[elId] = v
+                                            elseif isFiniteNum(v) then
+                                                secData[elId] = v
+                                            end
+                                        end
                                     end
                                 end
                             end
+                            if next(secData) then tabData[secId] = secData end
                         end
-                        if next(secData) then tabData[secId] = secData end
                     end
+                    if next(tabData) then elems[tabId] = tabData end
                 end
-                if next(tabData) then data.Elements[tabId] = tabData end
             end
+            return elems
+        end)
+        if elemsOk and elems and next(elems) then
+            data.Elements = elems
+        elseif not elemsOk then
+            warn("[airhubUI] Elements serialization failed: " .. tostring(elems))
         end
         local ok, str = pcall(function() return HttpService:JSONEncode(data) end)
-        if not ok then return nil end
+        if not ok or type(str) ~= "string" then
+            warn("[airhubUI] Export JSON encode failed: " .. tostring(str))
+            return nil
+        end
         return str
     end
 
@@ -2576,33 +2596,35 @@ local function createWindow(opts)
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
         end
-        -- v1.7.2: восстановление значений элементов (включая loadstring-вкладки)
+        -- Elements (wrapped in pcall; import failure shouldn't break theme/config restore)
         if type(data.Elements) == "table" then
-            for _, tab in ipairs(self.Tabs) do
-                local tabId = tab._nameKey or tab.Name
-                if tabId and not BUILTIN_TABS[tabId] then
-                    local tabData = data.Elements[tabId]
-                    if type(tabData) == "table" then
-                        for _, section in ipairs(tab.Sections) do
-                            local secId = section._tKey or section.Name
-                            local secData = secId and tabData[secId]
-                            if type(secData) == "table" then
-                                for _, el in ipairs(section.Elements) do
-                                    local elId = el._rawName
-                                    local elType = (el._meta and el._meta.Type) or el._type
-                                    local savedVal = elId and secData[elId]
-                                    if elId and el.Set and elType and savedVal ~= nil then
-                                        if elType == "Colorpicker" then
-                                            if type(savedVal) == "table" and savedVal.r then
-                                                local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
-                                                pcall(el.Set, c, savedVal.alpha or 0)
+            local elemsOk, elemsErr = pcall(function()
+                for _, tab in ipairs(self.Tabs) do
+                    local tabId = tab._nameKey or tab.Name
+                    if tabId and not BUILTIN_TABS[tabId] then
+                        local tabData = data.Elements[tabId]
+                        if type(tabData) == "table" then
+                            for _, section in ipairs(tab.Sections) do
+                                local secId = section._tKey or section.Name
+                                local secData = secId and tabData[secId]
+                                if type(secData) == "table" then
+                                    for _, el in ipairs(section.Elements) do
+                                        local elId = el._rawName
+                                        local elType = (el._meta and el._meta.Type) or el._type
+                                        local savedVal = elId and secData[elId]
+                                        if elId and el.Set and elType and savedVal ~= nil then
+                                            if elType == "Colorpicker" then
+                                                if type(savedVal) == "table" and isFiniteNum(savedVal.r) then
+                                                    local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
+                                                    pcall(el.Set, c, savedVal.alpha or 0)
+                                                end
+                                            elseif elType == "Keybind" then
+                                                pcall(el.Set, deserializeElemKey(savedVal))
+                                            elseif elType == "Button" then
+                                                -- skip
+                                            else
+                                                pcall(el.Set, savedVal)
                                             end
-                                        elseif elType == "Keybind" then
-                                            pcall(el.Set, deserializeElemKey(savedVal))
-                                        elseif elType == "Button" then
-                                            -- кнопки не восстанавливаем
-                                        else
-                                            pcall(el.Set, savedVal)
                                         end
                                     end
                                 end
@@ -2610,8 +2632,11 @@ local function createWindow(opts)
                         end
                     end
                 end
+            end)
+            if not elemsOk then
+                warn("[airhubUI] Elements import failed: " .. tostring(elemsErr))
             end
-            reevaluateVisibility()
+            pcall(reevaluateVisibility)
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         return true
@@ -2984,6 +3009,8 @@ secFileConfigs:AddButton({Name = "btn_save_file", Callback = function()
         elseif str then
             print("[airhubUI Config] " .. str)
             Notify("airhubUI", T("n_fs_unavail_console"), "warning", 5)
+        else
+            Notify("airhubUI", T("n_save_failed", "export failed"), "error", 8)
         end
         return
     end
