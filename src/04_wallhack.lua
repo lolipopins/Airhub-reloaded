@@ -1,11 +1,13 @@
---// AirHub - 04_wallhack.lua v4 (merged with ServerPosition)
---// CHANGES v4:
---//  - China Hat: real cone from stacked CylinderParts (materials apply per-part)
---//    No more SpecialMesh file mesh (rbxassetid://1033714).
---//  - Texture Chams: preset dropdown with built-in patterns + Custom ID fallback
---//    Presets: Studs/Inlet/Smooth (rbxasset:// bundled), Grid/Checker/Carbon/
---    Hexagon/Camo/Holographic (community asset IDs), None, Custom.
---//  - Migration: old TextureId → TexturePreset = "Custom" (or "None" if empty)
+--// AirHub - 04_wallhack.lua v5
+--// CHANGES v5:
+--//  - China Hat: TRIANGULAR CONE from WedgeParts
+--//    5 tiers × 8 wedges = 40 triangular facets. Materials apply per-wedge.
+--//    (no more cylinder circles; user wanted triangles)
+--//  - Texture Chams FIXED:
+--//    * Uses Texture instance (tileable, more visible than Decal)
+--//    * Presets: rbxassetid:// ONLY (rbxasset:// paths don't work as textures)
+--//    * Default TextureFaces = AllFaces (Front was invisible from behind)
+--//    * Custom preset works reliably — paste any valid rbxassetid://
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -30,7 +32,6 @@ WallHack.Visuals.BoxSettings = WallHack.Visuals.BoxSettings or {
     Transparency = 0.7, Thickness = 1, Filled = false, Increase = 1,
 }
 
--- Enemy Chams (was Glow) with texture preset
 do
     local existing = WallHack.Visuals.ChamsSettings or WallHack.Visuals.GlowSettings
     if existing and existing.FillColor then
@@ -48,16 +49,17 @@ do
             TexturePreset = "None",
             TextureId = "",
             TextureTransparency = 0.3,
-            TextureFaces = "Front",
+            TextureFaces = "AllFaces",  -- FIX: default to AllFaces for visibility
         }
     end
-    -- Migration: old TextureId → TexturePreset
     local C = WallHack.Visuals.ChamsSettings
     if C.TexturePreset == nil then
         local tid = C.TextureId or ""
         C.TexturePreset = (tid == "" or tid == "rbxassetid://0") and "None" or "Custom"
     end
     if C.TextureId == nil then C.TextureId = "" end
+    -- Migration: Front → AllFaces if user never explicitly chose (assume they hit the bug)
+    if C.TextureFaces == nil then C.TextureFaces = "AllFaces" end
     WallHack.Visuals.GlowSettings = WallHack.Visuals.ChamsSettings
 end
 local Chams = WallHack.Visuals.ChamsSettings
@@ -90,7 +92,7 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         TexturePreset = "None",
         TextureId = "",
         TextureTransparency = 0.3,
-        TextureFaces = "Front",
+        TextureFaces = "AllFaces",
     },
     ChinaHat = {
         Enabled = false,
@@ -99,9 +101,10 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         Size = 4, OffsetY = 1.8, Transparency = 0, Rotation = 0,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
+        Tiers = 5,          -- NEW: number of stepped tiers
+        Sides = 8,          -- NEW: wedges per tier ring
     },
 }
--- Migration: SelfESP.Chams texture
 do
     local C = WallHack.Visuals.SelfESP.Chams
     if C.TexturePreset == nil then
@@ -109,9 +112,15 @@ do
         C.TexturePreset = (tid == "" or tid == "rbxassetid://0") and "None" or "Custom"
     end
     if C.TextureId == nil then C.TextureId = "" end
-    -- Remove obsolete UseMesh from ChinaHat (no longer relevant)
+    if C.TextureFaces == nil then C.TextureFaces = "AllFaces" end
     if WallHack.Visuals.SelfESP.ChinaHat.UseMesh ~= nil then
         WallHack.Visuals.SelfESP.ChinaHat.UseMesh = nil
+    end
+    if WallHack.Visuals.SelfESP.ChinaHat.Tiers == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Tiers = 5
+    end
+    if WallHack.Visuals.SelfESP.ChinaHat.Sides == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Sides = 8
     end
 end
 
@@ -177,17 +186,13 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- TEXTURE PRESETS — built-in patterns for Texture Chams
+    -- TEXTURE PRESETS — rbxassetid:// only (rbxasset:// doesn't work reliably)
     -- ========================================================================
-    -- rbxasset:// paths are bundled with the Roblox client (no moderation risk)
-    -- rbxassetid:// IDs are community-sourced; may need replacing if moderated
     local TEXTURE_PRESETS = {
         ["None"]        = "",
-        ["Studs"]       = "rbxasset://textures/SurfacesDefault/StudsTop.png",
-        ["Inlet"]       = "rbxasset://textures/SurfacesDefault/InletTop.png",
-        ["Smooth"]      = "rbxasset://textures/SurfacesDefault/SmoothTop.png",
-        ["Grid"]        = "rbxassetid://4146655767",
-        ["Checker"]     = "rbxassetid://6475342416",
+        ["Studs"]       = "rbxassetid://9525623254",
+        ["Grid"]        = "rbxassetid://6691752130",
+        ["Checker"]     = "rbxassetid://6653005819",
         ["Carbon"]      = "rbxassetid://4029816438",
         ["Hexagon"]     = "rbxassetid://5288955706",
         ["Camo"]        = "rbxassetid://6454509901",
@@ -195,8 +200,8 @@ local okInit, errInit = pcall(function()
         ["Custom"]      = "custom",
     }
     local TEXTURE_PRESET_LIST = {
-        "None", "Studs", "Inlet", "Smooth",
-        "Grid", "Checker", "Carbon", "Hexagon", "Camo", "Holographic", "Custom",
+        "None", "Studs", "Grid", "Checker", "Carbon",
+        "Hexagon", "Camo", "Holographic", "Custom",
     }
 
     local function resolveTexture(C)
@@ -307,7 +312,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- HUD
+    -- HUD (unchanged)
     -- ========================================================================
     local function hudNewText(size, font)
         local t = Drawing.new("Text")
@@ -335,7 +340,7 @@ local okInit, errInit = pcall(function()
             pcall(function() accent.Rounding = 4 end)
             accent.Visible = false; built.accent = accent
             built.title = hudNewText(16, 2); built.subtitle = hudNewText(11, 1)
-            built.line1 = hudNewText(13, 2); built.line2    = hudNewText(13, 2)
+            built.line1 = hudNewText(13, 2); built.line2 = hudNewText(13, 2)
         end)
         if not ok then
             for _, e in pairs(built) do
@@ -441,7 +446,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- TEXTURE FACES CONSTANTS
+    -- TEXTURE FACES
     -- ========================================================================
     local TEXTURE_FACES_FRONT = { Enum.NormalId.Front }
     local TEXTURE_FACES_ALL = {
@@ -487,12 +492,13 @@ local okInit, errInit = pcall(function()
         end
     end
 
+    -- FIX: Use Texture (tileable) instead of Decal
     local function applySelfTextureChams(char)
         local Se = WallHack.Internal.SelfESP
         local C  = WallHack.Visuals.SelfESP.Chams
         local texPath = resolveTexture(C)
         local texTrans = math.clamp(tonumber(C.TextureTransparency) or 0.3, 0, 1)
-        local faces = (C.TextureFaces == "AllFaces") and TEXTURE_FACES_ALL or TEXTURE_FACES_FRONT
+        local faces = (C.TextureFaces == "Front") and TEXTURE_FACES_FRONT or TEXTURE_FACES_ALL
 
         if texPath == "" then
             removeSelfTextureChams(char)
@@ -504,13 +510,15 @@ local okInit, errInit = pcall(function()
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
                 for _, face in ipairs(faces) do
-                    local decal = Instance.new("Decal")
-                    decal.Name = "AirHubTC__" .. face.Name
-                    decal.Texture = texPath
-                    decal.Face = face
-                    decal.Transparency = texTrans
-                    decal.Parent = part
-                    table.insert(Se.TextureDecals, decal)
+                    local tex = Instance.new("Texture")
+                    tex.Name = "AirHubTC__" .. face.Name
+                    tex.Texture = texPath
+                    tex.Face = face
+                    tex.Transparency = texTrans
+                    tex.StudsPerTileU = 2
+                    tex.StudsPerTileV = 2
+                    tex.Parent = part
+                    table.insert(Se.TextureDecals, tex)
                 end
             end
         end
@@ -565,10 +573,12 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- CHINA HAT — real cone from stacked CylinderParts
+    -- CHINA HAT — TRIANGULAR CONE from WedgeParts (v5)
     -- ========================================================================
-    local HAT_LAYERS = 10
-    local HAT_HEIGHT_RATIO = 0.7  -- total height = baseSize * ratio
+    -- Replaces cylinders with stacked WedgeParts. Each tier is a ring of
+    -- triangles that taper towards the top. Materials apply per-wedge.
+    local HAT_HEIGHT_RATIO = 0.9
+    local HAT_TAPER_RATIO  = 0.85   -- radius shrinks to (1 - ratio) * base at top
 
     local function getHatFolder()
         local Se = WallHack.Internal.SelfESP
@@ -582,13 +592,43 @@ local okInit, errInit = pcall(function()
         return existing
     end
 
-    local function computeLayerRadius(i, baseSize, N)
-        local t0 = (i - 1) / N
-        local t1 = i / N
-        local rBottom = baseSize * (1 - t0)
-        local rTop    = baseSize * (1 - t1)
-        -- slight overlap so layers visually merge into a smooth cone
-        return math.max((rBottom + rTop) * 0.5, rBottom * 0.98), (rBottom + rTop) * 0.5
+    -- Calculate radius of tier at given index
+    local function tierRadius(idx, tiers, baseR)
+        return baseR * (1 - (idx - 1) * HAT_TAPER_RATIO / tiers)
+    end
+
+    local function makeWedge(tierIdx, sideIdx, tiers, sides, baseSize, totalH, C, resolved, color, transparency)
+        local tierR = tierRadius(tierIdx, tiers, baseSize)
+        local tierH = totalH / tiers
+        local sliceW = 2 * tierR * math.sin(math.pi / sides) * 1.05
+
+        local wedge = Instance.new("WedgePart")
+        wedge.Name = string.format("AirHubHatW_%d_%d", tierIdx, sideIdx)
+        wedge.Anchored = true
+        wedge.CanCollide = false
+        wedge.CanQuery = false
+        wedge.CanTouch = false
+        wedge.Massless = true
+        wedge.CastShadow = false
+        wedge.Color = color
+        wedge.Transparency = transparency
+        wedge.LocalTransparencyModifier = 0
+        wedge.Material = resolved
+        wedge.Size = Vector3.new(sliceW, tierH, tierR)
+
+        -- Position: each wedge spans from cone center (Z=-tierR/2) to edge (Z=+tierR/2)
+        -- Slope faces outward+down by default (inverted funnel visual — this is fine
+        -- because when stacked, the outer facets look like a cone)
+        local angleOffset = (sideIdx - 0.5) * 2 * math.pi / sides
+        if tierIdx % 2 == 0 then
+            angleOffset = angleOffset + math.pi / sides  -- spiral look
+        end
+
+        wedge.CFrame = CFrame.new(0, (tierIdx - 0.5) * tierH, 0)
+            * CFrame.Angles(0, angleOffset, 0)
+            * CFrame.new(0, 0, tierR / 2)
+
+        return wedge
     end
 
     local function buildHat(head)
@@ -602,49 +642,33 @@ local okInit, errInit = pcall(function()
         folder.Parent = getHatFolder()
 
         local baseSize = tonumber(C.Size) or 4
-        local totalHeight = baseSize * HAT_HEIGHT_RATIO
-        local layerH = totalHeight / HAT_LAYERS
+        local totalH = baseSize * HAT_HEIGHT_RATIO
+        local tiers = math.clamp(tonumber(C.Tiers) or 5, 2, 12)
+        local sides = math.clamp(tonumber(C.Sides) or 8, 3, 16)
+
         local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
         local transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        local layers = {}
-        for i = 1, HAT_LAYERS do
-            local _, rForPart = computeLayerRadius(i, baseSize, HAT_LAYERS)
-            local yPos = (i - 0.5) * layerH
-
-            local part = Instance.new("Part")
-            part.Name = "AirHubHatLayer" .. i
-            part.Anchored = true
-            part.CanCollide = false
-            part.CanQuery = false
-            part.CanTouch = false
-            part.Massless = true
-            part.CastShadow = false
-            part.Shape = Enum.PartType.Cylinder
-            part.Color = color
-            part.Transparency = transparency
-            part.LocalTransparencyModifier = 0
-            part.Material = resolved
-            -- Cylinder axis is X; rotate by Z 90° to make it vertical
-            part.Size = Vector3.new(layerH * 1.02, rForPart * 2, rForPart * 2)
-            part.CFrame = head.CFrame
-                * CFrame.new(0, C.OffsetY + yPos, 0)
-                * CFrame.Angles(0, 0, math.pi / 2)
-            part.Parent = folder
-            table.insert(layers, part)
+        local wedges = {}
+        for tier = 1, tiers do
+            for side = 1, sides do
+                local w = makeWedge(tier, side, tiers, sides, baseSize, totalH, C, resolved, color, transparency)
+                w.Parent = folder
+                table.insert(wedges, w)
+            end
         end
 
         Se.LastAppliedMaterial = resolved
-        return { folder = folder, layers = layers }
+        return { folder = folder, layers = wedges, tiers = tiers, sides = sides }
     end
 
     local function updateHatFrame(hatData, head, C, resolved)
         if not hatData or not hatData.folder or not hatData.folder.Parent then return end
+
         local baseSize = tonumber(C.Size) or 4
-        local totalHeight = baseSize * HAT_HEIGHT_RATIO
-        local N = #hatData.layers
-        if N == 0 then return end
-        local layerH = totalHeight / N
+        local totalH = baseSize * HAT_HEIGHT_RATIO
+        local tiers = hatData.tiers
+        local sides = hatData.sides
 
         local color
         if C.Rainbow then
@@ -655,28 +679,38 @@ local okInit, errInit = pcall(function()
         end
         local transparency = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        local angle
+        local rotAngle
         if C.AutoRotate then
-            angle = (os.clock() * (C.RotateSpeed or 90)) % 360
+            rotAngle = (os.clock() * (C.RotateSpeed or 90)) % 360
         else
-            angle = C.Rotation or 0
+            rotAngle = C.Rotation or 0
         end
+        local rotCF = CFrame.Angles(0, math.rad(rotAngle), 0)
+        local headCF = head.CFrame * CFrame.new(0, C.OffsetY, 0) * rotCF
 
-        for i, part in ipairs(hatData.layers) do
-            if part and part.Parent then
-                local _, rForPart = computeLayerRadius(i, baseSize, N)
-                local yPos = (i - 0.5) * layerH
-
-                part.Size = Vector3.new(layerH * 1.02, rForPart * 2, rForPart * 2)
-                part.Color = color
-                part.Transparency = transparency
-                part.LocalTransparencyModifier = 0
-                part.Material = resolved
-
-                part.CFrame = head.CFrame
-                    * CFrame.new(0, C.OffsetY + yPos, 0)
-                    * CFrame.Angles(0, math.rad(angle), 0)
-                    * CFrame.Angles(0, 0, math.pi / 2)
+        local idx = 1
+        for tier = 1, tiers do
+            local tierR = tierRadius(tier, tiers, baseSize)
+            local tierH = totalH / tiers
+            local sliceW = 2 * tierR * math.sin(math.pi / sides) * 1.05
+            for side = 1, sides do
+                local wedge = hatData.layers[idx]
+                if wedge and wedge.Parent then
+                    local angleOffset = (side - 0.5) * 2 * math.pi / sides
+                    if tier % 2 == 0 then
+                        angleOffset = angleOffset + math.pi / sides
+                    end
+                    wedge.Size = Vector3.new(sliceW, tierH, tierR)
+                    wedge.Color = color
+                    wedge.Transparency = transparency
+                    wedge.LocalTransparencyModifier = 0
+                    wedge.Material = resolved
+                    wedge.CFrame = headCF
+                        * CFrame.new(0, (tier - 0.5) * tierH, 0)
+                        * CFrame.Angles(0, angleOffset, 0)
+                        * CFrame.new(0, 0, tierR / 2)
+                end
+                idx = idx + 1
             end
         end
     end
@@ -714,6 +748,14 @@ local okInit, errInit = pcall(function()
 
             local C = WallHack.Visuals.SelfESP.ChinaHat
 
+            -- Rebuild if tier/side count changed
+            local wantTiers = math.clamp(tonumber(C.Tiers) or 5, 2, 12)
+            local wantSides = math.clamp(tonumber(C.Sides) or 8, 3, 16)
+            if Se.HatData.tiers ~= wantTiers or Se.HatData.sides ~= wantSides then
+                removeChinaHat()
+                Se.HatData = buildHat(Se.HatHead)
+            end
+
             -- Material change detection
             if Se.LastSchemaMaterial ~= C.Material then
                 local newResolved = setChinaHatMaterialInternal(C.Material, true)
@@ -724,7 +766,6 @@ local okInit, errInit = pcall(function()
                 end
             end
 
-            -- Ensure ResolvedMaterial in sync
             local resolved = Se.ResolvedMaterial or Enum.Material.Neon
             if Se.LastAppliedMaterial ~= resolved then
                 applyMaterialToHatLayers(Se.HatData, resolved)
@@ -797,7 +838,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- ENEMY CHAMS (was Glow)
+    -- ENEMY CHAMS — FIXED: Texture instance instead of Decal
     -- ========================================================================
     local function removeEnemyTextureChams(data)
         if not data.TextureDecals then return end
@@ -810,7 +851,7 @@ local okInit, errInit = pcall(function()
         local C = WallHack.Visuals.ChamsSettings
         local texPath = resolveTexture(C)
         local texTrans = math.clamp(tonumber(C.TextureTransparency) or 0.3, 0, 1)
-        local faces = (C.TextureFaces == "AllFaces") and TEXTURE_FACES_ALL or TEXTURE_FACES_FRONT
+        local faces = (C.TextureFaces == "Front") and TEXTURE_FACES_FRONT or TEXTURE_FACES_ALL
 
         if texPath == "" then
             removeEnemyTextureChams(data)
@@ -822,13 +863,15 @@ local okInit, errInit = pcall(function()
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
                 for _, face in ipairs(faces) do
-                    local decal = Instance.new("Decal")
-                    decal.Name = "AirHubETC__" .. face.Name
-                    decal.Texture = texPath
-                    decal.Face = face
-                    decal.Transparency = texTrans
-                    decal.Parent = part
-                    table.insert(data.TextureDecals, decal)
+                    local tex = Instance.new("Texture")
+                    tex.Name = "AirHubETC__" .. face.Name
+                    tex.Texture = texPath
+                    tex.Face = face
+                    tex.Transparency = texTrans
+                    tex.StudsPerTileU = 2
+                    tex.StudsPerTileV = 2
+                    tex.Parent = part
+                    table.insert(data.TextureDecals, tex)
                 end
             end
         end
@@ -884,33 +927,24 @@ local okInit, errInit = pcall(function()
             or  Enum.HighlightDepthMode.Occluded
 
         if mode == "Fill" then
-            hl.FillColor = safeFill
-            hl.OutlineColor = safeFill
-            hl.FillTransparency = fillT
-            hl.OutlineTransparency = 1
+            hl.FillColor = safeFill; hl.OutlineColor = safeFill
+            hl.FillTransparency = fillT; hl.OutlineTransparency = 1
         elseif mode == "Outline" then
-            hl.FillColor = safeOutline
-            hl.OutlineColor = safeOutline
-            hl.FillTransparency = 1
-            hl.OutlineTransparency = outlineT
+            hl.FillColor = safeOutline; hl.OutlineColor = safeOutline
+            hl.FillTransparency = 1; hl.OutlineTransparency = outlineT
         elseif mode == "Both" then
-            hl.FillColor = safeFill
-            hl.OutlineColor = safeOutline
-            hl.FillTransparency = fillT
-            hl.OutlineTransparency = outlineT
+            hl.FillColor = safeFill; hl.OutlineColor = safeOutline
+            hl.FillTransparency = fillT; hl.OutlineTransparency = outlineT
         elseif mode == "Wireframe" then
-            hl.FillColor = safeOutline
-            hl.OutlineColor = safeOutline
-            hl.FillTransparency = 1
-            hl.OutlineTransparency = math.max(0, outlineT * 0.5)
+            hl.FillColor = safeOutline; hl.OutlineColor = safeOutline
+            hl.FillTransparency = 1; hl.OutlineTransparency = math.max(0, outlineT * 0.5)
         elseif mode == "Pulse" then
             local pulse = (math.sin(os.clock() * 2) + 1) / 2
             local r = math.clamp(safeFill.R * (0.5 + pulse * 0.5), 0, 1)
             local g = math.clamp(safeFill.G * (0.5 + pulse * 0.5), 0, 1)
             local b = math.clamp(safeFill.B * (0.5 + pulse * 0.5), 0, 1)
             local pulsed = Color3.new(r, g, b)
-            hl.FillColor = pulsed
-            hl.OutlineColor = pulsed
+            hl.FillColor = pulsed; hl.OutlineColor = pulsed
             hl.FillTransparency = fillT * (0.5 + pulse * 0.5)
             hl.OutlineTransparency = outlineT * (0.5 + pulse * 0.5)
         end
@@ -1018,7 +1052,6 @@ local okInit, errInit = pcall(function()
             t.Tracer.Transparency = 1; t.Tracer.ZIndex = 2
         end)
         if not ok then return end
-
         t.Connections.Tracer = RunService.RenderStepped:Connect(function()
             if H.ShuttingDown then return end
             if not WallHack.Settings.Enabled or not WallHack.Visuals.TracerSettings.Enabled then
@@ -1061,7 +1094,6 @@ local okInit, errInit = pcall(function()
             t.NameTag.ZIndex = 4
         end)
         if not ok then return end
-
         t.Connections.NameTag = RunService.RenderStepped:Connect(function()
             if H.ShuttingDown then return end
             local S = WallHack.Visuals.NameSettings
@@ -1086,9 +1118,7 @@ local okInit, errInit = pcall(function()
             end
             if S.ShowHealth then
                 local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    text = text .. string.format(" %dHP", math.floor(hum.Health))
-                end
+                if hum then text = text .. string.format(" %dHP", math.floor(hum.Health)) end
             end
             t.NameTag.Text       = text
             t.NameTag.Position   = Vector2.new(v.X, v.Y)
@@ -1315,7 +1345,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v4" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v5 (triangular China Hat + fixed Texture chams)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1494,7 +1524,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v4")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v5")
 end
 
 -- ============================================================================
@@ -1506,7 +1536,6 @@ if not Window then
     return
 end
 
--- Inject translations
 do
     local UI = getgenv().airhubUI
     if UI and UI.L and UI.L.en and UI.L.ru then
@@ -1558,6 +1587,8 @@ do
             vis_se_hat_rainbow_speed = "Rainbow Speed",
             vis_se_hat_transparency = "Transparency",
             vis_se_hat_material = "Material",
+            vis_se_hat_tiers = "Cone Tiers (2-12)",
+            vis_se_hat_sides = "Wedges per Tier (3-16)",
             vis_sp_enabled = "Enabled", vis_sp_rgb = "RGB Color",
             vis_sp_strength = "Strength", vis_sp_maxlimb = "Max Limb Distance",
             vis_tracer_enabled = "Enabled", vis_tracer_color = "Color",
@@ -1585,16 +1616,16 @@ do
             tt_vis_hud_ping = "Show ping in ms",
             tt_vis_hud_session = "Show session uptime",
             tt_vis_chams_enabled = "Apply visual effect to enemy characters",
-            tt_vis_chams_mode = "Fill = solid color | Outline = edges | Both | Pulse = animated | Texture = custom image | Wireframe = edges only",
+            tt_vis_chams_mode = "Fill = solid | Outline = edges | Both | Pulse = animated | Texture = custom image | Wireframe = edges only",
             tt_vis_chams_fill_color = "Interior fill color",
             tt_vis_chams_fill_transparency = "Fill transparency (0=opaque)",
             tt_vis_chams_outline_color = "Edge color",
             tt_vis_chams_outline_transparency = "Edge transparency",
             tt_vis_chams_always_top = "Render through walls",
-            tt_vis_chams_texture_preset = "Built-in pattern. Studs/Inlet/Smooth use bundled Roblox textures; Grid/Checker/Carbon/Hexagon/Camo/Holographic use community IDs. Custom = use your own rbxassetid below",
-            tt_vis_chams_texture_id = "Only used when preset = Custom. Paste rbxassetid://... here",
+            tt_vis_chams_texture_preset = "Select a preset pattern, or 'Custom' to paste your own rbxassetid://. If a preset ID is moderated, use Custom with any valid image asset",
+            tt_vis_chams_texture_id = "Only used when preset = Custom. Paste rbxassetid://NUMBER here",
             tt_vis_chams_texture_transparency = "Texture image transparency",
-            tt_vis_chams_texture_faces = "Front = 1 decal per part | AllFaces = 6 decals (heavier)",
+            tt_vis_chams_texture_faces = "Front = only front faces | AllFaces = all 6 faces (recommended — Front is invisible from behind)",
             tt_vis_se_enabled = "Master switch for self chams and china hat",
             tt_vis_se_chams_enabled = "Apply visual effect to your own character",
             tt_vis_se_chams_mode = "Fill = solid | Outline = edges | Both | Texture = custom image | Wireframe = edges only",
@@ -1603,21 +1634,23 @@ do
             tt_vis_se_outline_color = "Edge color",
             tt_vis_se_outline_transparency = "Edge transparency",
             tt_vis_se_always_top = "Render through walls",
-            tt_vis_se_texture_preset = "Built-in pattern. Studs/Inlet/Smooth use bundled Roblox textures; other presets use community IDs",
-            tt_vis_se_texture_id = "Only used when preset = Custom. Paste rbxassetid://... here",
+            tt_vis_se_texture_preset = "Built-in pattern, or 'Custom' for your own rbxassetid://",
+            tt_vis_se_texture_id = "Only used when preset = Custom. Paste rbxassetid://NUMBER here",
             tt_vis_se_texture_transparency = "Texture image transparency",
-            tt_vis_se_texture_faces = "Front = 1 decal per part | AllFaces = 6 decals",
-            tt_vis_se_hat_enabled = "Show china hat above your head",
+            tt_vis_se_texture_faces = "Front = only front | AllFaces = all 6 faces (recommended)",
+            tt_vis_se_hat_enabled = "Show triangular cone hat above your head",
             tt_vis_se_hat_color = "Hat base color",
-            tt_vis_se_hat_size = "Hat scale",
+            tt_vis_se_hat_size = "Hat scale (base radius in studs)",
             tt_vis_se_hat_offset = "Vertical offset from head",
-            tt_vis_se_hat_rotation = "Fixed rotation (degrees, when Auto Rotate is OFF). Note: smooth cylinder cone is radially symmetric — rotation has no visible effect",
-            tt_vis_se_hat_autoro = "Continuously rotate. Note: smooth cylinder cone is radially symmetric — rotation is not visually apparent",
-            tt_vis_se_hat_rotospeed = "Rotation speed (degrees per second)",
+            tt_vis_se_hat_rotation = "Fixed rotation angle (when Auto Rotate OFF). Cone is near-radially symmetric — rotation barely visible",
+            tt_vis_se_hat_autoro = "Continuously rotate. Cone is near-radially symmetric — barely visible",
+            tt_vis_se_hat_rotospeed = "Rotation speed (deg/s)",
             tt_vis_se_hat_rainbow = "Cycle through rainbow colors",
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
-            tt_vis_se_hat_material = "Roblox material for each cone layer (materials apply to every part)",
+            tt_vis_se_hat_material = "Roblox material — applies per-wedge, works on all shapes",
+            tt_vis_se_hat_tiers = "Higher = smoother cone, lower = more angular. 5 is a good default",
+            tt_vis_se_hat_sides = "Wedges per ring. Higher = rounder, lower = more triangular. 8 is a good default",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
             tt_vis_sp_strength = "Prediction strength",
@@ -1681,6 +1714,8 @@ do
             vis_se_hat_rainbow_speed = "Скорость радуги",
             vis_se_hat_transparency = "Прозрачность",
             vis_se_hat_material = "Материал",
+            vis_se_hat_tiers = "Ярусов конуса (2-12)",
+            vis_se_hat_sides = "Клиньев в ярусе (3-16)",
             vis_sp_enabled = "Включено", vis_sp_rgb = "RGB цвет",
             vis_sp_strength = "Сила", vis_sp_maxlimb = "Макс. дистанция конечности",
             vis_tracer_enabled = "Включены", vis_tracer_color = "Цвет",
@@ -1714,10 +1749,10 @@ do
             tt_vis_chams_outline_color = "Цвет краёв",
             tt_vis_chams_outline_transparency = "Прозрачность краёв",
             tt_vis_chams_always_top = "Отрисовывать сквозь стены",
-            tt_vis_chams_texture_preset = "Встроенный паттерн. Studs/Inlet/Smooth — бандл Roblox; Grid/Checker/Carbon/Hexagon/Camo/Holographic — community IDs. Custom = свой rbxassetid ниже",
-            tt_vis_chams_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://... сюда",
+            tt_vis_chams_texture_preset = "Готовый паттерн или 'Custom' для своего rbxassetid://. Если ID замодерирован — используй Custom с валидным asset",
+            tt_vis_chams_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://NUMBER сюда",
             tt_vis_chams_texture_transparency = "Прозрачность картинки",
-            tt_vis_chams_texture_faces = "Front = 1 decal на часть | AllFaces = 6 decals",
+            tt_vis_chams_texture_faces = "Front = только фронт | AllFaces = все 6 граней (рекомендуется — Front невидим сзади)",
             tt_vis_se_enabled = "Главный выключатель чамсов и шляпы",
             tt_vis_se_chams_enabled = "Применить эффект к своему персонажу",
             tt_vis_se_chams_mode = "Fill = сплошной | Outline = края | Both | Texture = картинка | Wireframe = контур",
@@ -1726,21 +1761,23 @@ do
             tt_vis_se_outline_color = "Цвет краёв",
             tt_vis_se_outline_transparency = "Прозрачность краёв",
             tt_vis_se_always_top = "Сквозь стены",
-            tt_vis_se_texture_preset = "Встроенный паттерн. Studs/Inlet/Smooth — бандл Roblox; остальные — community IDs",
-            tt_vis_se_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://... сюда",
+            tt_vis_se_texture_preset = "Готовый паттерн или 'Custom' для своего rbxassetid://",
+            tt_vis_se_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://NUMBER сюда",
             tt_vis_se_texture_transparency = "Прозрачность картинки",
-            tt_vis_se_texture_faces = "Front = 1 decal на часть | AllFaces = 6 decals",
-            tt_vis_se_hat_enabled = "Показывать китайскую шляпу над головой",
-            tt_vis_se_hat_color = "Базовый цвет шляпы",
-            tt_vis_se_hat_size = "Масштаб шляпы",
+            tt_vis_se_texture_faces = "Front = только фронт | AllFaces = все 6 граней (рекомендуется)",
+            tt_vis_se_hat_enabled = "Показывать треугольный конус над головой",
+            tt_vis_se_hat_color = "Базовый цвет",
+            tt_vis_se_hat_size = "Масштаб (радиус основания в studs)",
             tt_vis_se_hat_offset = "Вертикальное смещение от головы",
-            tt_vis_se_hat_rotation = "Фиксированный поворот. Конус из цилиндров радиально симметричен — вращение визуально не заметно",
-            tt_vis_se_hat_autoro = "Постоянное вращение. Внимание: конус из цилиндров радиально симметричен — вращение не видно",
-            tt_vis_se_hat_rotospeed = "Скорость вращения (градусов в секунду)",
+            tt_vis_se_hat_rotation = "Фиксированный поворот. Конус почти радиально симметричен — вращение слабо заметно",
+            tt_vis_se_hat_autoro = "Постоянное вращение. Конус почти симметричен — едва заметно",
+            tt_vis_se_hat_rotospeed = "Скорость вращения (град/сек)",
             tt_vis_se_hat_rainbow = "Циклическая смена цветов",
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
-            tt_vis_se_hat_transparency = "Прозрачность шляпы",
-            tt_vis_se_hat_material = "Материал Roblox для каждого слоя конуса (материалы применяются к каждой части)",
+            tt_vis_se_hat_transparency = "Прозрачность",
+            tt_vis_se_hat_material = "Материал Roblox — применяется на каждый клин, работает на любой форме",
+            tt_vis_se_hat_tiers = "Больше = глаже, меньше = угловатее. 5 — хороший дефолт",
+            tt_vis_se_hat_sides = "Клиньев в кольце. Больше = круглее, меньше = треугольнее. 8 — хороший дефолт",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
             tt_vis_sp_strength = "Сила предсказания",
@@ -1768,12 +1805,8 @@ H._UI.VisualsTab = VisualsTab
 local Util             = H.Util
 local SafeColor        = WallHack.SafeColor or function(c, fb) return fb or c end
 
-local function refreshChams()
-    if WallHack.ApplyGlowToAll then pcall(WallHack.ApplyGlowToAll) end
-end
-local function refreshSelfESP()
-    if WallHack.Functions.RefreshSelfESP then pcall(WallHack.Functions.RefreshSelfESP) end
-end
+local function refreshChams() if WallHack.ApplyGlowToAll then pcall(WallHack.ApplyGlowToAll) end end
+local function refreshSelfESP() if WallHack.Functions.RefreshSelfESP then pcall(WallHack.Functions.RefreshSelfESP) end end
 local function startHUD() if WallHack.Functions.StartHUD then pcall(WallHack.Functions.StartHUD) end end
 local function stopHUD()  if WallHack.Functions.StopHUD  then pcall(WallHack.Functions.StopHUD)  end end
 local function startSelfESP() if WallHack.Functions.StartSelfESP then pcall(WallHack.Functions.StartSelfESP) end end
@@ -1805,260 +1838,169 @@ if not texturePresetList or #texturePresetList == 0 then
     texturePresetList = { "None", "Custom" }
 end
 
--- ===================== LEFT COLUMN =====================
+-- LEFT
 local visWH = VisualsTab:CreateSection({ Name = "vis_wallhack" })
 visWH:AddToggle({ Name = "vis_enabled", Value = WallHack.Settings.Enabled,
-    Callback = function(v) WallHack.Settings.Enabled = v; refreshChams() end,
-    Tooltip = "tt_vis_enabled" })
+    Callback = function(v) WallHack.Settings.Enabled = v; refreshChams() end, Tooltip = "tt_vis_enabled" })
 visWH:AddToggle({ Name = "vis_team_check", Value = WallHack.Settings.TeamCheck,
-    Callback = function(v) WallHack.Settings.TeamCheck = v end,
-    Tooltip = "tt_vis_team" })
+    Callback = function(v) WallHack.Settings.TeamCheck = v end, Tooltip = "tt_vis_team" })
 visWH:AddToggle({ Name = "vis_alive_check", Value = WallHack.Settings.AliveCheck,
-    Callback = function(v) WallHack.Settings.AliveCheck = v end,
-    Tooltip = "tt_vis_alive" })
+    Callback = function(v) WallHack.Settings.AliveCheck = v end, Tooltip = "tt_vis_alive" })
 
 local visBox = VisualsTab:CreateSection({ Name = "vis_boxes" })
 visBox:AddToggle({ Name = "vis_box_enabled", Value = WallHack.Visuals.BoxSettings.Enabled,
     Callback = function(v) setBox("Enabled", v) end, Tooltip = "tt_vis_box_enabled" })
 visBox:AddDropdown({ Name = "vis_box_type",
-    Value = (WallHack.Visuals.BoxSettings.Type == 1 and "3D" or "2D"),
-    List = { "3D", "2D" },
-    Callback = function(v) WallHack.Visuals.BoxSettings.Type = (v == "3D") and 1 or 2 end,
-    Tooltip = "tt_vis_box_type" })
+    Value = (WallHack.Visuals.BoxSettings.Type == 1 and "3D" or "2D"), List = { "3D", "2D" },
+    Callback = function(v) WallHack.Visuals.BoxSettings.Type = (v == "3D") and 1 or 2 end, Tooltip = "tt_vis_box_type" })
 visBox:AddColorpicker({ Name = "vis_box_color", Default = WallHack.Visuals.BoxSettings.Color,
-    Callback = function(v) WallHack.Visuals.BoxSettings.Color = SafeColor(v, Color3.fromRGB(255,255,255)) end,
-    Tooltip = "tt_vis_box_color" })
+    Callback = function(v) WallHack.Visuals.BoxSettings.Color = SafeColor(v, Color3.fromRGB(255,255,255)) end, Tooltip = "tt_vis_box_color" })
 visBox:AddColorpicker({ Name = "vis_box_target", Default = WallHack.Visuals.BoxSettings.TargetColor,
-    Callback = function(v) WallHack.Visuals.BoxSettings.TargetColor = SafeColor(v, Color3.fromRGB(255,0,0)) end,
-    Tooltip = "tt_vis_box_target" })
+    Callback = function(v) WallHack.Visuals.BoxSettings.TargetColor = SafeColor(v, Color3.fromRGB(255,0,0)) end, Tooltip = "tt_vis_box_target" })
 visBox:AddSlider({ Name = "vis_box_transparency", Value = WallHack.Visuals.BoxSettings.Transparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setBox("Transparency", v) end, Tooltip = "tt_vis_box_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setBox("Transparency", v) end, Tooltip = "tt_vis_box_transparency" })
 visBox:AddSlider({ Name = "vis_box_thickness", Value = WallHack.Visuals.BoxSettings.Thickness,
-    Min = 1, Max = 5,
-    Callback = function(v) setBox("Thickness", v) end, Tooltip = "tt_vis_box_thickness" })
+    Min = 1, Max = 5, Callback = function(v) setBox("Thickness", v) end, Tooltip = "tt_vis_box_thickness" })
 visBox:AddToggle({ Name = "vis_box_filled", Value = WallHack.Visuals.BoxSettings.Filled,
     Callback = function(v) setBox("Filled", v) end, Tooltip = "tt_vis_box_filled" })
 visBox:AddSlider({ Name = "vis_box_scale", Value = WallHack.Visuals.BoxSettings.Increase,
-    Min = 1, Max = 5,
-    Callback = function(v) setBox("Increase", v) end, Tooltip = "tt_vis_box_scale" })
+    Min = 1, Max = 5, Callback = function(v) setBox("Increase", v) end, Tooltip = "tt_vis_box_scale" })
 
 local visTracer = VisualsTab:CreateSection({ Name = "vis_tracers" })
 visTracer:AddToggle({ Name = "vis_tracer_enabled", Value = WallHack.Visuals.TracerSettings.Enabled,
     Callback = function(v) setTracer("Enabled", v) end, Tooltip = "tt_vis_tracer_enabled" })
 visTracer:AddColorpicker({ Name = "vis_tracer_color", Default = WallHack.Visuals.TracerSettings.Color,
-    Callback = function(v) WallHack.Visuals.TracerSettings.Color = SafeColor(v, Color3.fromRGB(255,100,100)) end,
-    Tooltip = "tt_vis_tracer_color" })
+    Callback = function(v) WallHack.Visuals.TracerSettings.Color = SafeColor(v, Color3.fromRGB(255,100,100)) end, Tooltip = "tt_vis_tracer_color" })
 visTracer:AddSlider({ Name = "vis_tracer_transparency", Value = WallHack.Visuals.TracerSettings.Transparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setTracer("Transparency", v) end, Tooltip = "tt_vis_tracer_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setTracer("Transparency", v) end, Tooltip = "tt_vis_tracer_transparency" })
 visTracer:AddSlider({ Name = "vis_tracer_thickness", Value = WallHack.Visuals.TracerSettings.Thickness,
-    Min = 1, Max = 5,
-    Callback = function(v) setTracer("Thickness", v) end, Tooltip = "tt_vis_tracer_thickness" })
+    Min = 1, Max = 5, Callback = function(v) setTracer("Thickness", v) end, Tooltip = "tt_vis_tracer_thickness" })
 visTracer:AddDropdown({ Name = "vis_tracer_origin", Value = WallHack.Visuals.TracerSettings.Origin or "Bottom",
-    List = tracerOrigins,
-    Callback = function(v) setTracer("Origin", v) end, Tooltip = "tt_vis_tracer_origin" })
+    List = tracerOrigins, Callback = function(v) setTracer("Origin", v) end, Tooltip = "tt_vis_tracer_origin" })
 
 local hudSec = VisualsTab:CreateSection({ Name = "vis_hud" })
 hudSec:AddToggle({ Name = "vis_hud_enabled", Value = WallHack.Visuals.HUDSettings.Enabled,
-    Callback = function(v)
-        WallHack.Visuals.HUDSettings.Enabled = v
-        if v then startHUD() else stopHUD() end
-    end, Tooltip = "tt_vis_hud_enabled" })
-hudSec:AddDropdown({ Name = "vis_hud_pos",
-    Value = WallHack.Visuals.HUDSettings.Position or "TopLeft",
-    List = hudPositions,
-    Callback = function(v) setHUD("Position", v) end, Tooltip = "tt_vis_hud_pos" })
-hudSec:AddToggle({ Name = "vis_hud_players",
-    Value = WallHack.Visuals.HUDSettings.ShowPlayers ~= false,
+    Callback = function(v) WallHack.Visuals.HUDSettings.Enabled = v; if v then startHUD() else stopHUD() end end, Tooltip = "tt_vis_hud_enabled" })
+hudSec:AddDropdown({ Name = "vis_hud_pos", Value = WallHack.Visuals.HUDSettings.Position or "TopLeft",
+    List = hudPositions, Callback = function(v) setHUD("Position", v) end, Tooltip = "tt_vis_hud_pos" })
+hudSec:AddToggle({ Name = "vis_hud_players", Value = WallHack.Visuals.HUDSettings.ShowPlayers ~= false,
     Callback = function(v) setHUD("ShowPlayers", v) end, Tooltip = "tt_vis_hud_players" })
-hudSec:AddToggle({ Name = "vis_hud_fps",
-    Value = WallHack.Visuals.HUDSettings.ShowFPS ~= false,
+hudSec:AddToggle({ Name = "vis_hud_fps", Value = WallHack.Visuals.HUDSettings.ShowFPS ~= false,
     Callback = function(v) setHUD("ShowFPS", v) end, Tooltip = "tt_vis_hud_fps" })
-hudSec:AddToggle({ Name = "vis_hud_ping",
-    Value = WallHack.Visuals.HUDSettings.ShowPing ~= false,
+hudSec:AddToggle({ Name = "vis_hud_ping", Value = WallHack.Visuals.HUDSettings.ShowPing ~= false,
     Callback = function(v) setHUD("ShowPing", v) end, Tooltip = "tt_vis_hud_ping" })
-hudSec:AddToggle({ Name = "vis_hud_session",
-    Value = WallHack.Visuals.HUDSettings.ShowSession ~= false,
+hudSec:AddToggle({ Name = "vis_hud_session", Value = WallHack.Visuals.HUDSettings.ShowSession ~= false,
     Callback = function(v) setHUD("ShowSession", v) end, Tooltip = "tt_vis_hud_session" })
 
--- ===================== RIGHT COLUMN =====================
+-- RIGHT
 local visNames = VisualsTab:CreateSection({ Name = "vis_names", Side = "Right" })
 visNames:AddToggle({ Name = "vis_name_enabled", Value = WallHack.Visuals.NameSettings.Enabled,
     Callback = function(v) setName("Enabled", v) end, Tooltip = "tt_vis_name_enabled" })
 visNames:AddColorpicker({ Name = "vis_name_color", Default = WallHack.Visuals.NameSettings.Color,
-    Callback = function(v) WallHack.Visuals.NameSettings.Color = SafeColor(v, Color3.fromRGB(255,255,255)) end,
-    Tooltip = "tt_vis_name_color" })
+    Callback = function(v) WallHack.Visuals.NameSettings.Color = SafeColor(v, Color3.fromRGB(255,255,255)) end, Tooltip = "tt_vis_name_color" })
 visNames:AddSlider({ Name = "vis_name_size", Value = WallHack.Visuals.NameSettings.Size,
-    Min = 8, Max = 24,
-    Callback = function(v) setName("Size", math.floor(v)) end, Tooltip = "tt_vis_name_size" })
+    Min = 8, Max = 24, Callback = function(v) setName("Size", math.floor(v)) end, Tooltip = "tt_vis_name_size" })
 visNames:AddToggle({ Name = "vis_name_distance", Value = WallHack.Visuals.NameSettings.ShowDistance ~= false,
     Callback = function(v) setName("ShowDistance", v) end, Tooltip = "tt_vis_name_distance" })
 visNames:AddToggle({ Name = "vis_name_health", Value = WallHack.Visuals.NameSettings.ShowHealth ~= false,
     Callback = function(v) setName("ShowHealth", v) end, Tooltip = "tt_vis_name_health" })
 
--- CHAMS (enemy)
 local chamsSec = VisualsTab:CreateSection({ Name = "vis_chams", Side = "Right" })
 chamsSec:AddToggle({ Name = "vis_chams_enabled", Value = Chams.Enabled,
-    Callback = function(v) Chams.Enabled = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_enabled" })
-chamsSec:AddDropdown({ Name = "vis_chams_mode", Value = Chams.Mode or "Outline",
-    List = CHAMS_MODES,
-    Callback = function(v) Chams.Mode = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_mode" })
+    Callback = function(v) Chams.Enabled = v; refreshChams() end, Tooltip = "tt_vis_chams_enabled" })
+chamsSec:AddDropdown({ Name = "vis_chams_mode", Value = Chams.Mode or "Outline", List = CHAMS_MODES,
+    Callback = function(v) Chams.Mode = v; refreshChams() end, Tooltip = "tt_vis_chams_mode" })
 chamsSec:AddColorpicker({ Name = "vis_chams_fill_color", Default = Chams.FillColor,
-    Callback = function(v) Chams.FillColor = SafeColor(v, Color3.fromRGB(0,255,255)); refreshChams() end,
-    Tooltip = "tt_vis_chams_fill_color" })
+    Callback = function(v) Chams.FillColor = SafeColor(v, Color3.fromRGB(0,255,255)); refreshChams() end, Tooltip = "tt_vis_chams_fill_color" })
 chamsSec:AddSlider({ Name = "vis_chams_fill_transparency", Value = Chams.FillTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) Chams.FillTransparency = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_fill_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) Chams.FillTransparency = v; refreshChams() end, Tooltip = "tt_vis_chams_fill_transparency" })
 chamsSec:AddColorpicker({ Name = "vis_chams_outline_color", Default = Chams.OutlineColor,
-    Callback = function(v) Chams.OutlineColor = SafeColor(v, Color3.fromRGB(0,255,255)); refreshChams() end,
-    Tooltip = "tt_vis_chams_outline_color" })
+    Callback = function(v) Chams.OutlineColor = SafeColor(v, Color3.fromRGB(0,255,255)); refreshChams() end, Tooltip = "tt_vis_chams_outline_color" })
 chamsSec:AddSlider({ Name = "vis_chams_outline_transparency", Value = Chams.OutlineTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) Chams.OutlineTransparency = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_outline_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) Chams.OutlineTransparency = v; refreshChams() end, Tooltip = "tt_vis_chams_outline_transparency" })
 chamsSec:AddToggle({ Name = "vis_chams_always_top", Value = Chams.AlwaysOnTop ~= false,
-    Callback = function(v) Chams.AlwaysOnTop = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_always_top" })
+    Callback = function(v) Chams.AlwaysOnTop = v; refreshChams() end, Tooltip = "tt_vis_chams_always_top" })
 chamsSec:AddDropdown({ Name = "vis_chams_texture_preset", Value = Chams.TexturePreset or "None",
-    List = texturePresetList,
-    Callback = function(v) Chams.TexturePreset = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_texture_preset" })
+    List = texturePresetList, Callback = function(v) Chams.TexturePreset = v; refreshChams() end, Tooltip = "tt_vis_chams_texture_preset" })
 chamsSec:AddInput({ Name = "vis_chams_texture_id", Value = Chams.TextureId or "",
-    Callback = function(v) Chams.TextureId = v or ""; refreshChams() end,
-    Tooltip = "tt_vis_chams_texture_id" })
+    Callback = function(v) Chams.TextureId = v or ""; refreshChams() end, Tooltip = "tt_vis_chams_texture_id" })
 chamsSec:AddSlider({ Name = "vis_chams_texture_transparency", Value = Chams.TextureTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) Chams.TextureTransparency = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_texture_transparency" })
-chamsSec:AddDropdown({ Name = "vis_chams_texture_faces", Value = Chams.TextureFaces or "Front",
-    List = textureFaces,
-    Callback = function(v) Chams.TextureFaces = v; refreshChams() end,
-    Tooltip = "tt_vis_chams_texture_faces" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) Chams.TextureTransparency = v; refreshChams() end, Tooltip = "tt_vis_chams_texture_transparency" })
+chamsSec:AddDropdown({ Name = "vis_chams_texture_faces", Value = Chams.TextureFaces or "AllFaces",
+    List = textureFaces, Callback = function(v) Chams.TextureFaces = v; refreshChams() end, Tooltip = "tt_vis_chams_texture_faces" })
 
--- SELF ESP
 local seSec = VisualsTab:CreateSection({ Name = "vis_selfesp", Side = "Right" })
 seSec:AddToggle({ Name = "vis_se_enabled", Value = WallHack.Visuals.SelfESP.Enabled,
-    Callback = function(v)
-        WallHack.Visuals.SelfESP.Enabled = v
-        if v then startSelfESP() else stopSelfESP() end
-    end, Tooltip = "tt_vis_se_enabled" })
+    Callback = function(v) WallHack.Visuals.SelfESP.Enabled = v; if v then startSelfESP() else stopSelfESP() end end, Tooltip = "tt_vis_se_enabled" })
 
 seSec:AddDivider({ Text = "vis_se_group_chams" })
 seSec:AddToggle({ Name = "vis_se_chams_enabled", Value = WallHack.Visuals.SelfESP.Chams.Enabled,
-    Callback = function(v) setChamsSelf("Enabled", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_chams_enabled" })
-seSec:AddDropdown({ Name = "vis_se_chams_mode",
-    Value = WallHack.Visuals.SelfESP.Chams.Mode or "Both",
-    List = SELF_CHAMS_MODES,
-    Callback = function(v) setChamsSelf("Mode", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_chams_mode" })
+    Callback = function(v) setChamsSelf("Enabled", v); refreshSelfESP() end, Tooltip = "tt_vis_se_chams_enabled" })
+seSec:AddDropdown({ Name = "vis_se_chams_mode", Value = WallHack.Visuals.SelfESP.Chams.Mode or "Both",
+    List = SELF_CHAMS_MODES, Callback = function(v) setChamsSelf("Mode", v); refreshSelfESP() end, Tooltip = "tt_vis_se_chams_mode" })
 seSec:AddColorpicker({ Name = "vis_se_fill_color", Default = WallHack.Visuals.SelfESP.Chams.FillColor,
-    Callback = function(v) WallHack.Visuals.SelfESP.Chams.FillColor = SafeColor(v, Color3.fromRGB(90,140,255)); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_fill_color" })
+    Callback = function(v) WallHack.Visuals.SelfESP.Chams.FillColor = SafeColor(v, Color3.fromRGB(90,140,255)); refreshSelfESP() end, Tooltip = "tt_vis_se_fill_color" })
 seSec:AddSlider({ Name = "vis_se_fill_transparency", Value = WallHack.Visuals.SelfESP.Chams.FillTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setChamsSelf("FillTransparency", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_fill_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setChamsSelf("FillTransparency", v); refreshSelfESP() end, Tooltip = "tt_vis_se_fill_transparency" })
 seSec:AddColorpicker({ Name = "vis_se_outline_color", Default = WallHack.Visuals.SelfESP.Chams.OutlineColor,
-    Callback = function(v) WallHack.Visuals.SelfESP.Chams.OutlineColor = SafeColor(v, Color3.fromRGB(255,255,255)); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_outline_color" })
+    Callback = function(v) WallHack.Visuals.SelfESP.Chams.OutlineColor = SafeColor(v, Color3.fromRGB(255,255,255)); refreshSelfESP() end, Tooltip = "tt_vis_se_outline_color" })
 seSec:AddSlider({ Name = "vis_se_outline_transparency", Value = WallHack.Visuals.SelfESP.Chams.OutlineTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setChamsSelf("OutlineTransparency", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_outline_transparency" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setChamsSelf("OutlineTransparency", v); refreshSelfESP() end, Tooltip = "tt_vis_se_outline_transparency" })
 seSec:AddToggle({ Name = "vis_se_always_top", Value = WallHack.Visuals.SelfESP.Chams.AlwaysOnTop ~= false,
-    Callback = function(v) setChamsSelf("AlwaysOnTop", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_always_top" })
-seSec:AddDropdown({ Name = "vis_se_texture_preset",
-    Value = WallHack.Visuals.SelfESP.Chams.TexturePreset or "None",
-    List = texturePresetList,
-    Callback = function(v) setChamsSelf("TexturePreset", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_texture_preset" })
+    Callback = function(v) setChamsSelf("AlwaysOnTop", v); refreshSelfESP() end, Tooltip = "tt_vis_se_always_top" })
+seSec:AddDropdown({ Name = "vis_se_texture_preset", Value = WallHack.Visuals.SelfESP.Chams.TexturePreset or "None",
+    List = texturePresetList, Callback = function(v) setChamsSelf("TexturePreset", v); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_preset" })
 seSec:AddInput({ Name = "vis_se_texture_id", Value = WallHack.Visuals.SelfESP.Chams.TextureId or "",
-    Callback = function(v) setChamsSelf("TextureId", v or ""); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_texture_id" })
+    Callback = function(v) setChamsSelf("TextureId", v or ""); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_id" })
 seSec:AddSlider({ Name = "vis_se_texture_transparency", Value = WallHack.Visuals.SelfESP.Chams.TextureTransparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setChamsSelf("TextureTransparency", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_texture_transparency" })
-seSec:AddDropdown({ Name = "vis_se_texture_faces", Value = WallHack.Visuals.SelfESP.Chams.TextureFaces or "Front",
-    List = textureFaces,
-    Callback = function(v) setChamsSelf("TextureFaces", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_texture_faces" })
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setChamsSelf("TextureTransparency", v); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_transparency" })
+seSec:AddDropdown({ Name = "vis_se_texture_faces", Value = WallHack.Visuals.SelfESP.Chams.TextureFaces or "AllFaces",
+    List = textureFaces, Callback = function(v) setChamsSelf("TextureFaces", v); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_faces" })
 
 seSec:AddDivider({ Text = "vis_se_group_hat" })
 seSec:AddToggle({ Name = "vis_se_hat_enabled", Value = WallHack.Visuals.SelfESP.ChinaHat.Enabled,
-    Callback = function(v) setHat("Enabled", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_enabled" })
+    Callback = function(v) setHat("Enabled", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_enabled" })
 seSec:AddColorpicker({ Name = "vis_se_hat_color", Default = WallHack.Visuals.SelfESP.ChinaHat.Color,
-    Callback = function(v) WallHack.Visuals.SelfESP.ChinaHat.Color = SafeColor(v, Color3.fromRGB(255,60,60)); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_color" })
+    Callback = function(v) WallHack.Visuals.SelfESP.ChinaHat.Color = SafeColor(v, Color3.fromRGB(255,60,60)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_color" })
 seSec:AddSlider({ Name = "vis_se_hat_size", Value = WallHack.Visuals.SelfESP.ChinaHat.Size,
-    Min = 1, Max = 10, Decimals = 1,
-    Callback = function(v) setHat("Size", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_size" })
+    Min = 1, Max = 10, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_size" })
 seSec:AddSlider({ Name = "vis_se_hat_offset", Value = WallHack.Visuals.SelfESP.ChinaHat.OffsetY,
-    Min = 0, Max = 5, Decimals = 1,
-    Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_offset" })
+    Min = 0, Max = 5, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
+seSec:AddSlider({ Name = "vis_se_hat_tiers", Value = WallHack.Visuals.SelfESP.ChinaHat.Tiers or 5,
+    Min = 2, Max = 12, Callback = function(v) setHat("Tiers", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_tiers" })
+seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.ChinaHat.Sides or 8,
+    Min = 3, Max = 16, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
 seSec:AddSlider({ Name = "vis_se_hat_rotation", Value = WallHack.Visuals.SelfESP.ChinaHat.Rotation,
-    Min = 0, Max = 360,
-    Callback = function(v) setHat("Rotation", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_rotation" })
+    Min = 0, Max = 360, Callback = function(v) setHat("Rotation", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotation" })
 seSec:AddToggle({ Name = "vis_se_hat_autoro", Value = WallHack.Visuals.SelfESP.ChinaHat.AutoRotate,
-    Callback = function(v) setHat("AutoRotate", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_autoro" })
+    Callback = function(v) setHat("AutoRotate", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_autoro" })
 seSec:AddSlider({ Name = "vis_se_hat_rotospeed", Value = WallHack.Visuals.SelfESP.ChinaHat.RotateSpeed,
-    Min = 10, Max = 720,
-    Callback = function(v) setHat("RotateSpeed", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_rotospeed" })
+    Min = 10, Max = 720, Callback = function(v) setHat("RotateSpeed", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotospeed" })
 seSec:AddToggle({ Name = "vis_se_hat_rainbow", Value = WallHack.Visuals.SelfESP.ChinaHat.Rainbow,
-    Callback = function(v) setHat("Rainbow", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_rainbow" })
+    Callback = function(v) setHat("Rainbow", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rainbow" })
 seSec:AddSlider({ Name = "vis_se_hat_rainbow_speed", Value = WallHack.Visuals.SelfESP.ChinaHat.RainbowSpeed,
-    Min = 0.1, Max = 3, Decimals = 2,
-    Callback = function(v) setHat("RainbowSpeed", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_rainbow_speed" })
+    Min = 0.1, Max = 3, Decimals = 2, Callback = function(v) setHat("RainbowSpeed", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rainbow_speed" })
 seSec:AddSlider({ Name = "vis_se_hat_transparency", Value = WallHack.Visuals.SelfESP.ChinaHat.Transparency,
-    Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) setHat("Transparency", v); refreshSelfESP() end,
-    Tooltip = "tt_vis_se_hat_transparency" })
-seSec:AddDropdown({ Name = "vis_se_hat_material",
-    Value = WallHack.Visuals.SelfESP.ChinaHat.Material or "Neon",
+    Min = 0, Max = 1, Decimals = 2, Callback = function(v) setHat("Transparency", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_transparency" })
+seSec:AddDropdown({ Name = "vis_se_hat_material", Value = WallHack.Visuals.SelfESP.ChinaHat.Material or "Neon",
     List = hatMaterials,
     Callback = function(v)
         WallHack.Visuals.SelfESP.ChinaHat.Material = v
-        if WallHack.Functions.SetChinaHatMaterial then
-            pcall(WallHack.Functions.SetChinaHatMaterial, v)
-        end
+        if WallHack.Functions.SetChinaHatMaterial then pcall(WallHack.Functions.SetChinaHatMaterial, v) end
         refreshSelfESP()
     end, Tooltip = "tt_vis_se_hat_material" })
 
 local spSec = VisualsTab:CreateSection({ Name = "vis_sp", Side = "Right" })
 local spInitEnabled = (SP and SP.Settings and SP.Settings.Enabled) == true
 spSec:AddToggle({ Name = "vis_sp_enabled", Value = spInitEnabled,
-    Callback = function(v)
-        if not SP or not SP.Settings then return end
-        SP.Settings.Enabled = v
-        if v then spStop(); spStart() else spStop() end
+    Callback = function(v) if not SP or not SP.Settings then return end
+        SP.Settings.Enabled = v; if v then spStop(); spStart() else spStop() end
     end, Tooltip = "tt_vis_sp_enabled" })
-spSec:AddToggle({ Name = "vis_sp_rgb",
-    Value = (SP and SP.Settings and SP.Settings.RGB) ~= false,
-    Callback = function(v) if SP and SP.Settings then SP.Settings.RGB = v end end,
-    Tooltip = "tt_vis_sp_rgb" })
-spSec:AddSlider({ Name = "vis_sp_strength",
-    Value = (SP and SP.Settings and SP.Settings.Strength) or 1,
-    Min = 0, Max = 5, Decimals = 1,
-    Callback = function(v) if SP and SP.Settings then SP.Settings.Strength = v end end,
-    Tooltip = "tt_vis_sp_strength" })
-spSec:AddSlider({ Name = "vis_sp_maxlimb",
-    Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
-    Min = 1, Max = 20,
-    Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end,
-    Tooltip = "tt_vis_sp_maxlimb" })
+spSec:AddToggle({ Name = "vis_sp_rgb", Value = (SP and SP.Settings and SP.Settings.RGB) ~= false,
+    Callback = function(v) if SP and SP.Settings then SP.Settings.RGB = v end end, Tooltip = "tt_vis_sp_rgb" })
+spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.Settings.Strength) or 1,
+    Min = 0, Max = 5, Decimals = 1, Callback = function(v) if SP and SP.Settings then SP.Settings.Strength = v end end, Tooltip = "tt_vis_sp_strength" })
+spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
+    Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v4 (Part-cone China Hat + Texture Presets)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v5 (triangular China Hat + fixed Texture chams)")
