@@ -1,4 +1,4 @@
---// AirHub - arsenal extra tab (standalone fallback UI)
+--// AirHub - arsenal extra tab (hybrid: native tab + standalone fallback)
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then
     warn("[AirHub] arsenal extra tab: core not loaded")
@@ -399,7 +399,6 @@ local function BuildStandaloneUI()
         Parent = sg,
     })
     corner(openBtn, 8)
-    local openStroke = stroke(openBtn, COLORS.border, 1, 0.4)
 
     -- Window
     local win = make("Frame", {
