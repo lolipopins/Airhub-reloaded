@@ -1,5 +1,16 @@
---// AirHub - 02_aimbot.lua (airhubUI build)
---// Logic: unchanged from original. UI: airhubUI (AddToggle/Slider/Dropdown/Input/Label/Button).
+--// AirHub - 02_aimbot.lua (airhubUI build, v32)
+--// Fixes v31 → v32:
+--//  - MPV shadow → MPVcfg (UI-локал)
+--//  - GetClosestPlayer: двойной GetVisiblePointOnPart убран
+--//  - IgnoreGameProcessed: применён последовательно во всех InputBegan
+--//  - Wallbang: только рабочие методы (RemotePatch, RayIgnore)
+--//  - WallbangDistance реализован
+--//  - TPAimReturnOnKill реализован
+--//  - AimbotHz UI Max 240
+--//  - Drawing.new("Circle") под pcall, FOVCircle nil-safe
+--//  - TOPBAR_PX через GuiService:GetGuiInset().Y
+--//  - AimMode: Silent | Instant | Smooth | CFrame
+--//  - RU локализация + tooltips (динамическая инъекция в airhubUI.L)
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then
@@ -56,7 +67,6 @@ if type(AddLog) ~= "function" then
     Util.AddLog = AddLog
 end
 
--- Prefer H.PlayHitsound / H.PlayKillsound (provided by 01_core.lua), fallback to noop
 if type(Util.PlayHitsound) ~= "function" then
     Util.PlayHitsound = (H.PlayHitsound or function() end)
 end
@@ -102,9 +112,10 @@ H.Aimbot = {
         TriggerKey = "MouseButton2",
         Toggle = false,
         LockPart = "Head",
-        AimMethod = "Smooth",
-        SilentAim = true,
-        SilentAimMode = "Camera",
+
+        -- v32: единый AimMode вместо SilentAim(bool) + AimMethod(str)
+        AimMode = "Silent",          -- "Silent" | "Instant" | "Smooth" | "CFrame"
+        SilentAimMode = "Camera",    -- hook только при AimMode="Silent"
         IgnoreFOV = false,
         CheckFromPlayerOnTP = true,
         PredictionEnabled = false, PredictionX = 0, PredictionY = 0, PredictionTime = 0.15,
@@ -176,7 +187,6 @@ H.Aimbot = {
         ModeCacheTTL         = 60.0,
     },
     FOVSettings = { Enabled = true, Visible = true, Amount = 90 },
-    FOVCircle   = Drawing.new("Circle"),
     Locked      = nil,
     LockPartInstance = nil,
     Internal    = {
@@ -193,8 +203,33 @@ H.Aimbot = {
 }
 local Aimbot = H.Aimbot
 
+-- Drawing.new("Circle") под pcall — Drawing недоступен в некоторых средах
+do
+    local ok, circle = pcall(function() return Drawing.new("Circle") end)
+    Aimbot.FOVCircle = (ok and circle) or nil
+end
+
+-- legacy → AimMode
+do
+    local S = Aimbot.Settings
+    if not S.AimMode then
+        if S.SilentAim then S.AimMode = "Silent"
+        elseif S.AimMethod == "Instant" then S.AimMode = "Instant"
+        elseif S.AimMethod == "CFrame" then S.AimMode = "CFrame"
+        else S.AimMode = "Smooth" end
+    end
+    S.SilentAim = nil
+    S.AimMethod = nil
+    -- wallbang method whitelist
+    if S.WallbangMethod ~= "RemotePatch" and S.WallbangMethod ~= "RayIgnore" then
+        S.WallbangMethod = "RemotePatch"
+    end
+end
+
 local function DebugPrint(...) if Aimbot.Settings.Debug then warn("[AirHub][Shot]", ...) end end
 local function DebugHookPrint(...) if Aimbot.Settings.Debug then warn("[AirHub][Hook]", ...) end end
+
+local function AimModeIs(mode) return Aimbot.Settings.AimMode == mode end
 
 local WB = { HoldUntil = 0 }
 
@@ -995,7 +1030,9 @@ local function CancelLock()
     Aimbot.LockPartInstance = nil
     Aimbot.Internal.LockedGhost = nil
     Aimbot.Internal.CachedAimPos = nil
-    Aimbot.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+    if Aimbot.FOVCircle then
+        Aimbot.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+    end
     if Aimbot.Internal.TargetLock then
         Aimbot.Internal.TargetLock.Active    = false
         Aimbot.Internal.TargetLock.Remaining = 0
@@ -1031,7 +1068,7 @@ local function GetClosestPlayer()
         Aimbot.Internal.CachedAimPos = nil
         tlState.Active = false
         tlState.Remaining = 0
-        if alsoCancelField then
+        if alsoCancelField and Aimbot.FOVCircle then
             Aimbot.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
         end
     end
@@ -1127,10 +1164,16 @@ local function GetClosestPlayer()
                 if Aimbot.Settings.FallbackToVisible then
                     targetPart = FindVisiblePart(charTarget, origin, preferred)
                 else
+                    -- FIX: кэшируем точку, не вызываем GetVisiblePointOnPart дважды
                     for _, name in ipairs(preferred) do
                         local p = charTarget:FindFirstChild(name)
-                        if p and p:IsA("BasePart") and GetVisiblePointOnPart(origin, p, preDensity) then
-                            targetPart = p; break
+                        if p and p:IsA("BasePart") then
+                            local pPt = GetVisiblePointOnPart(origin, p, preDensity)
+                            if pPt then
+                                targetPart  = p
+                                targetPoint = pPt
+                                break
+                            end
                         end
                     end
                 end
@@ -1449,11 +1492,20 @@ local function WaitForShotPoint(targetPart)
     return nil, false
 end
 
-local TOPBAR_PX = 36
+-- FIX: TOPBAR_PX через GuiService:GetGuiInset().Y (fallback 36)
+local function GetTopbarHeight()
+    local ok, inset = pcall(function()
+        local gs = game:GetService("GuiService")
+        return gs:GetGuiInset()
+    end)
+    if ok and inset and typeof(inset) == "Vector2" then return inset.Y end
+    return 36
+end
+
 local function WorldToMouseVIM(worldPos)
     local sp, onScreen = workspace.CurrentCamera:WorldToViewportPoint(worldPos)
     if not onScreen then return nil end
-    return math.floor(sp.X), math.floor(sp.Y + TOPBAR_PX)
+    return math.floor(sp.X), math.floor(sp.Y + GetTopbarHeight())
 end
 local function MoveMouseAbs(x, y)
     if type(mousemoveabs) == "function" then
@@ -1576,8 +1628,10 @@ local function IsModeAvailable(mode)
 end
 local function InvalidateModeCache() Aimbot.Internal.ModeCache = {} end
 local function GetEffectiveMode() return Aimbot.Settings.SilentAimMode end
+
+-- FIX: только при AimMode == "Silent" silent-hooks активны
 local function IsModeHooked(mode)
-    return Aimbot.Settings.Enabled and Aimbot.Settings.SilentAim
+    return Aimbot.Settings.Enabled and AimModeIs("Silent")
        and Aimbot.Settings.SilentAimMode == mode
 end
 local function ShouldRedirect(mode) return IsModeHooked(mode) and Running end
@@ -1633,6 +1687,10 @@ local function RestoreCurrentCFrame()
         return true
     end
     return false
+end
+local function ClearSavedCFrame()
+    Aimbot.TPAimInternal.SavedCFrame = nil
+    Aimbot.TPAimInternal.SavedVelocity = nil
 end
 local function TeleportToTarget(targetPart)
     local hrp = GetHRP()
@@ -1720,6 +1778,18 @@ local function PerformWallbang(targetPart, btn)
     local method = Aimbot.Settings.WallbangMethod
     local char = targetPart.Parent
     if not char then return false end
+
+    -- FIX: WallbangDistance — дистанционная проверка
+    local hrp = GetHRP()
+    if hrp then
+        local dist = (targetPart.Position - hrp.Position).Magnitude
+        local maxDist = tonumber(Aimbot.Settings.WallbangDistance) or 500
+        if dist > maxDist then
+            DebugPrint(string.format("wallbang: distance %.1f > %.1f — abort", dist, maxDist))
+            return false
+        end
+    end
+
     local hum = char:FindFirstChildOfClass("Humanoid")
     local startHealth = hum and hum.Health or 0
     local ok = false
@@ -1751,7 +1821,6 @@ local function PerformMagicBullet(targetPart, btn)
     task.wait(0.01)
     FireClick(btn)
     task.wait(0.02)
-    RestoreCurrentCFrame()
     if Hg and Hg.AntiAim and Hg.AntiAim.Desync and Hg.AntiAim.Desync.Settings and not dwE then
         local S = Hg.AntiAim.Desync.Settings
         S.Enabled = false
@@ -1759,11 +1828,22 @@ local function PerformMagicBullet(targetPart, btn)
         if dR ~= nil then S.RefreshOnShot = dR end
         if Hg.AntiAim.StopDesync then Hg.AntiAim.StopDesync() end
     end
+    -- FIX: TPAimReturnOnKill — вернуть/не вернуть CFrame после килла
     task.delay(0.15, function()
         local char = targetPart.Parent
+        local killed, hum = false, nil
         if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then LogShot(char, char.Name, hum.Health, targetPart.Name, false) end
+            hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                killed = hum.Health <= 0
+                LogShot(char, char.Name, hum.Health, targetPart.Name, false)
+            end
+        end
+        local returnOnKill = Aimbot.Settings.TPAimReturnOnKill ~= false
+        if returnOnKill or not killed then
+            RestoreCurrentCFrame()
+        else
+            ClearSavedCFrame()
         end
     end)
 end
@@ -1797,7 +1877,7 @@ local AV_MODE_SET = {
 }
 
 local function PerformSilentShot(targetPart, btn, wasVisible)
-    if not Aimbot.Settings.SilentAim then return end
+    if not AimModeIs("Silent") then return end
     if not targetPart or not IsAlive(targetPart) then return end
     local targetChar = targetPart.Parent
     if not targetChar then return end
@@ -1914,7 +1994,7 @@ local function AV_HandleNamecall(self, ...)
         if ok and isC then return AV_Original(self, ...) end
     end
     if Aimbot.Settings.SilentAimMode ~= method then return AV_Original(self, ...) end
-    if not Aimbot.Settings.Enabled or not Aimbot.Settings.SilentAim or not Running then
+    if not AimModeIs("Silent") or not Aimbot.Settings.Enabled or not Running then
         return AV_Original(self, ...)
     end
     local aimPos = Aimbot.Internal.CachedAimPos
@@ -1980,7 +2060,7 @@ local function SetupAVHook()
     AV_Active = true
     Aimbot.Internal.HookHandlers.AVNamecall     = handler
     Aimbot.Internal.HookHandlers.AVNamecallOrig = orig
-    DebugHookPrint("AV namecall hook installed (v31)")
+    DebugHookPrint("AV namecall hook installed (v32)")
 end
 local function RemoveAVHook()
     if not AV_Active then return end
@@ -2056,7 +2136,7 @@ local function VerifyAndFixHooks()
     if H.ShuttingDown then return end
     local Hh = Aimbot.Internal.HookHandlers
     local mode    = Aimbot.Settings.SilentAimMode
-    local enabled = Aimbot.Settings.Enabled and Aimbot.Settings.SilentAim
+    local enabled = Aimbot.Settings.Enabled and AimModeIs("Silent")
     local wantAV = enabled and (AV_MODE_SET[mode] == true)
     if AV_Active and not wantAV then RemoveAVHook()
     elseif not AV_Active and wantAV then SetupAVHook() end
@@ -2071,7 +2151,7 @@ local function VerifyAndFixHooks()
 end
 local function ManageHooks()
     local mode    = Aimbot.Settings.SilentAimMode
-    local enabled = Aimbot.Settings.Enabled and Aimbot.Settings.SilentAim
+    local enabled = Aimbot.Settings.Enabled and AimModeIs("Silent")
     local wantAV  = enabled and (AV_MODE_SET[mode] == true)
     local wantMHT = enabled and mode == "Mouse.Hit/Target"
     local key = tostring(wantAV) .. "|" .. tostring(wantMHT)
@@ -2079,6 +2159,27 @@ local function ManageHooks()
     Aimbot.Internal.LastManageKey = key
     if wantAV then SetupAVHook() else RemoveAVHook() end
     if wantMHT then SetupMHTProxy() else RemoveMHTProxy() end
+end
+
+--// ===========================================================================
+--// Camera aim by AimMode
+--// ===========================================================================
+local function ApplyAimModeCamera(visiblePoint, interval)
+    local mode = Aimbot.Settings.AimMode
+    if mode == "Silent" then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local camPos = cam.CFrame.Position
+
+    if mode == "Instant" then
+        cam.CFrame = CFrame.new(camPos, visiblePoint)
+    elseif mode == "Smooth" then
+        local targetCF = CFrame.new(camPos, visiblePoint)
+        local sm = 1 - math.exp(-(Aimbot.Settings.AimSmoothingSpeed or 6) * interval)
+        cam.CFrame = cam.CFrame:Lerp(targetCF, sm)
+    elseif mode == "CFrame" then
+        cam.CFrame = CFrame.lookAt(camPos, visiblePoint, Vector3.new(0, 1, 0))
+    end
 end
 
 --// ===========================================================================
@@ -2097,15 +2198,17 @@ local function LoadAimbot()
         Aimbot.Internal.FovAccum = Aimbot.Internal.FovAccum + dt
         if Aimbot.Internal.FovAccum >= (1/60) then
             Aimbot.Internal.FovAccum = 0
-            if Aimbot.Settings.Enabled and Aimbot.FOVSettings.Enabled and not Aimbot.Settings.IgnoreFOV then
-                Aimbot.FOVCircle.Radius = Aimbot.FOVSettings.Amount
-                Aimbot.FOVCircle.Thickness = 1
-                Aimbot.FOVCircle.Filled = false
-                Aimbot.FOVCircle.Transparency = 0.5
-                Aimbot.FOVCircle.Visible = Aimbot.FOVSettings.Visible
-                Aimbot.FOVCircle.Position = GetMousePos()
-            else
-                Aimbot.FOVCircle.Visible = false
+            if Aimbot.FOVCircle then
+                if Aimbot.Settings.Enabled and Aimbot.FOVSettings.Enabled and not Aimbot.Settings.IgnoreFOV then
+                    Aimbot.FOVCircle.Radius = Aimbot.FOVSettings.Amount
+                    Aimbot.FOVCircle.Thickness = 1
+                    Aimbot.FOVCircle.Filled = false
+                    Aimbot.FOVCircle.Transparency = 0.5
+                    Aimbot.FOVCircle.Visible = Aimbot.FOVSettings.Visible
+                    Aimbot.FOVCircle.Position = GetMousePos()
+                else
+                    Aimbot.FOVCircle.Visible = false
+                end
             end
         end
 
@@ -2122,25 +2225,20 @@ local function LoadAimbot()
             Aimbot.Internal.TargetAccum = 0
             if Aimbot.Settings.Enabled and Running then
                 GetClosestPlayer()
-                Aimbot.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+                if Aimbot.FOVCircle then
+                    Aimbot.FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+                end
                 if Aimbot.Locked and Aimbot.LockPartInstance and IsAlive(Aimbot.LockPartInstance) then
                     local targetPart = Aimbot.LockPartInstance
                     local origin = GetCheckOrigin()
                     local visiblePoint = GetVisiblePointOnPart(origin, targetPart)
                     if visiblePoint then
-                        Aimbot.FOVCircle.Color = Color3.fromRGB(255, 200, 70)
-                        Aimbot.Internal.CachedAimPos = visiblePoint
-                        if not Aimbot.Settings.SilentAim then
-                            if Aimbot.Settings.AimMethod == "Instant" then
-                                workspace.CurrentCamera.CFrame =
-                                    CFrame.new(workspace.CurrentCamera.CFrame.Position, visiblePoint)
-                            else
-                                local targetCF = CFrame.new(workspace.CurrentCamera.CFrame.Position, visiblePoint)
-                                local sm = 1 - math.exp(-Aimbot.Settings.AimSmoothingSpeed * interval)
-                                workspace.CurrentCamera.CFrame =
-                                    workspace.CurrentCamera.CFrame:Lerp(targetCF, sm)
-                            end
+                        if Aimbot.FOVCircle then
+                            Aimbot.FOVCircle.Color = Color3.fromRGB(255, 200, 70)
                         end
+                        Aimbot.Internal.CachedAimPos = visiblePoint
+                        -- v32: применяем AimMode (Silent — не двигает камеру)
+                        ApplyAimModeCamera(visiblePoint, interval)
                     else
                         local raw = PredictPartPosition(targetPart)
                         if typeof(raw) == "Vector3" then Aimbot.Internal.CachedAimPos = raw end
@@ -2160,6 +2258,7 @@ local function LoadAimbot()
 
     Track(UserInputService.InputBegan:Connect(function(inp, gpe)
         if Typing then return end
+        -- FIX: применяем IgnoreGameProcessed последовательно
         if not Aimbot.Settings.IgnoreGameProcessed and gpe then return end
         local tk = Aimbot.Settings.TriggerKey
         local kp = false
@@ -2192,7 +2291,9 @@ local function LoadAimbot()
         if kr then Running = false; CancelLock() end
     end))
     Track(UserInputService.InputBegan:Connect(function(inp, gpe)
-        if gpe or Typing then return end
+        if Typing then return end
+        -- FIX: применяем IgnoreGameProcessed последовательно
+        if not Aimbot.Settings.IgnoreGameProcessed and gpe then return end
         if not Aimbot.Settings.Enabled or not Running or not Aimbot.Locked then return end
         local btn
         if inp.UserInputType == Enum.UserInputType.MouseButton1 then btn = 0
@@ -2202,7 +2303,7 @@ local function LoadAimbot()
         if Aimbot.Settings.AutoShoot.Enabled then return end
         local tp = Aimbot.LockPartInstance
         if tp and IsAlive(tp) then
-            if Aimbot.Settings.SilentAim then
+            if AimModeIs("Silent") then
                 PerformSilentShot(tp, btn, nil)
             else
                 if Aimbot.Settings.WallCheck and not ShouldBypassWallCheck() then
@@ -2246,7 +2347,7 @@ local function LoadAimbot()
                     end
                 end
                 local sb = Aimbot.Settings.AutoShoot.ShootKey == "MouseButton1" and 0 or 1
-                if Aimbot.Settings.SilentAim then
+                if AimModeIs("Silent") then
                     PerformSilentShot(tp, sb, nv)
                 else
                     RefreshOldPositionIfNeeded()
@@ -2313,6 +2414,7 @@ Aimbot.PerformMagicBullet    = PerformMagicBullet
 Aimbot.PerformInfiniteTP     = PerformInfiniteTP
 Aimbot.DisableDesyncDuringShot = DisableDesyncDuringShot
 Aimbot.FireClickNoDesync     = FireClickNoDesync
+Aimbot.ApplyAimModeCamera    = ApplyAimModeCamera
 
 Aimbot.GetCharacterBaseParts     = GetCharacterBaseParts
 Aimbot.IsPointVisibleEx          = IsPointVisibleEx
@@ -2352,7 +2454,7 @@ local function Diagnose()
         if Check(c, l, d) == 1 then p = p + 1 else f = f + 1 end
     end
     warn("==========================================================")
-    warn("          AirHub Aimbot - DIAGNOSTICS (v31)")
+    warn("          AirHub Aimbot - DIAGNOSTICS (v32)")
     warn("==========================================================")
     T(H ~= nil, "H (AirHub) exists")
     T(Util ~= nil, "Util module present")
@@ -2363,11 +2465,12 @@ local function Diagnose()
     T(LocalPlayer ~= nil, "LocalPlayer")
     T(workspace.CurrentCamera ~= nil, "CurrentCamera")
     T(pcall(function() local d = Drawing.new("Circle"); d:Remove() end), "Drawing.new available")
+    T(Aimbot.FOVCircle ~= nil, "FOVCircle created")
     for _, n in ipairs({"hookmetamethod","newcclosure","checkcaller","getnamecallmethod"}) do
         T(getExec(n) ~= nil, "executor: " .. n)
     end
     T(type(Aimbot.GetTargetLockState) == "function", "GetTargetLockState exported")
-    T(type(Aimbot.ResetTargetLock) == "function", "ResetTargetLock exported")
+    T(type(Aimbot.ApplyAimModeCamera) == "function", "ApplyAimModeCamera exported")
     InvalidateModeCache()
     for _, m in ipairs({"Camera","Mouse","Raycast","FindPartOnRay",
                         "FindPartOnRayWithWhitelist","FindPartOnRayWithIgnoreList",
@@ -2395,6 +2498,344 @@ if not Window then
     return
 end
 
+-- v32: динамическая инъекция переводов в airhubUI
+do
+    local UI = getgenv().airhubUI
+    if UI and UI.L and UI.L.en and UI.L.ru then
+        local en = {
+            -- секции
+            aim_main = "Main",
+            aim_target_lock = "Target Lock",
+            aim_prediction = "Prediction",
+            aim_multipoint = "Multi-Point",
+            aim_multipoint_visuals = "Multi-Point Visuals",
+            aim_aimline = "Aim Line",
+            aim_fov = "FOV",
+            aim_visibility = "Visibility",
+            aim_silent = "Aim Mode",
+            aim_wallbang = "Wallbang",
+            aim_tpaim = "TP Aim",
+            aim_autoshoot = "Auto Shoot",
+            -- main
+            aim_enabled = "Enabled",
+            aim_toggle = "Toggle",
+            aim_ignore_fov = "360 Ignore FOV",
+            aim_check_from_player = "Check visibility from player on TP",
+            aim_lock_part = "Lock Part",
+            aim_fallback_visible = "Fallback to visible parts",
+            aim_trigger_key = "Aim Key (MouseButton1/2 or KeyCode)",
+            aim_mode = "Aim Mode",
+            aim_smoothing = "Smoothing Speed",
+            aim_hz = "Aimbot Update Rate (Hz)",
+            aim_target_npc = "Target NPCs (rigs/dummies)",
+            aim_npc_filter = "NPC name filter (optional)",
+            -- target lock
+            aim_tl_enabled = "Enabled (stick to one player)",
+            aim_tl_duration_mode = "Duration Mode",
+            aim_tl_frames = "Frames (aimbot update cycles)",
+            aim_tl_seconds = "Seconds",
+            aim_tl_stick = "Stick Beyond FOV (keep target off-screen)",
+            -- prediction
+            aim_pred_enabled = "Enabled",
+            aim_pred_x = "Prediction X (%)",
+            aim_pred_y = "Prediction Y (%)",
+            aim_pred_time = "Base Time (s)",
+            -- mp
+            aim_mp_enabled = "Enabled (aim at closest VISIBLE mesh point)",
+            aim_mp_density = "Density (rays per axis)",
+            aim_mp_jitter = "Jitter Sub-rays (per missed cell)",
+            aim_mp_adaptive = "Adaptive density by on-screen size",
+            aim_mp_refine = "Refine edges (silhouette sub-sampling)",
+            aim_mp_maxrays = "Max rays per part",
+            aim_mp_include_all = "Include ALL parts (R6+R15+accessories)",
+            aim_mp_apply_nearest = "Apply to Nearest mode",
+            aim_mp_front = "Front-facing only (skip back faces)",
+            -- mp visuals
+            aim_mpv_enabled = "Show Sampled Points",
+            aim_mpv_style = "Style",
+            aim_mpv_show_all = "Show All Body Parts",
+            aim_mpv_only_mesh = "Only Mesh Hits (hide miss dots)",
+            aim_mpv_refined = "Show Refined Points (edge sub-samples)",
+            aim_mpv_misses = "Show Misses",
+            aim_mpv_radius = "Point Radius",
+            aim_mpv_filled = "Filled Points",
+            aim_mpv_maxpoints = "Max Rendered Points",
+            -- line
+            aim_line_enabled = "Show Line to Aim Target",
+            aim_line_from = "Line From",
+            aim_line_thickness = "Line Thickness",
+            -- fov
+            aim_fov_enabled = "Enabled",
+            aim_fov_visible = "Visible",
+            aim_fov_radius = "Radius",
+            -- visibility
+            aim_wallcheck = "WallCheck",
+            aim_wallcheck_mode = "WallCheck Mode",
+            aim_wallcheck_method = "WallCheck Method",
+            aim_delay_shot = "Delay Shot",
+            aim_alive_check = "Alive Check",
+            aim_team_check = "Team Check",
+            aim_team_mode = "Team Mode",
+            aim_team_neutral = "Treat Neutrals as Enemies",
+            -- silent / aim mode
+            aim_silent_mode = "Silent Aim Hook",
+            aim_use_backtrack = "Use Backtrack",
+            aim_backtrack_ghost = "Aim At Ghost (experimental)",
+            -- wallbang
+            aim_wb_enabled = "Enabled",
+            aim_wb_method = "Method",
+            aim_wb_hold = "Hold Time (s) — 0.05-0.5",
+            aim_wb_distance = "Max Distance (studs)",
+            -- tp aim
+            aim_tp_enabled = "Enabled",
+            aim_tp_method = "Method",
+            aim_tp_key = "InfiniteTP Key (KeyCode)",
+            aim_tp_distance = "TP Distance (studs)",
+            aim_tp_return = "Return on kill (MagicBullet)",
+            -- auto shoot
+            aim_as_enabled = "Enabled",
+            aim_as_only_aiming = "Only when aiming",
+            aim_as_rate = "Manual delay (s)",
+            aim_as_key = "Shoot Key",
+            aim_as_autostop = "AutoStop",
+            aim_as_stop_time = "Stop time (s)",
+
+            -- tooltips
+            tt_aim_enabled = "Master switch for the aimbot",
+            tt_aim_toggle = "If enabled, aim key toggles instead of holds",
+            tt_aim_ignore_fov = "Ignore the FOV circle entirely. NOTE: with this ON, target selection uses 3D distance from origin (not screen distance to crosshair).",
+            tt_aim_check_from_player = "Raycast from HRP instead of camera (safer for TP aim)",
+            tt_aim_lock_part = "Preferred hitbox. 'Nearest' = closest mesh point to mouse.",
+            tt_aim_fallback_visible = "If preferred part is hidden, use any visible part",
+            tt_aim_trigger_key = "Key or mouse button that holds/toggles aim",
+            tt_aim_mode = "Silent: instant hit via hooks, no camera move | Instant: snap camera | Smooth: lerp camera | CFrame: direct CFrame.lookAt write",
+            tt_aim_smoothing = "Higher = faster camera convergence",
+            tt_aim_hz = "Internal target update frequency (30–240Hz; RenderStepped caps ~240)",
+            tt_aim_target_npc = "Include NPC models (not players)",
+            tt_aim_npc_filter = "Only NPCs whose name contains this substring (empty = all)",
+            tt_aim_tl_enabled = "Keep same target until duration expires or FOV is lost",
+            tt_aim_tl_duration_mode = "Frames = N aimbot ticks; Seconds = real time",
+            tt_aim_tl_frames = "Frames of target lock",
+            tt_aim_tl_seconds = "Seconds of target lock",
+            tt_aim_tl_stick = "Continue aiming at locked target even outside FOV",
+            tt_aim_pred_enabled = "Predict target movement",
+            tt_aim_pred_x = "Horizontal prediction multiplier",
+            tt_aim_pred_y = "Vertical prediction multiplier",
+            tt_aim_pred_time = "Prediction lookahead time",
+            tt_aim_mp_enabled = "Sample mesh for closest VISIBLE point on target",
+            tt_aim_mp_density = "Grid rays per axis. 4 = 16 rays per part.",
+            tt_aim_mp_jitter = "Extra sub-rays for missed cells next to hits",
+            tt_aim_mp_adaptive = "Increase density for thin/small targets",
+            tt_aim_mp_refine = "Extra rays on silhouette edges (sub-pixel accuracy)",
+            tt_aim_mp_maxrays = "Total per-part ray budget",
+            tt_aim_mp_include_all = "Include accessories, R15 limbs, all BaseParts",
+            tt_aim_mp_apply_nearest = "Multi-point mesh selection also in Nearest mode",
+            tt_aim_mp_front = "Skip back-facing surfaces (perf boost)",
+            tt_aim_mpv_enabled = "Overlay dots for sampled mesh points",
+            tt_aim_mpv_style = "Grid = all points | Silhouette = edges only | MeshOnly = hits only",
+            tt_aim_mpv_show_all = "Render points for every part, not just current target",
+            tt_aim_mpv_only_mesh = "Hide misses (recommended)",
+            tt_aim_mpv_refined = "Show sub-sampled edge points (yellow)",
+            tt_aim_mpv_misses = "Render red dots for misses (verbose)",
+            tt_aim_mpv_radius = "Dot radius",
+            tt_aim_mpv_filled = "Solid or hollow dots",
+            tt_aim_mpv_maxpoints = "Cap on rendered dots (perf)",
+            tt_aim_line_enabled = "Draw a line from mouse/camera/HRP to aim point",
+            tt_aim_line_from = "Origin point of the line",
+            tt_aim_line_thickness = "Line width",
+            tt_aim_fov_enabled = "FOV-based target filtering",
+            tt_aim_fov_visible = "Show FOV circle on screen",
+            tt_aim_fov_radius = "FOV circle radius (pixels)",
+            tt_aim_wallcheck = "Require line-of-sight to aim",
+            tt_aim_wallcheck_mode = "Fast = 1 ray | Perfect = 9 rays (box corners)",
+            tt_aim_wallcheck_method = "Raycast = workspace:Raycast | CameraObscuring = GetPartsObscuringTarget",
+            tt_aim_delay_shot = "Wait for shot point if initially blocked (up to 100ms)",
+            tt_aim_alive_check = "Skip dead targets",
+            tt_aim_team_check = "Filter by team",
+            tt_aim_team_mode = "Which teams to target",
+            tt_aim_team_neutral = "If team is unknown, treat as enemy",
+            tt_aim_silent_mode = "Hook used in Silent aim (Camera/Mouse/Raycast etc.)",
+            tt_aim_use_backtrack = "Aim at lag-compensated position (requires Exploits module)",
+            tt_aim_backtrack_ghost = "Experimental: aim at ghost model of lag-compensated target",
+            tt_aim_wb_enabled = "Shoot through walls using RemotePatch or RayIgnore",
+            tt_aim_wb_method = "RemotePatch = patch FireServer args | RayIgnore = patch Raycast filter",
+            tt_aim_wb_hold = "How long the hook stays active during shot",
+            tt_aim_wb_distance = "Abort wallbang if target is farther than this",
+            tt_aim_tp_enabled = "Teleport-based aim",
+            tt_aim_tp_method = "MagicBullet = TP + shoot + return | InfiniteTP = hold key to stick",
+            tt_aim_tp_key = "Key that holds InfiniteTP",
+            tt_aim_tp_distance = "Offset from target when teleported",
+            tt_aim_tp_return = "If OFF, do NOT return CFrame after killing a target",
+            tt_aim_as_enabled = "Auto-fire at locked target",
+            tt_aim_as_only_aiming = "Only fire while aim key is held",
+            tt_aim_as_rate = "Minimum delay between auto-shots",
+            tt_aim_as_key = "Which mouse button to send",
+            tt_aim_as_autostop = "Briefly stop moving before shooting (for accuracy)",
+            tt_aim_as_stop_time = "How long to freeze movement",
+        }
+        local ru = {
+            aim_main = "Основное",
+            aim_target_lock = "Захват цели",
+            aim_prediction = "Предсказание",
+            aim_multipoint = "Мультипоинт",
+            aim_multipoint_visuals = "Визуал мультипоинта",
+            aim_aimline = "Линия прицела",
+            aim_fov = "FOV",
+            aim_visibility = "Видимость",
+            aim_silent = "Режим аима",
+            aim_wallbang = "Wallbang",
+            aim_tpaim = "TP-аим",
+            aim_autoshoot = "Авто-стрельба",
+            aim_enabled = "Включен",
+            aim_toggle = "Переключение",
+            aim_ignore_fov = "360 игнор FOV",
+            aim_check_from_player = "Проверка видимости от игрока при TP",
+            aim_lock_part = "Часть для аима",
+            aim_fallback_visible = "Откатываться на видимые части",
+            aim_trigger_key = "Клавиша аима (MouseButton1/2 или KeyCode)",
+            aim_mode = "Режим аима",
+            aim_smoothing = "Скорость сглаживания",
+            aim_hz = "Частота обновления (Hz)",
+            aim_target_npc = "Аимить NPC (болванки)",
+            aim_npc_filter = "Фильтр имён NPC (опционально)",
+            aim_tl_enabled = "Включен (держать одну цель)",
+            aim_tl_duration_mode = "Режим длительности",
+            aim_tl_frames = "Кадры (тики аимбота)",
+            aim_tl_seconds = "Секунды",
+            aim_tl_stick = "Держать за пределами FOV (не терять цель)",
+            aim_pred_enabled = "Включено",
+            aim_pred_x = "Предсказание X (%)",
+            aim_pred_y = "Предсказание Y (%)",
+            aim_pred_time = "Базовое время (с)",
+            aim_mp_enabled = "Включен (аим в ближайшую ВИДИМУЮ точку меша)",
+            aim_mp_density = "Плотность (лучей на ось)",
+            aim_mp_jitter = "Jitter-лучи (на промах-клетку)",
+            aim_mp_adaptive = "Адаптивная плотность по размеру на экране",
+            aim_mp_refine = "Уточнять края (суб-сэмплинг силуэта)",
+            aim_mp_maxrays = "Макс. лучей на часть",
+            aim_mp_include_all = "Включить ВСЕ части (R6+R15+аксессуары)",
+            aim_mp_apply_nearest = "Применять в режиме Nearest",
+            aim_mp_front = "Только фронтальные поверхности",
+            aim_mpv_enabled = "Показывать точки сэмплинга",
+            aim_mpv_style = "Стиль",
+            aim_mpv_show_all = "Показывать все части тела",
+            aim_mpv_only_mesh = "Только попадания (скрыть промахи)",
+            aim_mpv_refined = "Показывать уточнённые точки (края)",
+            aim_mpv_misses = "Показывать промахи",
+            aim_mpv_radius = "Радиус точки",
+            aim_mpv_filled = "Залитые точки",
+            aim_mpv_maxpoints = "Макс. отображаемых точек",
+            aim_line_enabled = "Показывать линию до цели",
+            aim_line_from = "Откуда линия",
+            aim_line_thickness = "Толщина линии",
+            aim_fov_enabled = "Включен",
+            aim_fov_visible = "Видимый",
+            aim_fov_radius = "Радиус",
+            aim_wallcheck = "Проверка стен",
+            aim_wallcheck_mode = "Режим проверки стен",
+            aim_wallcheck_method = "Метод проверки стен",
+            aim_delay_shot = "Отложенный выстрел",
+            aim_alive_check = "Проверка живых",
+            aim_team_check = "Проверка команды",
+            aim_team_mode = "Режим команды",
+            aim_team_neutral = "Нейтралов считать врагами",
+            aim_silent_mode = "Хук Silent Aim",
+            aim_use_backtrack = "Использовать backtrack",
+            aim_backtrack_ghost = "Аимить призрака (эксп.)",
+            aim_wb_enabled = "Включен",
+            aim_wb_method = "Метод",
+            aim_wb_hold = "Время удержания (с) — 0.05-0.5",
+            aim_wb_distance = "Макс. дистанция (studs)",
+            aim_tp_enabled = "Включен",
+            aim_tp_method = "Метод",
+            aim_tp_key = "Клавиша InfiniteTP",
+            aim_tp_distance = "Дистанция TP (studs)",
+            aim_tp_return = "Возврат после убийства (MagicBullet)",
+            aim_as_enabled = "Включена",
+            aim_as_only_aiming = "Только при аиме",
+            aim_as_rate = "Задержка (с)",
+            aim_as_key = "Кнопка стрельбы",
+            aim_as_autostop = "Авто-стоп",
+            aim_as_stop_time = "Время остановки (с)",
+
+            tt_aim_enabled = "Главный выключатель аимбота",
+            tt_aim_toggle = "Если включено — клавиша аима переключает, а не удерживает",
+            tt_aim_ignore_fov = "Игнорировать круг FOV. ВНИМАНИЕ: при включении выбор цели идёт по 3D-дистанции от источника (не по экранному расстоянию до прицела).",
+            tt_aim_check_from_player = "Рейкаст из HRP вместо камеры (безопаснее для TP-аима)",
+            tt_aim_lock_part = "Предпочитаемый хитбокс. 'Nearest' — ближайшая точка меша к мыши.",
+            tt_aim_fallback_visible = "Если часть скрыта — использовать любую видимую",
+            tt_aim_trigger_key = "Клавиша или кнопка мыши для аима",
+            tt_aim_mode = "Silent: мгновенное попадание через хуки, камера не двигается | Instant: мгновенный поворот | Smooth: плавный поворот | CFrame: прямая запись CFrame.lookAt",
+            tt_aim_smoothing = "Больше = быстрее камера сходится к цели",
+            tt_aim_hz = "Внутренняя частота обновления цели (30–240Hz; RenderStepped ~240)",
+            tt_aim_target_npc = "Включать NPC-модели (не игроков)",
+            tt_aim_npc_filter = "Только NPC с этой подстрокой в имени (пусто = все)",
+            tt_aim_tl_enabled = "Держать ту же цель, пока длительность не истечёт или FOV не потерян",
+            tt_aim_tl_duration_mode = "Frames = N тиков аимбота; Seconds = реальное время",
+            tt_aim_tl_frames = "Кадры захвата",
+            tt_aim_tl_seconds = "Секунды захвата",
+            tt_aim_tl_stick = "Продолжать аимить вне FOV",
+            tt_aim_pred_enabled = "Предсказывать движение цели",
+            tt_aim_pred_x = "Горизонтальный множитель",
+            tt_aim_pred_y = "Вертикальный множитель",
+            tt_aim_pred_time = "Время упреждения",
+            tt_aim_mp_enabled = "Сэмплировать меш для ближайшей ВИДИМОЙ точки",
+            tt_aim_mp_density = "Лучей сетки на ось. 4 = 16 лучей на часть.",
+            tt_aim_mp_jitter = "Доп. под-лучи для промахов рядом с попаданиями",
+            tt_aim_mp_adaptive = "Повышать плотность для тонких/мелких целей",
+            tt_aim_mp_refine = "Доп. лучи на краях силуэта",
+            tt_aim_mp_maxrays = "Бюджет лучей на часть",
+            tt_aim_mp_include_all = "Включать аксессуары, R15-конечности, все BasePart",
+            tt_aim_mp_apply_nearest = "Мультипоинт также в режиме Nearest",
+            tt_aim_mp_front = "Пропускать задние поверхности (перф.)",
+            tt_aim_mpv_enabled = "Наложение точек сэмплинга",
+            tt_aim_mpv_style = "Grid = все точки | Silhouette = только края | MeshOnly = только попадания",
+            tt_aim_mpv_show_all = "Рисовать точки для всех частей, не только цели",
+            tt_aim_mpv_only_mesh = "Скрыть промахи (рекомендуется)",
+            tt_aim_mpv_refined = "Показывать суб-точки краёв (жёлтые)",
+            tt_aim_mpv_misses = "Красные точки промахов (нагрузочно)",
+            tt_aim_mpv_radius = "Радиус точки",
+            tt_aim_mpv_filled = "Залитые или полые точки",
+            tt_aim_mpv_maxpoints = "Лимит отрисованных точек (перф.)",
+            tt_aim_line_enabled = "Рисовать линию от мыши/камеры/HRP к точке прицела",
+            tt_aim_line_from = "Начало линии",
+            tt_aim_line_thickness = "Толщина",
+            tt_aim_fov_enabled = "Фильтрация целей по FOV",
+            tt_aim_fov_visible = "Показывать круг FOV",
+            tt_aim_fov_radius = "Радиус круга FOV (пиксели)",
+            tt_aim_wallcheck = "Требовать линию видимости для аима",
+            tt_aim_wallcheck_mode = "Fast = 1 луч | Perfect = 9 лучей (углы бокса)",
+            tt_aim_wallcheck_method = "Raycast = workspace:Raycast | CameraObscuring = GetPartsObscuringTarget",
+            tt_aim_delay_shot = "Ждать точку выстрела при блоке (до 100мс)",
+            tt_aim_alive_check = "Пропускать мёртвых",
+            tt_aim_team_check = "Фильтр по команде",
+            tt_aim_team_mode = "Какие команды аимить",
+            tt_aim_team_neutral = "Без команды = враг",
+            tt_aim_silent_mode = "Хук Silent Aim (Camera/Mouse/Raycast и др.)",
+            tt_aim_use_backtrack = "Аим в лаг-компенсированную позицию (требует Exploits)",
+            tt_aim_backtrack_ghost = "Экспериментально: аим в призрак лаг-компенсированной цели",
+            tt_aim_wb_enabled = "Стрельба через стены (RemotePatch или RayIgnore)",
+            tt_aim_wb_method = "RemotePatch = патч FireServer | RayIgnore = патч Raycast-фильтра",
+            tt_aim_wb_hold = "Сколько держать хук во время выстрела",
+            tt_aim_wb_distance = "Прервать wallbang если цель дальше этого",
+            tt_aim_tp_enabled = "Аим через телепорт",
+            tt_aim_tp_method = "MagicBullet = TP + выстрел + возврат | InfiniteTP = держать клавишу",
+            tt_aim_tp_key = "Клавиша InfiniteTP",
+            tt_aim_tp_distance = "Отступ от цели при телепорте",
+            tt_aim_tp_return = "Если ВЫКЛ — НЕ возвращать CFrame после убийства",
+            tt_aim_as_enabled = "Авто-стрельба по захваченной цели",
+            tt_aim_as_only_aiming = "Стрелять только при удержании клавиши аима",
+            tt_aim_as_rate = "Минимальная задержка между выстрелами",
+            tt_aim_as_key = "Какую кнопку мыши посылать",
+            tt_aim_as_autostop = "Кратко остановиться перед выстрелом (точность)",
+            tt_aim_as_stop_time = "Сколько длится остановка",
+        }
+        for k, v in pairs(en) do UI.L.en[k] = v end
+        for k, v in pairs(ru) do UI.L.ru[k] = v end
+        if UI.RefreshTheme then pcall(UI.RefreshTheme) end
+    end
+end
+
 H._UI = H._UI or {}
 local AimbotTab = Window:AddTab({ Name = "Aimbot", Icon = ">" })
 H._UI.AimbotTab = AimbotTab
@@ -2412,7 +2853,8 @@ local function aSetFov(k, v) if Aimbot.FOVSettings then Aimbot.FOVSettings[k] = 
 local function aSetMP(k, v)
     if Aimbot.Settings and Aimbot.Settings.MultiPoint then Aimbot.Settings.MultiPoint[k] = v end
 end
-local function aSetMPV(k, v)
+-- FIX: MPVcfg — не конфликтует с MPV (Drawing pool)
+local function aSetMPVcfg(k, v)
     if Aimbot.Settings and Aimbot.Settings.MultiPointVisuals then
         Aimbot.Settings.MultiPointVisuals[k] = v
     end
@@ -2443,197 +2885,256 @@ local silentAimModes   = {
     "FindPartOnRay", "FindPartOnRayWithWhitelist",
     "FindPartOnRayWithIgnoreList", "Mouse.Hit/Target",
 }
-local wallbangModes = {
-    "RemotePatch", "RemotePatchFull", "RayIgnore", "RayNewHook",
-    "MuzzleTeleport", "MouseHit", "ScreenPointToRay", "CameraTP",
-}
+-- FIX: только рабочие wallbang-методы
+local wallbangModes = { "RemotePatch", "RayIgnore" }
 local mpStyles = { "Grid", "Silhouette", "MeshOnly" }
 local tlModes  = { "Frames", "Seconds" }
+-- v32: единый AimMode
+local aimModesList = { "Silent", "Instant", "Smooth", "CFrame" }
 
 -- // LEFT column
-local secA = AimbotTab:CreateSection({ Name = "Main" })
-secA:AddToggle({ Name = "Enabled", Value = AS.Enabled or false,
-    Callback = function(v) aSet("Enabled", v) end })
-secA:AddToggle({ Name = "Toggle", Value = AS.Toggle or false,
-    Callback = function(v) aSet("Toggle", v) end })
-secA:AddToggle({ Name = "360 Ignore FOV", Value = AS.IgnoreFOV or false,
-    Callback = function(v) aSet("IgnoreFOV", v) end })
-secA:AddToggle({ Name = "Check visibility from player on TP",
+local secA = AimbotTab:CreateSection({ Name = "aim_main" })
+secA:AddToggle({ Name = "aim_enabled", Value = AS.Enabled or false,
+    Callback = function(v) aSet("Enabled", v) end, Tooltip = "tt_aim_enabled" })
+secA:AddToggle({ Name = "aim_toggle", Value = AS.Toggle or false,
+    Callback = function(v) aSet("Toggle", v) end, Tooltip = "tt_aim_toggle" })
+secA:AddToggle({ Name = "aim_ignore_fov", Value = AS.IgnoreFOV or false,
+    Callback = function(v) aSet("IgnoreFOV", v) end, Tooltip = "tt_aim_ignore_fov" })
+secA:AddToggle({ Name = "aim_check_from_player",
     Value = AS.CheckFromPlayerOnTP ~= false,
-    Callback = function(v) aSet("CheckFromPlayerOnTP", v) end })
-secA:AddDropdown({ Name = "Lock Part", Value = AS.LockPart or "Head",
+    Callback = function(v) aSet("CheckFromPlayerOnTP", v) end,
+    Tooltip = "tt_aim_check_from_player" })
+secA:AddDropdown({ Name = "aim_lock_part", Value = AS.LockPart or "Head",
     List = { "Head", "Torso", "Nearest" },
-    Callback = function(v) aSet("LockPart", v) end })
-secA:AddToggle({ Name = "Fallback to visible parts",
+    Callback = function(v) aSet("LockPart", v) end,
+    Tooltip = "tt_aim_lock_part" })
+secA:AddToggle({ Name = "aim_fallback_visible",
     Value = AS.FallbackToVisible or false,
-    Callback = function(v) aSet("FallbackToVisible", v) end })
-secA:AddInput({ Name = "Aim Key (MouseButton1/2 or KeyCode)",
+    Callback = function(v) aSet("FallbackToVisible", v) end,
+    Tooltip = "tt_aim_fallback_visible" })
+secA:AddInput({ Name = "aim_trigger_key",
     Value = AS.TriggerKey or "MouseButton2",
-    Callback = function(v) aSet("TriggerKey", v) end })
-secA:AddDropdown({ Name = "Aim Method", Value = AS.AimMethod or "Smooth",
-    List = { "Smooth", "Instant" },
-    Callback = function(v) aSet("AimMethod", v) end })
-secA:AddSlider({ Name = "Smoothing Speed", Value = AS.AimSmoothingSpeed or 6,
+    Callback = function(v) aSet("TriggerKey", v) end,
+    Tooltip = "tt_aim_trigger_key" })
+-- v32: единый AimMode (заменяет SilentAim + AimMethod)
+secA:AddDropdown({ Name = "aim_mode", Value = AS.AimMode or "Silent",
+    List = aimModesList,
+    Callback = function(v)
+        aSet("AimMode", v)
+        if Aimbot.Internal then Aimbot.Internal.LastManageKey = nil end
+        -- при выходе из Silent — снять хуки
+        if v ~= "Silent" then
+            if Aimbot.RemoveAVHook then pcall(Aimbot.RemoveAVHook) end
+            if Aimbot.RemoveMHTProxy then pcall(Aimbot.RemoveMHTProxy) end
+        end
+    end, Tooltip = "tt_aim_mode" })
+secA:AddSlider({ Name = "aim_smoothing", Value = AS.AimSmoothingSpeed or 6,
     Min = 1, Max = 20,
-    Callback = function(v) aSet("AimSmoothingSpeed", v) end })
-secA:AddSlider({ Name = "Aimbot Update Rate (Hz)", Value = AS.AimbotHz or 120,
-    Min = 30, Max = 500,
-    Callback = function(v) aSet("AimbotHz", v) end })
-secA:AddToggle({ Name = "Target NPCs (rigs/dummies)", Value = AS.TargetNPCs or false,
-    Callback = function(v) aSet("TargetNPCs", v) end })
-secA:AddInput({ Name = "NPC name filter (optional)",
+    Callback = function(v) aSet("AimSmoothingSpeed", v) end,
+    Tooltip = "tt_aim_smoothing" })
+-- FIX: Max=240 (RenderStepped предел)
+secA:AddSlider({ Name = "aim_hz", Value = AS.AimbotHz or 120,
+    Min = 30, Max = 240,
+    Callback = function(v) aSet("AimbotHz", v) end,
+    Tooltip = "tt_aim_hz" })
+secA:AddToggle({ Name = "aim_target_npc", Value = AS.TargetNPCs or false,
+    Callback = function(v) aSet("TargetNPCs", v) end,
+    Tooltip = "tt_aim_target_npc" })
+secA:AddInput({ Name = "aim_npc_filter",
     Value = AS.NPCNameFilter or "",
-    Callback = function(v) aSet("NPCNameFilter", v) end })
+    Callback = function(v) aSet("NPCNameFilter", v) end,
+    Tooltip = "tt_aim_npc_filter" })
 
-local secTL = AimbotTab:CreateSection({ Name = "Target Lock" })
+local secTL = AimbotTab:CreateSection({ Name = "aim_target_lock" })
 local TL = AS.TargetLock or {}
-secTL:AddToggle({ Name = "Enabled (stick to one player)",
+secTL:AddToggle({ Name = "aim_tl_enabled",
     Value = TL.Enabled or false,
-    Callback = function(v) aSetTL("Enabled", v) end })
-secTL:AddDropdown({ Name = "Duration Mode",
+    Callback = function(v) aSetTL("Enabled", v) end,
+    Tooltip = "tt_aim_tl_enabled" })
+secTL:AddDropdown({ Name = "aim_tl_duration_mode",
     Value = TL.DurationMode or "Frames", List = tlModes,
-    Callback = function(v) aSetTL("DurationMode", v) end })
-secTL:AddSlider({ Name = "Frames (aimbot update cycles)",
+    Callback = function(v) aSetTL("DurationMode", v) end,
+    Tooltip = "tt_aim_tl_duration_mode" })
+secTL:AddSlider({ Name = "aim_tl_frames",
     Value = TL.Frames or 60, Min = 1, Max = 600,
-    Callback = function(v) aSetTL("Frames", math.floor(v)) end })
-secTL:AddSlider({ Name = "Seconds",
+    Callback = function(v) aSetTL("Frames", math.floor(v)) end,
+    Tooltip = "tt_aim_tl_frames" })
+secTL:AddSlider({ Name = "aim_tl_seconds",
     Value = TL.Seconds or 1.0, Min = 0.1, Max = 10, Decimals = 2,
-    Callback = function(v) aSetTL("Seconds", v) end })
-secTL:AddToggle({ Name = "Stick Beyond FOV (keep target off-screen)",
+    Callback = function(v) aSetTL("Seconds", v) end,
+    Tooltip = "tt_aim_tl_seconds" })
+secTL:AddToggle({ Name = "aim_tl_stick",
     Value = TL.StickBeyondFOV ~= false,
-    Callback = function(v) aSetTL("StickBeyondFOV", v) end })
+    Callback = function(v) aSetTL("StickBeyondFOV", v) end,
+    Tooltip = "tt_aim_tl_stick" })
 
-local predSec = AimbotTab:CreateSection({ Name = "Prediction" })
-predSec:AddToggle({ Name = "Enabled", Value = AS.PredictionEnabled or false,
-    Callback = function(v) aSet("PredictionEnabled", v) end })
-predSec:AddSlider({ Name = "Prediction X (%)", Value = AS.PredictionX or 0,
+local predSec = AimbotTab:CreateSection({ Name = "aim_prediction" })
+predSec:AddToggle({ Name = "aim_pred_enabled", Value = AS.PredictionEnabled or false,
+    Callback = function(v) aSet("PredictionEnabled", v) end,
+    Tooltip = "tt_aim_pred_enabled" })
+predSec:AddSlider({ Name = "aim_pred_x", Value = AS.PredictionX or 0,
     Min = -100, Max = 100,
-    Callback = function(v) aSet("PredictionX", v) end })
-predSec:AddSlider({ Name = "Prediction Y (%)", Value = AS.PredictionY or 0,
+    Callback = function(v) aSet("PredictionX", v) end,
+    Tooltip = "tt_aim_pred_x" })
+predSec:AddSlider({ Name = "aim_pred_y", Value = AS.PredictionY or 0,
     Min = -100, Max = 100,
-    Callback = function(v) aSet("PredictionY", v) end })
-predSec:AddSlider({ Name = "Base Time (s)", Value = AS.PredictionTime or 0.15,
+    Callback = function(v) aSet("PredictionY", v) end,
+    Tooltip = "tt_aim_pred_y" })
+predSec:AddSlider({ Name = "aim_pred_time", Value = AS.PredictionTime or 0.15,
     Min = 0.01, Max = 0.5, Decimals = 2,
-    Callback = function(v) aSet("PredictionTime", v) end })
+    Callback = function(v) aSet("PredictionTime", v) end,
+    Tooltip = "tt_aim_pred_time" })
 
-local secMP = AimbotTab:CreateSection({ Name = "Multi-Point" })
+local secMP = AimbotTab:CreateSection({ Name = "aim_multipoint" })
 local MP = AS.MultiPoint or {}
-secMP:AddToggle({ Name = "Enabled (aim at closest VISIBLE mesh point)",
+secMP:AddToggle({ Name = "aim_mp_enabled",
     Value = MP.Enabled or false,
-    Callback = function(v) aSetMP("Enabled", v) end })
-secMP:AddSlider({ Name = "Density (rays per axis)",
+    Callback = function(v) aSetMP("Enabled", v) end,
+    Tooltip = "tt_aim_mp_enabled" })
+secMP:AddSlider({ Name = "aim_mp_density",
     Value = MP.Density or 4, Min = 2, Max = 8,
-    Callback = function(v) aSetMP("Density", math.floor(v)) end })
-secMP:AddSlider({ Name = "Jitter Sub-rays (per missed cell)",
+    Callback = function(v)
+        aSetMP("Density", math.floor(v))
+        if Aimbot.InvalidateMPCache then pcall(Aimbot.InvalidateMPCache) end
+    end, Tooltip = "tt_aim_mp_density" })
+secMP:AddSlider({ Name = "aim_mp_jitter",
     Value = MP.JitterTries or 4, Min = 0, Max = 8,
-    Callback = function(v) aSetMP("JitterTries", math.floor(v)) end })
-secMP:AddToggle({ Name = "Adaptive density by on-screen size",
+    Callback = function(v) aSetMP("JitterTries", math.floor(v)) end,
+    Tooltip = "tt_aim_mp_jitter" })
+secMP:AddToggle({ Name = "aim_mp_adaptive",
     Value = MP.AdaptiveDensity ~= false,
-    Callback = function(v) aSetMP("AdaptiveDensity", v) end })
-secMP:AddToggle({ Name = "Refine edges (silhouette sub-sampling)",
+    Callback = function(v) aSetMP("AdaptiveDensity", v) end,
+    Tooltip = "tt_aim_mp_adaptive" })
+secMP:AddToggle({ Name = "aim_mp_refine",
     Value = MP.RefineEdges ~= false,
-    Callback = function(v) aSetMP("RefineEdges", v) end })
-secMP:AddSlider({ Name = "Max rays per part",
+    Callback = function(v) aSetMP("RefineEdges", v) end,
+    Tooltip = "tt_aim_mp_refine" })
+secMP:AddSlider({ Name = "aim_mp_maxrays",
     Value = MP.MaxRaysPerPart or 128, Min = 16, Max = 400,
-    Callback = function(v) aSetMP("MaxRaysPerPart", math.floor(v)) end })
-secMP:AddToggle({ Name = "Include ALL parts (R6+R15+accessories)",
+    Callback = function(v) aSetMP("MaxRaysPerPart", math.floor(v)) end,
+    Tooltip = "tt_aim_mp_maxrays" })
+secMP:AddToggle({ Name = "aim_mp_include_all",
     Value = MP.IncludeAllParts ~= false,
-    Callback = function(v) aSetMP("IncludeAllParts", v) end })
-secMP:AddToggle({ Name = "Apply to Nearest mode",
+    Callback = function(v) aSetMP("IncludeAllParts", v) end,
+    Tooltip = "tt_aim_mp_include_all" })
+secMP:AddToggle({ Name = "aim_mp_apply_nearest",
     Value = MP.ApplyToNearest ~= false,
-    Callback = function(v) aSetMP("ApplyToNearest", v) end })
-secMP:AddToggle({ Name = "Front-facing only (skip back faces)",
+    Callback = function(v) aSetMP("ApplyToNearest", v) end,
+    Tooltip = "tt_aim_mp_apply_nearest" })
+secMP:AddToggle({ Name = "aim_mp_front",
     Value = MP.FrontFacingOnly ~= false,
-    Callback = function(v) aSetMP("FrontFacingOnly", v) end })
+    Callback = function(v) aSetMP("FrontFacingOnly", v) end,
+    Tooltip = "tt_aim_mp_front" })
 
-local secMPV = AimbotTab:CreateSection({ Name = "Multi-Point Visuals" })
-local MPV = AS.MultiPointVisuals or {}
-secMPV:AddToggle({ Name = "Show Sampled Points",
-    Value = MPV.Enabled or false,
-    Callback = function(v) aSetMPV("Enabled", v) end })
-secMPV:AddDropdown({ Name = "Style", Value = MPV.Style or "Grid", List = mpStyles,
-    Callback = function(v) aSetMPV("Style", v) end })
-secMPV:AddToggle({ Name = "Show All Body Parts",
-    Value = MPV.ShowAllParts ~= false,
-    Callback = function(v) aSetMPV("ShowAllParts", v) end })
-secMPV:AddToggle({ Name = "Only Mesh Hits (hide miss dots)",
-    Value = MPV.OnlyMeshHits ~= false,
+local secMPV = AimbotTab:CreateSection({ Name = "aim_multipoint_visuals" })
+-- FIX: MPVcfg — избегаем shadowing MPV
+local MPVcfg = AS.MultiPointVisuals or {}
+secMPV:AddToggle({ Name = "aim_mpv_enabled",
+    Value = MPVcfg.Enabled or false,
+    Callback = function(v) aSetMPVcfg("Enabled", v) end,
+    Tooltip = "tt_aim_mpv_enabled" })
+secMPV:AddDropdown({ Name = "aim_mpv_style", Value = MPVcfg.Style or "Grid", List = mpStyles,
+    Callback = function(v) aSetMPVcfg("Style", v) end,
+    Tooltip = "tt_aim_mpv_style" })
+secMPV:AddToggle({ Name = "aim_mpv_show_all",
+    Value = MPVcfg.ShowAllParts ~= false,
+    Callback = function(v) aSetMPVcfg("ShowAllParts", v) end,
+    Tooltip = "tt_aim_mpv_show_all" })
+secMPV:AddToggle({ Name = "aim_mpv_only_mesh",
+    Value = MPVcfg.OnlyMeshHits ~= false,
     Callback = function(v)
-        aSetMPV("OnlyMeshHits", v)
-        aSetMPV("ShowMisses", not v)
-    end })
-secMPV:AddToggle({ Name = "Show Refined Points (edge sub-samples)",
-    Value = MPV.ShowRefined ~= false,
-    Callback = function(v) aSetMPV("ShowRefined", v) end })
-secMPV:AddToggle({ Name = "Show Misses",
-    Value = MPV.ShowMisses == true,
+        aSetMPVcfg("OnlyMeshHits", v)
+        aSetMPVcfg("ShowMisses", not v)
+    end, Tooltip = "tt_aim_mpv_only_mesh" })
+secMPV:AddToggle({ Name = "aim_mpv_refined",
+    Value = MPVcfg.ShowRefined ~= false,
+    Callback = function(v) aSetMPVcfg("ShowRefined", v) end,
+    Tooltip = "tt_aim_mpv_refined" })
+secMPV:AddToggle({ Name = "aim_mpv_misses",
+    Value = MPVcfg.ShowMisses == true,
     Callback = function(v)
-        aSetMPV("ShowMisses", v)
-        aSetMPV("OnlyMeshHits", not v)
-    end })
-secMPV:AddSlider({ Name = "Point Radius",
-    Value = MPV.PointRadius or 4, Min = 1, Max = 12,
-    Callback = function(v) aSetMPV("PointRadius", v) end })
-secMPV:AddToggle({ Name = "Filled Points",
-    Value = MPV.PointFilled ~= false,
-    Callback = function(v) aSetMPV("PointFilled", v) end })
-secMPV:AddSlider({ Name = "Max Rendered Points",
-    Value = MPV.MaxPoints or 512, Min = 64, Max = 1024,
-    Callback = function(v) aSetMPV("MaxPoints", math.floor(v)) end })
+        aSetMPVcfg("ShowMisses", v)
+        aSetMPVcfg("OnlyMeshHits", not v)
+    end, Tooltip = "tt_aim_mpv_misses" })
+secMPV:AddSlider({ Name = "aim_mpv_radius",
+    Value = MPVcfg.PointRadius or 4, Min = 1, Max = 12,
+    Callback = function(v) aSetMPVcfg("PointRadius", v) end,
+    Tooltip = "tt_aim_mpv_radius" })
+secMPV:AddToggle({ Name = "aim_mpv_filled",
+    Value = MPVcfg.PointFilled ~= false,
+    Callback = function(v) aSetMPVcfg("PointFilled", v) end,
+    Tooltip = "tt_aim_mpv_filled" })
+secMPV:AddSlider({ Name = "aim_mpv_maxpoints",
+    Value = MPVcfg.MaxPoints or 512, Min = 64, Max = 1024,
+    Callback = function(v) aSetMPVcfg("MaxPoints", math.floor(v)) end,
+    Tooltip = "tt_aim_mpv_maxpoints" })
 
-local secLine = AimbotTab:CreateSection({ Name = "Aim Line" })
+local secLine = AimbotTab:CreateSection({ Name = "aim_aimline" })
 local AL = AS.AimLineVisuals or {}
-secLine:AddToggle({ Name = "Show Line to Aim Target",
+secLine:AddToggle({ Name = "aim_line_enabled",
     Value = AL.Enabled or false,
-    Callback = function(v) aSetLine("Enabled", v) end })
-secLine:AddDropdown({ Name = "Line From", Value = AL.LineFrom or "Mouse",
+    Callback = function(v) aSetLine("Enabled", v) end,
+    Tooltip = "tt_aim_line_enabled" })
+secLine:AddDropdown({ Name = "aim_line_from", Value = AL.LineFrom or "Mouse",
     List = { "Mouse", "Camera", "PlayerHRP" },
-    Callback = function(v) aSetLine("LineFrom", v) end })
-secLine:AddSlider({ Name = "Line Thickness",
+    Callback = function(v) aSetLine("LineFrom", v) end,
+    Tooltip = "tt_aim_line_from" })
+secLine:AddSlider({ Name = "aim_line_thickness",
     Value = AL.Thickness or 2, Min = 1, Max = 6,
-    Callback = function(v) aSetLine("Thickness", v) end })
+    Callback = function(v) aSetLine("Thickness", v) end,
+    Tooltip = "tt_aim_line_thickness" })
 
-local secE = AimbotTab:CreateSection({ Name = "FOV" })
-secE:AddToggle({ Name = "Enabled",
+local secE = AimbotTab:CreateSection({ Name = "aim_fov" })
+secE:AddToggle({ Name = "aim_fov_enabled",
     Value = (Aimbot.FOVSettings and Aimbot.FOVSettings.Enabled) ~= false,
-    Callback = function(v) aSetFov("Enabled", v) end })
-secE:AddToggle({ Name = "Visible",
+    Callback = function(v) aSetFov("Enabled", v) end,
+    Tooltip = "tt_aim_fov_enabled" })
+secE:AddToggle({ Name = "aim_fov_visible",
     Value = (Aimbot.FOVSettings and Aimbot.FOVSettings.Visible) ~= false,
-    Callback = function(v) aSetFov("Visible", v) end })
-secE:AddSlider({ Name = "Radius",
+    Callback = function(v) aSetFov("Visible", v) end,
+    Tooltip = "tt_aim_fov_visible" })
+secE:AddSlider({ Name = "aim_fov_radius",
     Value = (Aimbot.FOVSettings and Aimbot.FOVSettings.Amount) or 90,
     Min = 10, Max = 300,
-    Callback = function(v) aSetFov("Amount", v) end })
+    Callback = function(v) aSetFov("Amount", v) end,
+    Tooltip = "tt_aim_fov_radius" })
 
 -- // RIGHT column
-local secW = AimbotTab:CreateSection({ Name = "Visibility", Side = "Right" })
-secW:AddToggle({ Name = "WallCheck", Value = AS.WallCheck or false,
-    Callback = function(v) aSet("WallCheck", v) end })
-secW:AddDropdown({ Name = "WallCheck Mode",
+local secW = AimbotTab:CreateSection({ Name = "aim_visibility", Side = "Right" })
+secW:AddToggle({ Name = "aim_wallcheck", Value = AS.WallCheck or false,
+    Callback = function(v) aSet("WallCheck", v) end,
+    Tooltip = "tt_aim_wallcheck" })
+secW:AddDropdown({ Name = "aim_wallcheck_mode",
     Value = AS.WallCheckMode or "Perfect", List = wallCheckModes,
-    Callback = function(v) aSet("WallCheckMode", v) end })
-secW:AddDropdown({ Name = "WallCheck Method",
+    Callback = function(v) aSet("WallCheckMode", v) end,
+    Tooltip = "tt_aim_wallcheck_mode" })
+secW:AddDropdown({ Name = "aim_wallcheck_method",
     Value = AS.WallCheckMethod or "Raycast", List = wallCheckMethods,
-    Callback = function(v) aSet("WallCheckMethod", v) end })
-secW:AddToggle({ Name = "Delay Shot", Value = AS.DelayShot ~= false,
-    Callback = function(v) aSet("DelayShot", v) end })
-secW:AddToggle({ Name = "Alive Check", Value = AS.AliveCheck ~= false,
-    Callback = function(v) aSet("AliveCheck", v) end })
-secW:AddToggle({ Name = "Team Check",
+    Callback = function(v) aSet("WallCheckMethod", v) end,
+    Tooltip = "tt_aim_wallcheck_method" })
+secW:AddToggle({ Name = "aim_delay_shot", Value = AS.DelayShot ~= false,
+    Callback = function(v) aSet("DelayShot", v) end,
+    Tooltip = "tt_aim_delay_shot" })
+secW:AddToggle({ Name = "aim_alive_check", Value = AS.AliveCheck ~= false,
+    Callback = function(v) aSet("AliveCheck", v) end,
+    Tooltip = "tt_aim_alive_check" })
+secW:AddToggle({ Name = "aim_team_check",
     Value = (AS.TeamCheck and AS.TeamCheck.Enabled) ~= false,
-    Callback = function(v) aSetTeam("Enabled", v) end })
-secW:AddDropdown({ Name = "Team Mode",
+    Callback = function(v) aSetTeam("Enabled", v) end,
+    Tooltip = "tt_aim_team_check" })
+secW:AddDropdown({ Name = "aim_team_mode",
     Value = (AS.TeamCheck and AS.TeamCheck.Mode) or "Enemies",
     List = teamModes,
-    Callback = function(v) aSetTeam("Mode", v) end })
-secW:AddToggle({ Name = "Treat Neutrals as Enemies",
+    Callback = function(v) aSetTeam("Mode", v) end,
+    Tooltip = "tt_aim_team_mode" })
+secW:AddToggle({ Name = "aim_team_neutral",
     Value = (AS.TeamCheck and AS.TeamCheck.TreatNeutralAsEnemy) ~= false,
-    Callback = function(v) aSetTeam("TreatNeutralAsEnemy", v) end })
+    Callback = function(v) aSetTeam("TreatNeutralAsEnemy", v) end,
+    Tooltip = "tt_aim_team_neutral" })
 
-local secD = AimbotTab:CreateSection({ Name = "Silent Aim", Side = "Right" })
-secD:AddToggle({ Name = "Enabled", Value = AS.SilentAim ~= false,
-    Callback = function(v) aSet("SilentAim", v) end })
-secD:AddDropdown({ Name = "Mode", Value = AS.SilentAimMode or "Camera",
+-- Aim Mode section (бывший Silent Aim — теперь только hook, когда AimMode="Silent")
+local secD = AimbotTab:CreateSection({ Name = "aim_silent", Side = "Right" })
+secD:AddDropdown({ Name = "aim_silent_mode", Value = AS.SilentAimMode or "Camera",
     List = silentAimModes,
     Callback = function(v)
         aSet("SilentAimMode", v)
@@ -2645,8 +3146,8 @@ secD:AddDropdown({ Name = "Mode", Value = AS.SilentAimMode or "Camera",
         if v ~= "Mouse.Hit/Target" and Aimbot.RemoveMHTProxy then
             pcall(Aimbot.RemoveMHTProxy)
         end
-    end })
-secD:AddToggle({ Name = "Use Backtrack", Value = AS.UseBacktrack or false,
+    end, Tooltip = "tt_aim_silent_mode" })
+secD:AddToggle({ Name = "aim_use_backtrack", Value = AS.UseBacktrack or false,
     Callback = function(v)
         aSet("UseBacktrack", v)
         if v then
@@ -2656,80 +3157,89 @@ secD:AddToggle({ Name = "Use Backtrack", Value = AS.UseBacktrack or false,
                 warn("[AirHub] Use Backtrack: H.Exploits не загружен или Backtrack не включён.")
             end
         end
-    end })
-secD:AddToggle({ Name = "Aim At Ghost (experimental)",
+    end, Tooltip = "tt_aim_use_backtrack" })
+secD:AddToggle({ Name = "aim_backtrack_ghost",
     Value = AS.BacktrackAimAtGhost or false,
-    Callback = function(v) aSet("BacktrackAimAtGhost", v) end })
+    Callback = function(v) aSet("BacktrackAimAtGhost", v) end,
+    Tooltip = "tt_aim_backtrack_ghost" })
 
-local secWB = AimbotTab:CreateSection({ Name = "Wallbang", Side = "Right" })
-secWB:AddToggle({ Name = "Enabled", Value = AS.WallbangEnabled or false,
-    Callback = function(v) aSetWB("WallbangEnabled", v) end })
-secWB:AddDropdown({ Name = "Method", Value = AS.WallbangMethod or "RemotePatch",
+local secWB = AimbotTab:CreateSection({ Name = "aim_wallbang", Side = "Right" })
+secWB:AddToggle({ Name = "aim_wb_enabled", Value = AS.WallbangEnabled or false,
+    Callback = function(v) aSetWB("WallbangEnabled", v) end,
+    Tooltip = "tt_aim_wb_enabled" })
+secWB:AddDropdown({ Name = "aim_wb_method", Value = AS.WallbangMethod or "RemotePatch",
     List = wallbangModes,
-    Callback = function(v) aSetWB("WallbangMethod", v) end })
-secWB:AddInput({ Name = "Hold Time (s) — 0.05-0.5",
+    Callback = function(v) aSetWB("WallbangMethod", v) end,
+    Tooltip = "tt_aim_wb_method" })
+secWB:AddInput({ Name = "aim_wb_hold",
     Value = tostring(AS.WallbangHoldTime or 0.1),
     Callback = function(v)
         local n = tonumber(v)
         if n then aSetWB("WallbangHoldTime", math.clamp(n, 0.05, 0.5)) end
-    end })
-secWB:AddInput({ Name = "Max Distance (studs)",
+    end, Tooltip = "tt_aim_wb_hold" })
+secWB:AddInput({ Name = "aim_wb_distance",
     Value = tostring(AS.WallbangDistance or 500),
     Callback = function(v)
         local n = tonumber(v)
         if n and n > 0 then aSetWB("WallbangDistance", math.floor(n)) end
-    end })
+    end, Tooltip = "tt_aim_wb_distance" })
 
-local secTP = AimbotTab:CreateSection({ Name = "TP Aim", Side = "Right" })
-secTP:AddToggle({ Name = "Enabled", Value = AS.TPAimEnabled or false,
-    Callback = function(v) aSetTP("TPAimEnabled", v) end })
-secTP:AddDropdown({ Name = "Method", Value = AS.TPAimMethod or "MagicBullet",
+local secTP = AimbotTab:CreateSection({ Name = "aim_tpaim", Side = "Right" })
+secTP:AddToggle({ Name = "aim_tp_enabled", Value = AS.TPAimEnabled or false,
+    Callback = function(v) aSetTP("TPAimEnabled", v) end,
+    Tooltip = "tt_aim_tp_enabled" })
+secTP:AddDropdown({ Name = "aim_tp_method", Value = AS.TPAimMethod or "MagicBullet",
     List = { "MagicBullet", "InfiniteTP" },
-    Callback = function(v) aSetTP("TPAimMethod", v) end })
-secTP:AddInput({ Name = "InfiniteTP Key (KeyCode)", Value = AS.TPAimKey or "E",
-    Callback = function(v) if v and v ~= "" then aSetTP("TPAimKey", v) end end })
-secTP:AddInput({ Name = "TP Distance (studs)",
+    Callback = function(v) aSetTP("TPAimMethod", v) end,
+    Tooltip = "tt_aim_tp_method" })
+secTP:AddInput({ Name = "aim_tp_key", Value = AS.TPAimKey or "E",
+    Callback = function(v) if v and v ~= "" then aSetTP("TPAimKey", v) end end,
+    Tooltip = "tt_aim_tp_key" })
+secTP:AddInput({ Name = "aim_tp_distance",
     Value = tostring(AS.TPAimDistance or 5),
     Callback = function(v)
         local n = tonumber(v)
         if n and n > 0 then aSetTP("TPAimDistance", n) end
-    end })
-secTP:AddToggle({ Name = "Return on kill (MagicBullet)",
+    end, Tooltip = "tt_aim_tp_distance" })
+secTP:AddToggle({ Name = "aim_tp_return",
     Value = AS.TPAimReturnOnKill ~= false,
-    Callback = function(v) aSetTP("TPAimReturnOnKill", v) end })
+    Callback = function(v) aSetTP("TPAimReturnOnKill", v) end,
+    Tooltip = "tt_aim_tp_return" })
 
-local secAS = AimbotTab:CreateSection({ Name = "Auto Shoot", Side = "Right" })
-secAS:AddToggle({ Name = "Enabled",
+local secAS = AimbotTab:CreateSection({ Name = "aim_autoshoot", Side = "Right" })
+secAS:AddToggle({ Name = "aim_as_enabled",
     Value = (AS.AutoShoot and AS.AutoShoot.Enabled) or false,
-    Callback = function(v) aSetAS("Enabled", v) end })
-secAS:AddToggle({ Name = "Only when aiming",
+    Callback = function(v) aSetAS("Enabled", v) end,
+    Tooltip = "tt_aim_as_enabled" })
+secAS:AddToggle({ Name = "aim_as_only_aiming",
     Value = (AS.AutoShoot and AS.AutoShoot.OnlyWhenAiming) ~= false,
-    Callback = function(v) aSetAS("OnlyWhenAiming", v) end })
-secAS:AddInput({ Name = "Manual delay (s)",
+    Callback = function(v) aSetAS("OnlyWhenAiming", v) end,
+    Tooltip = "tt_aim_as_only_aiming" })
+secAS:AddInput({ Name = "aim_as_rate",
     Value = tostring((AS.AutoShoot and AS.AutoShoot.FireRate) or 0.05),
     Callback = function(v)
         local n = tonumber(v)
         if n then aSetAS("FireRate", math.clamp(n, 0.001, 1)) end
-    end })
-secAS:AddDropdown({ Name = "Shoot Key", Value = "Left Click",
+    end, Tooltip = "tt_aim_as_rate" })
+secAS:AddDropdown({ Name = "aim_as_key", Value = "Left Click",
     List = { "Left Click", "Right Click" },
     Callback = function(v)
         aSetAS("ShootKey", (v == "Left Click") and "MouseButton1" or "MouseButton2")
-    end })
-secAS:AddToggle({ Name = "AutoStop",
+    end, Tooltip = "tt_aim_as_key" })
+secAS:AddToggle({ Name = "aim_as_autostop",
     Value = (AS.AutoShoot and AS.AutoShoot.AutoStop and AS.AutoShoot.AutoStop.Enabled) or false,
     Callback = function(v)
         if Aimbot.Settings and Aimbot.Settings.AutoShoot and Aimbot.Settings.AutoShoot.AutoStop then
             Aimbot.Settings.AutoShoot.AutoStop.Enabled = v
         end
-    end })
-secAS:AddSlider({ Name = "Stop time (s)",
+    end, Tooltip = "tt_aim_as_autostop" })
+secAS:AddSlider({ Name = "aim_as_stop_time",
     Value = (AS.AutoShoot and AS.AutoShoot.AutoStop and AS.AutoShoot.AutoStop.Time) or 0.1,
     Min = 0.01, Max = 0.5, Decimals = 2,
     Callback = function(v)
         if Aimbot.Settings and Aimbot.Settings.AutoShoot and Aimbot.Settings.AutoShoot.AutoStop then
             Aimbot.Settings.AutoShoot.AutoStop.Time = v
         end
-    end })
+    end, Tooltip = "tt_aim_as_stop_time" })
 
-print("[AirHub] 02_aimbot: loaded OK (logic + airhubUI tab)")
+print("[AirHub] 02_aimbot: loaded OK v32 (AimMode: Silent/Instant/Smooth/CFrame + RU loc + tooltips)")
