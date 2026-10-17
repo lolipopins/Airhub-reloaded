@@ -1,5 +1,5 @@
 --// ============================================================================
---// AirHub — rivals extra tab (Manual Apply/Reset)
+--// AirHub — rivals extra tab (Apply to ALL weapons)
 --// ============================================================================
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then 
@@ -12,6 +12,8 @@ if H.Rivals and H.Rivals._Loaded then
 end
 
 local Util        = H.Util
+local LocalPlayer = Util.LocalPlayer
+
 H.Rivals = H.Rivals or {}
 local R = H.Rivals
 R._Loaded = true
@@ -20,105 +22,121 @@ R.Settings = R.Settings or {
     SpreadValue   = 0,
     RecoilValue   = 0,
     FireRateValue = 0.01,
+    Applied       = false,
 }
 
 R.Internal = R.Internal or {
-    Originals = setmetatable({}, {__mode = "k"}), -- Слабые ключи для таблиц
+    Originals = setmetatable({}, {__mode = "k"}),
+    Hooked    = false,
+    OldInput  = nil,
 }
-R.Functions = R.Functions or {}
 
-local function log(msg) 
-    print("[AirHub] rivals: " .. tostring(msg)) 
-end
+local SPREAD_FIELDS = {"ShootSpread", "Spread", "WeaponSpread", "Inaccuracy"}
+local RECOIL_FIELDS = {"ShootRecoil", "Recoil", "RecoilHorizontal", "RecoilVertical", "CameraRecoil"}
+local RATE_FIELDS   = {"ShootCooldown", "QuickShotCooldown", "Cooldown", "FireRate"}
 
 --// ============================================================================
---// ЛОГИКА ПРИМЕНЕНИЯ И СБРОСА
+--// ЛОГИКА ПРИМЕНЕНИЯ
 --// ============================================================================
-local function applyMods()
-    if type(getgc) ~= "function" then 
-        log("getgc is not supported in this executor")
-        return 
-    end
-
-    local gc = getgc(true)
-    local modifiedCount = 0
-
-    for _, obj in pairs(gc) do
-        if type(obj) == "table" then
-            local function processTable(tbl)
-                if type(tbl) ~= "table" then return end
-                local changed = false
-                
-                -- 1. Spread
-                local spreadFields = {"ShootSpread", "Spread", "WeaponSpread", "Inaccuracy"}
-                for _, field in ipairs(spreadFields) do
-                    if rawget(tbl, field) ~= nil then
-                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
-                        if R.Internal.Originals[tbl][field] == nil then 
-                            R.Internal.Originals[tbl][field] = tbl[field] 
-                        end
-                        pcall(function() tbl[field] = R.Settings.SpreadValue end)
-                        changed = true
-                    end
-                end
-
-                -- 2. Recoil
-                local recoilFields = {"ShootRecoil", "Recoil", "RecoilHorizontal", "RecoilVertical", "CameraRecoil"}
-                for _, field in ipairs(recoilFields) do
-                    if rawget(tbl, field) ~= nil then
-                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
-                        if R.Internal.Originals[tbl][field] == nil then 
-                            R.Internal.Originals[tbl][field] = tbl[field] 
-                        end
-                        pcall(function() tbl[field] = R.Settings.RecoilValue end)
-                        changed = true
-                    end
-                end
-
-                -- 3. Rapid Fire
-                local rateFields = {"ShootCooldown", "QuickShotCooldown", "Cooldown", "FireRate"}
-                for _, field in ipairs(rateFields) do
-                    if rawget(tbl, field) ~= nil then
-                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
-                        if R.Internal.Originals[tbl][field] == nil then 
-                            R.Internal.Originals[tbl][field] = tbl[field] 
-                        end
-                        pcall(function() tbl[field] = R.Settings.FireRateValue end)
-                        changed = true
-                    end
-                end
-
-                if changed then
-                    modifiedCount = modifiedCount + 1
-                end
+local function applyStatsToTable(tbl)
+    if type(tbl) ~= "table" then return false end
+    local changed = false
+    
+    local function setVal(field, value)
+        if rawget(tbl, field) ~= nil then
+            if not R.Internal.Originals[tbl] then 
+                R.Internal.Originals[tbl] = {} 
             end
-
-            -- Обрабатываем саму таблицу
-            processTable(obj)
-            
-            -- Обрабатываем вложенные таблицы (например, obj.Info)
-            local info = rawget(obj, "Info")
-            if type(info) == "table" then
-                processTable(info)
+            if R.Internal.Originals[tbl][field] == nil then 
+                R.Internal.Originals[tbl][field] = tbl[field] 
             end
+            pcall(function() tbl[field] = value end)
+            changed = true
         end
     end
 
-    log("Applied mods to " .. modifiedCount .. " tables.")
+    for _, f in ipairs(SPREAD_FIELDS) do setVal(f, R.Settings.SpreadValue) end
+    for _, f in ipairs(RECOIL_FIELDS) do setVal(f, R.Settings.RecoilValue) end
+    for _, f in ipairs(RATE_FIELDS) do setVal(f, R.Settings.FireRateValue) end
+
+    return changed
+end
+
+local function applyMods()
+    if type(getgc) ~= "function" then return end
+    local gc = getgc(true)
+    local count = 0
+    
+    for _, obj in pairs(gc) do
+        if type(obj) == "table" then
+            if applyStatsToTable(obj) then count = count + 1 end
+            local info = rawget(obj, "Info")
+            if type(info) == "table" then
+                if applyStatsToTable(info) then count = count + 1 end
+            end
+        end
+    end
+    print("[Rivals] Applied mods to " .. count .. " tables")
 end
 
 local function resetMods()
-    local resetCount = 0
-    for tbl, props in pairs(R.Internal.Originals) do
-        for k, v in pairs(props) do
-            pcall(function() 
-                tbl[k] = v 
+    local count = 0
+    for tbl, fields in pairs(R.Internal.Originals) do
+        for f, v in pairs(fields) do
+            pcall(function() tbl[f] = v end)
+        end
+        count = count + 1
+    end
+    R.Internal.Originals = setmetatable({}, {__mode = "k"})
+    print("[Rivals] Reset " .. count .. " tables to original values")
+end
+
+--// ============================================================================
+--// ХУК ВЫСТРЕЛА (Применяет ко ВСЕМУ оружию)
+--// ============================================================================
+local function findClientItem()
+    local node = LocalPlayer
+    local names = {"PlayerScripts", "Modules", "ClientReplicatedClasses", "ClientFighter", "ClientItem"}
+    for _, name in ipairs(names) do
+        node = node:FindFirstChild(name)
+        if not node then return nil end
+    end
+    local ok, mod = pcall(require, node)
+    if ok and type(mod) == "table" then return mod end
+    return nil
+end
+
+local function hookInput()
+    if R.Internal.Hooked then return end
+    local ClientItem = findClientItem()
+    if not ClientItem or not ClientItem.Input then return end
+    
+    R.Internal.OldInput = ClientItem.Input
+    
+    local function newInput(self, ...)
+        if R.Settings.Applied and type(self) == "table" then
+            pcall(function()
+                applyStatsToTable(self)
+                if type(self.Info) == "table" then
+                    applyStatsToTable(self.Info)
+                end
             end)
         end
-        resetCount = resetCount + 1
+        return R.Internal.OldInput(self, ...)
     end
-    R.Internal.Originals = setmetatable({}, {__mode = "k"}) -- Очищаем кэш
-    log("Reset " .. resetCount .. " tables to original values.")
+    
+    local success = pcall(function()
+        if hookfunction then
+            hookfunction(ClientItem.Input, newInput)
+        else
+            ClientItem.Input = newInput
+        end
+    end)
+
+    if success then
+        R.Internal.Hooked = true
+        print("[Rivals] ClientItem.Input hooked (Auto-Apply enabled)")
+    end
 end
 
 --// ============================================================================
@@ -127,16 +145,12 @@ end
 task.spawn(function()
     local deadline = tick() + 30
     while tick() < deadline do
-        if H.ShuttingDown then return end
         if getgenv().airhubUI_Window then break end
         task.wait(0.25)
     end
 
     local Window = getgenv().airhubUI_Window
-    if not Window then
-        warn("[AirHub] rivals extra tab: airhubUI Window never appeared")
-        return
-    end
+    if not Window then return end
 
     local tab = Window:AddTab({ Name = "rivals", Icon = "R" })
     local secMain = tab:CreateSection({ Name = "Rivals Mods" })
@@ -163,15 +177,18 @@ task.spawn(function()
     })
 
     secMain:AddButton({
-        Name = "Apply Mods",
+        Name = "Apply to All Weapons",
         Callback = function()
+            R.Settings.Applied = true
             applyMods()
+            hookInput()
         end,
     })
 
     secMain:AddButton({
         Name = "Reset to Original",
         Callback = function()
+            R.Settings.Applied = false
             resetMods()
         end,
     })
@@ -180,5 +197,6 @@ task.spawn(function()
 end)
 
 R.Functions.StopAll = function()
+    R.Settings.Applied = false
     resetMods()
 end
