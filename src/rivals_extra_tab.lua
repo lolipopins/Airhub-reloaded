@@ -1,12 +1,11 @@
 --// ============================================================================
---// AirHub — rivals extra tab (Оптимизированная версия без лагов)
+--// AirHub — rivals extra tab (Zero-Lag версия)
 --// ============================================================================
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then return end
 if H.Rivals and H.Rivals._Loaded then return end
 
 local Util        = H.Util
-local RunService  = Util.RunService
 local LocalPlayer = Util.LocalPlayer
 
 H.Rivals = H.Rivals or {}
@@ -25,125 +24,92 @@ R.Settings = R.Settings or {
 
 R.Internal = R.Internal or {
     CachedTables  = {},
-    SeenTables    = setmetatable({}, {__mode = "k"}), -- Слабые ключи (защита от утечек памяти)
-    Conns         = {},
+    SeenTables    = setmetatable({}, {__mode = "k"}), 
 }
 R.Functions = R.Functions or {}
 
 local function log(msg) print("[AirHub] rivals: " .. tostring(msg)) end
 
 --// ============================================================================
---// СКАНИРОВАНИЕ ПАМЯТИ (Только для первичного поиска)
---// ============================================================================
-local function scanGCForGuns()
-    local ok, gc = pcall(getgc, true)
-    if not ok or type(gc) ~= "table" then return end
-
-    local found = 0
-    for _, obj in pairs(gc) do
-        if type(obj) == "table" and not R.Internal.SeenTables[obj] then
-            -- Проверяем, есть ли в таблице оружейные статы
-            if rawget(obj, "ShootSpread") ~= nil or rawget(obj, "ShootRecoil") ~= nil or rawget(obj, "ShootCooldown") ~= nil then
-                table.insert(R.Internal.CachedTables, obj)
-                R.Internal.SeenTables[obj] = true
-                found = found + 1
-            end
-        end
-    end
-    if found > 0 then
-        log("Кэшировано новых таблиц: " .. found .. " (Всего в кэше: " .. #R.Internal.CachedTables .. ")")
-    end
-end
-
---// ============================================================================
---// ПРИМЕНЕНИЕ МОДОВ (Очень быстрое, без getgc)
+--// ПРИМЕНЕНИЕ (Срабатывает только при выстреле или по кнопке)
 --// ============================================================================
 local function applyMods()
     if not R.Settings.Enabled then return end
     
     for _, tbl in ipairs(R.Internal.CachedTables) do
         if R.Settings.NoSpread then
-            if rawget(tbl, "ShootSpread") ~= nil then pcall(function() tbl.ShootSpread = R.Settings.SpreadValue end) end
-            if rawget(tbl, "Spread") ~= nil then pcall(function() tbl.Spread = R.Settings.SpreadValue end) end
+            if tbl.ShootSpread then tbl.ShootSpread = R.Settings.SpreadValue end
+            if tbl.Spread then tbl.Spread = R.Settings.SpreadValue end
         end
         
         if R.Settings.NoRecoil then
-            if rawget(tbl, "ShootRecoil") ~= nil then pcall(function() tbl.ShootRecoil = R.Settings.RecoilValue end) end
-            if rawget(tbl, "Recoil") ~= nil then pcall(function() tbl.Recoil = R.Settings.RecoilValue end) end
+            if tbl.ShootRecoil then tbl.ShootRecoil = R.Settings.RecoilValue end
+            if tbl.Recoil then tbl.Recoil = R.Settings.RecoilValue end
         end
         
         if R.Settings.RapidFire then
-            if rawget(tbl, "ShootCooldown") ~= nil then pcall(function() tbl.ShootCooldown = 0 end) end
-            if rawget(tbl, "FireRate") ~= nil then pcall(function() tbl.FireRate = R.Settings.FireRateValue end) end
+            if tbl.ShootCooldown then tbl.ShootCooldown = 0 end
+            if tbl.FireRate then tbl.FireRate = R.Settings.FireRateValue end
         end
         
-        -- Проверяем вложенный Info (в Rivals статы бывают там)
-        local info = rawget(tbl, "Info")
+        -- Вложенный Info
+        local info = tbl.Info
         if type(info) == "table" then
-            if R.Settings.NoSpread and rawget(info, "ShootSpread") ~= nil then pcall(function() info.ShootSpread = R.Settings.SpreadValue end) end
-            if R.Settings.NoRecoil and rawget(info, "ShootRecoil") ~= nil then pcall(function() info.ShootRecoil = R.Settings.RecoilValue end) end
-            if R.Settings.RapidFire and rawget(info, "ShootCooldown") ~= nil then pcall(function() info.ShootCooldown = 0 end) end
+            if R.Settings.NoSpread and info.ShootSpread then info.ShootSpread = R.Settings.SpreadValue end
+            if R.Settings.NoRecoil and info.ShootRecoil then info.ShootRecoil = R.Settings.RecoilValue end
+            if R.Settings.RapidFire and info.ShootCooldown then info.ShootCooldown = 0 end
         end
     end
 end
 
 --// ============================================================================
---// ХУК ВЫСТРЕЛА (Ловит новые пушки на лету)
+--// ХУК ВЫСТРЕЛА (Главная защита от лагов)
 --// ============================================================================
 local function hookInput()
     local path = LocalPlayer.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem
     local ok, ClientItem = pcall(require, path)
     if not ok or not ClientItem or not ClientItem.Input then return end
     
-    if getgenv().Rivals_Opt_Hooked then return end
-    getgenv().Rivals_Opt_Hooked = true
+    if getgenv().Rivals_ZeroLag_Hooked then return end
+    getgenv().Rivals_ZeroLag_Hooked = true
     
     local oldInput = ClientItem.Input
     ClientItem.Input = function(self, ...)
         if R.Settings.Enabled and type(self) == "table" then
-            -- Добавляем новую пушку в кэш, если ее там еще нет
-            if not R.Internal.SeenTables[self] then
-                table.insert(R.Internal.CachedTables, self)
-                R.Internal.SeenTables[self] = true
+            -- Применяем статы прямо перед выстрелом (это мгновенно)
+            if R.Settings.NoSpread then
+                if self.ShootSpread then self.ShootSpread = R.Settings.SpreadValue end
+                if self.Spread then self.Spread = R.Settings.SpreadValue end
             end
-            -- Применяем моды прямо перед выстрелом
-            applyMods()
+            if R.Settings.NoRecoil then
+                if self.ShootRecoil then self.ShootRecoil = R.Settings.RecoilValue end
+            end
+            if R.Settings.RapidFire then
+                if self.ShootCooldown then self.ShootCooldown = 0 end
+            end
         end
         return oldInput(self, ...)
     end
 end
 
 --// ============================================================================
---// ЗАПУСК / ОСТАНОВКА
+--// ЕДИНОРАЗОВЫЙ СКАН (Только при нажатии Enable)
 --// ============================================================================
-local function startRivals()
-    scanGCForGuns()
-    hookInput()
-    applyMods()
+local function scanOnce()
+    local ok, gc = pcall(getgc, true)
+    if not ok or type(gc) ~= "table" then return end
 
-    if not R.Internal.Conns.heartbeat then
-        -- Оптимизированный цикл: обновляем только закэшированные таблицы
-        R.Internal.Conns.heartbeat = RunService.Heartbeat:Connect(function()
-            if H.ShuttingDown then return end
-            applyMods()
-        end)
-    end
-
-    -- Раз в 10 секунд делаем легкий ре-скан (на случай если пушка загрузилась без выстрела)
-    if not R.Internal.Conns.rescan then
-        task.spawn(function()
-            while R.Settings.Enabled and not H.ShuttingDown do
-                task.wait(10)
-                if R.Settings.Enabled then
-                    scanGCForGuns()
-                end
+    local found = 0
+    for _, obj in pairs(gc) do
+        if type(obj) == "table" and not R.Internal.SeenTables[obj] then
+            if obj.ShootSpread or obj.ShootRecoil or obj.ShootCooldown then
+                table.insert(R.Internal.CachedTables, obj)
+                R.Internal.SeenTables[obj] = true
+                found = found + 1
             end
-        end)
+        end
     end
-end
-
-local function stopRivals()
-    R.Settings.Enabled = false
+    log("Найдено и закэшировано таблиц оружия: " .. found)
 end
 
 --// ============================================================================
@@ -167,7 +133,11 @@ task.spawn(function()
         Value = R.Settings.Enabled,
         Callback = function(v)
             R.Settings.Enabled = v
-            if v then startRivals() else stopRivals() end
+            if v then
+                hookInput()
+                scanOnce()  -- Вызывается 1 раз!
+                applyMods() -- Мгновенно применяем то, что нашли
+            end
         end,
     })
 
@@ -209,13 +179,14 @@ task.spawn(function()
 
     local secDbg = tab:CreateSection({ Name = "Debug" })
     secDbg:AddButton({
-        Name = "Force Rescan Memory",
+        Name = "Manual Rescan (может вызвать 1 сек. фриз)",
         Callback = function()
-            scanGCForGuns()
+            scanOnce()
+            applyMods()
         end,
     })
 
-    print("[AirHub] rivals extra tab: optimized tab created")
+    print("[AirHub] rivals extra tab: zero-lag tab created")
 end)
 
-R.Functions.StopAll = function() stopRivals() end
+R.Functions.StopAll = function() R.Settings.Enabled = false end
