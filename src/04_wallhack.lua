@@ -1,10 +1,11 @@
---// AirHub - 04_wallhack.lua v11
---// CHANGES v11:
---//  - China Hat REWRITTEN AGAIN: Fixed the WedgePart math completely
---//  - Now it builds a perfect hollow cone out of WedgeParts (proper model)
---//  - Fixed the matrix orientation (Right-Handed) so they don't crumple
---//  - You can apply Textures to these WedgeParts in-game
---//  - Both "Closed" and "Opened" modes use this clean cone model
+--// AirHub - 04_wallhack.lua v12
+--// CHANGES v12:
+--//  - Increased UI limits for China Hat:
+--//    * Width (Size): max 100 (was 20)
+--//    * Height (Length): max 100 (was 30)
+--//    * Offset Y: max 20 (was 5)
+--//    * Facets (Sides): max 128 (was 32)
+--//  - Updated internal math.clamp for sides to match new limit (128)
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -92,7 +93,7 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
     },
     ChinaHat = {
         Enabled = false,
-        Mode = "Closed", -- "Closed" | "Opened" (both render as proper cone now)
+        Mode = "Closed", -- "Closed" | "Opened"
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
         Size = 4,
@@ -100,7 +101,7 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         OffsetY = 1.8, Transparency = 0, Rotation = 0,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
-        Sides = 16, -- number of facets around the cone (each facet = 2 wedges)
+        Sides = 16,
     },
 }
 do
@@ -608,7 +609,8 @@ local okInit, errInit = pcall(function()
         local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
         local trans = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        local sides = math.clamp(tonumber(C.Sides) or 16, 6, 32)
+        -- Increased max sides from 32 to 128
+        local sides = math.clamp(tonumber(C.Sides) or 16, 6, 128)
         local thickness = 0.08
         local scale     = 1.04
 
@@ -748,7 +750,8 @@ local okInit, errInit = pcall(function()
 
             local C = WallHack.Visuals.SelfESP.ChinaHat
 
-            local wantSides = math.clamp(tonumber(C.Sides) or 16, 6, 32)
+            -- Increased max sides to 128
+            local wantSides = math.clamp(tonumber(C.Sides) or 16, 6, 128)
             if Se.HatData.sides ~= wantSides then
                 removeChinaHat()
                 Se.HatData = buildHat(Se.HatHead)
@@ -1342,7 +1345,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v11 (perfect cone model)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v12 (bigger limits)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1521,7 +1524,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v11")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v12")
 end
 
 -- ============================================================================
@@ -1649,7 +1652,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
             tt_vis_se_hat_material = "Roblox material for the hat",
-            tt_vis_se_hat_sides = "Number of facets around the cone. Higher = smoother.",
+            tt_vis_se_hat_sides = "Number of facets around the cone (Max 128). Higher = smoother.",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
             tt_vis_sp_strength = "Prediction strength",
@@ -1778,7 +1781,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_hat_transparency = "Прозрачность шляпы",
             tt_vis_se_hat_material = "Материал Roblox для шляпы",
-            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса. Больше = глаже.",
+            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса (Макс 128). Больше = глаже.",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
             tt_vis_sp_strength = "Сила предсказания",
@@ -1967,13 +1970,13 @@ seSec:AddDropdown({ Name = "vis_se_hat_mode", Value = WallHack.Visuals.SelfESP.C
 seSec:AddColorpicker({ Name = "vis_se_hat_color", Default = WallHack.Visuals.SelfESP.ChinaHat.Color,
     Callback = function(v) WallHack.Visuals.SelfESP.ChinaHat.Color = SafeColor(v, Color3.fromRGB(255,60,60)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_color" })
 seSec:AddSlider({ Name = "vis_se_hat_width", Value = WallHack.Visuals.SelfESP.ChinaHat.Size,
-    Min = 1, Max = 20, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_width" })
+    Min = 1, Max = 100, Decimals = 1, Callback = function(v) setHat("Size", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_width" })
 seSec:AddSlider({ Name = "vis_se_hat_height", Value = WallHack.Visuals.SelfESP.ChinaHat.Height,
-    Min = 1, Max = 30, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
+    Min = 1, Max = 100, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
 seSec:AddSlider({ Name = "vis_se_hat_offset", Value = WallHack.Visuals.SelfESP.ChinaHat.OffsetY,
-    Min = 0, Max = 5, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
+    Min = 0, Max = 20, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
 seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.ChinaHat.Sides or 16,
-    Min = 6, Max = 32, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
+    Min = 6, Max = 128, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
 seSec:AddSlider({ Name = "vis_se_hat_rotation", Value = WallHack.Visuals.SelfESP.ChinaHat.Rotation,
     Min = 0, Max = 360, Callback = function(v) setHat("Rotation", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotation" })
 seSec:AddToggle({ Name = "vis_se_hat_autoro", Value = WallHack.Visuals.SelfESP.ChinaHat.AutoRotate,
@@ -2007,4 +2010,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v11 (perfect cone model)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v12 (bigger limits)")
