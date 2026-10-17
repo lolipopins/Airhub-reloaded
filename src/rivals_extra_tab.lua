@@ -1,130 +1,124 @@
 --// ============================================================================
---// AirHub — rivals extra tab (Chunked GC + Robust Hook)
+--// AirHub — rivals extra tab (Manual Apply/Reset)
 --// ============================================================================
 local H = getgenv().AirHub
-if not H or not H._CoreLoaded then return end
-if H.Rivals and H.Rivals._Loaded then return end
+if not H or not H._CoreLoaded then 
+    warn("[AirHub] rivals extra tab: core not loaded") 
+    return 
+end
+if H.Rivals and H.Rivals._Loaded then 
+    warn("[AirHub] rivals extra tab: already loaded") 
+    return 
+end
 
 local Util        = H.Util
-local LocalPlayer = Util.LocalPlayer
-
 H.Rivals = H.Rivals or {}
 local R = H.Rivals
 R._Loaded = true
 
 R.Settings = R.Settings or {
-    Enabled       = false,
-    NoSpread      = true,
-    NoRecoil      = true,
-    RapidFire     = true,
     SpreadValue   = 0,
     RecoilValue   = 0,
     FireRateValue = 0.01,
 }
 
 R.Internal = R.Internal or {
-    LoopActive = false,
-    Hooked     = false,
+    Originals = setmetatable({}, {__mode = "k"}), -- Слабые ключи для таблиц
 }
 R.Functions = R.Functions or {}
 
-local function log(msg) print("[AirHub] rivals: " .. tostring(msg)) end
-
---// ============================================================================
---// РЕКУРСИВНОЕ ПРИМЕНЕНИЕ СТАТОВ (Ищет во вложенных таблицах)
---// ============================================================================
-local function applyStats(tbl, depth)
-    if type(tbl) ~= "table" or depth > 3 then return end
-    
-    -- Применяем статы, если нашли
-    if R.Settings.NoSpread then
-        if tbl.ShootSpread ~= nil then tbl.ShootSpread = R.Settings.SpreadValue end
-        if tbl.Spread ~= nil then tbl.Spread = R.Settings.SpreadValue end
-        if tbl.Inaccuracy ~= nil then tbl.Inaccuracy = R.Settings.SpreadValue end
-        if tbl.WeaponSpread ~= nil then tbl.WeaponSpread = R.Settings.SpreadValue end
-    end
-    
-    if R.Settings.NoRecoil then
-        if tbl.ShootRecoil ~= nil then tbl.ShootRecoil = R.Settings.RecoilValue end
-        if tbl.Recoil ~= nil then tbl.Recoil = R.Settings.RecoilValue end
-        if tbl.CameraRecoil ~= nil then tbl.CameraRecoil = R.Settings.RecoilValue end
-    end
-    
-    if R.Settings.RapidFire then
-        if tbl.ShootCooldown ~= nil then tbl.ShootCooldown = 0 end
-        if tbl.Cooldown ~= nil then tbl.Cooldown = 0 end
-        if tbl.FireRate ~= nil then tbl.FireRate = R.Settings.FireRateValue end
-    end
-
-    -- Рекурсивно проверяем вложенные таблицы (например, .Info)
-    for k, v in pairs(tbl) do
-        if type(v) == "table" and k ~= "Parent" then
-            applyStats(v, depth + 1)
-        end
-    end
+local function log(msg) 
+    print("[AirHub] rivals: " .. tostring(msg)) 
 end
 
 --// ============================================================================
---// ФОНОВЫЙ СКАН (Без лагов, порциями)
+--// ЛОГИКА ПРИМЕНЕНИЯ И СБРОСА
 --// ============================================================================
-local function startBackgroundScan()
-    if R.Internal.LoopActive then return end
-    R.Internal.LoopActive = true
-    
-    task.spawn(function()
-        while R.Internal.LoopActive and not H.ShuttingDown do
-            if R.Settings.Enabled then
-                local ok, gc = pcall(getgc, true)
-                if ok and type(gc) == "table" then
-                    local count = 0
-                    for _, obj in pairs(gc) do
-                        if type(obj) == "table" then
-                            -- Быстрая проверка, есть ли тут оружейные статы
-                            if obj.ShootSpread ~= nil or obj.ShootRecoil ~= nil or obj.ShootCooldown ~= nil then
-                                applyStats(obj, 0)
-                            end
+local function applyMods()
+    if type(getgc) ~= "function" then 
+        log("getgc is not supported in this executor")
+        return 
+    end
+
+    local gc = getgc(true)
+    local modifiedCount = 0
+
+    for _, obj in pairs(gc) do
+        if type(obj) == "table" then
+            local function processTable(tbl)
+                if type(tbl) ~= "table" then return end
+                local changed = false
+                
+                -- 1. Spread
+                local spreadFields = {"ShootSpread", "Spread", "WeaponSpread", "Inaccuracy"}
+                for _, field in ipairs(spreadFields) do
+                    if rawget(tbl, field) ~= nil then
+                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
+                        if R.Internal.Originals[tbl][field] == nil then 
+                            R.Internal.Originals[tbl][field] = tbl[field] 
                         end
-                        
-                        -- Каждые 1000 таблиц делаем паузу, чтобы не лагало
-                        count = count + 1
-                        if count % 1000 == 0 then
-                            task.wait()
-                        end
+                        pcall(function() tbl[field] = R.Settings.SpreadValue end)
+                        changed = true
                     end
                 end
+
+                -- 2. Recoil
+                local recoilFields = {"ShootRecoil", "Recoil", "RecoilHorizontal", "RecoilVertical", "CameraRecoil"}
+                for _, field in ipairs(recoilFields) do
+                    if rawget(tbl, field) ~= nil then
+                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
+                        if R.Internal.Originals[tbl][field] == nil then 
+                            R.Internal.Originals[tbl][field] = tbl[field] 
+                        end
+                        pcall(function() tbl[field] = R.Settings.RecoilValue end)
+                        changed = true
+                    end
+                end
+
+                -- 3. Rapid Fire
+                local rateFields = {"ShootCooldown", "QuickShotCooldown", "Cooldown", "FireRate"}
+                for _, field in ipairs(rateFields) do
+                    if rawget(tbl, field) ~= nil then
+                        if not R.Internal.Originals[tbl] then R.Internal.Originals[tbl] = {} end
+                        if R.Internal.Originals[tbl][field] == nil then 
+                            R.Internal.Originals[tbl][field] = tbl[field] 
+                        end
+                        pcall(function() tbl[field] = R.Settings.FireRateValue end)
+                        changed = true
+                    end
+                end
+
+                if changed then
+                    modifiedCount = modifiedCount + 1
+                end
             end
-            task.wait(2) -- Спим 2 секунды перед следующим сканом
+
+            -- Обрабатываем саму таблицу
+            processTable(obj)
+            
+            -- Обрабатываем вложенные таблицы (например, obj.Info)
+            local info = rawget(obj, "Info")
+            if type(info) == "table" then
+                processTable(info)
+            end
         end
-    end)
+    end
+
+    log("Applied mods to " .. modifiedCount .. " tables.")
 end
 
---// ============================================================================
---// ХУК ВЫСТРЕЛА (Мгновенное применение)
---// ============================================================================
-local function hookInput()
-    if R.Internal.Hooked then return end
-    
-    local path = LocalPlayer.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem
-    local ok, ClientItem = pcall(require, path)
-    if not ok or not ClientItem or not ClientItem.Input then return end
-    
-    local oldInput = ClientItem.Input
-    local newInput = function(self, ...)
-        if R.Settings.Enabled and type(self) == "table" then
-            -- Применяем статы прямо к объекту оружия перед выстрелом
-            applyStats(self, 0)
+local function resetMods()
+    local resetCount = 0
+    for tbl, props in pairs(R.Internal.Originals) do
+        for k, v in pairs(props) do
+            pcall(function() 
+                tbl[k] = v 
+            end)
         end
-        return oldInput(self, ...)
+        resetCount = resetCount + 1
     end
-
-    if hookfunction then
-        hookfunction(ClientItem.Input, newInput)
-    else
-        ClientItem.Input = newInput
-    end
-    
-    R.Internal.Hooked = true
-    log("Input hook installed")
+    R.Internal.Originals = setmetatable({}, {__mode = "k"}) -- Очищаем кэш
+    log("Reset " .. resetCount .. " tables to original values.")
 end
 
 --// ============================================================================
@@ -133,33 +127,20 @@ end
 task.spawn(function()
     local deadline = tick() + 30
     while tick() < deadline do
+        if H.ShuttingDown then return end
         if getgenv().airhubUI_Window then break end
         task.wait(0.25)
     end
 
     local Window = getgenv().airhubUI_Window
-    if not Window then return end
+    if not Window then
+        warn("[AirHub] rivals extra tab: airhubUI Window never appeared")
+        return
+    end
 
     local tab = Window:AddTab({ Name = "rivals", Icon = "R" })
     local secMain = tab:CreateSection({ Name = "Rivals Mods" })
 
-    secMain:AddToggle({
-        Name = "Enabled",
-        Value = R.Settings.Enabled,
-        Callback = function(v)
-            R.Settings.Enabled = v
-            if v then
-                hookInput()
-                startBackgroundScan()
-            end
-        end,
-    })
-
-    secMain:AddToggle({
-        Name = "No Spread",
-        Value = R.Settings.NoSpread,
-        Callback = function(v) R.Settings.NoSpread = v end,
-    })
     secMain:AddSlider({
         Name = "Spread Value",
         Value = R.Settings.SpreadValue,
@@ -167,11 +148,6 @@ task.spawn(function()
         Callback = function(v) R.Settings.SpreadValue = v end,
     })
 
-    secMain:AddToggle({
-        Name = "No Recoil",
-        Value = R.Settings.NoRecoil,
-        Callback = function(v) R.Settings.NoRecoil = v end,
-    })
     secMain:AddSlider({
         Name = "Recoil Value",
         Value = R.Settings.RecoilValue,
@@ -179,22 +155,30 @@ task.spawn(function()
         Callback = function(v) R.Settings.RecoilValue = v end,
     })
 
-    secMain:AddToggle({
-        Name = "Rapid Fire",
-        Value = R.Settings.RapidFire,
-        Callback = function(v) R.Settings.RapidFire = v end,
-    })
     secMain:AddSlider({
-        Name = "Fire Rate Value",
+        Name = "Rapid Fire (Cooldown)",
         Value = R.Settings.FireRateValue,
         Min = 0.001, Max = 0.5, Decimals = 3,
         Callback = function(v) R.Settings.FireRateValue = v end,
     })
 
+    secMain:AddButton({
+        Name = "Apply Mods",
+        Callback = function()
+            applyMods()
+        end,
+    })
+
+    secMain:AddButton({
+        Name = "Reset to Original",
+        Callback = function()
+            resetMods()
+        end,
+    })
+
     print("[AirHub] rivals extra tab: loaded")
 end)
 
-R.Functions.StopAll = function() 
-    R.Settings.Enabled = false 
-    R.Internal.LoopActive = false
+R.Functions.StopAll = function()
+    resetMods()
 end
