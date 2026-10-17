@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.7.1 — Fixed: Config scope, T() crash, keybind, font/lang import
+-- airhubUI v1.7.2 — Added: element state persistence in configs (incl. loadstring tabs)
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.7.1",
+    Version = "1.7.2",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -1698,7 +1698,8 @@ local function createToggle(section, opts)
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return eff end, BindId = bindId, _meta = meta}
+    return {Set = meta.Set, Get = function() return eff end, BindId = bindId,
+        _meta = meta, _rawName = opts.Name, _type = "Toggle"}
 end
 
 local function createSlider(section, opts)
@@ -1765,7 +1766,8 @@ local function createSlider(section, opts)
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return effV end, BindId = bindId, _meta = meta}
+    return {Set = meta.Set, Get = function() return effV end, BindId = bindId,
+        _meta = meta, _rawName = opts.Name, _type = "Slider"}
 end
 
 local function createButton(section, opts)
@@ -1841,7 +1843,8 @@ local function createInput(section, opts)
     attachRowBinds(row, nil, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return value end, _meta = meta}
+    return {Set = meta.Set, Get = function() return value end, _meta = meta,
+        _rawName = opts.Name, _type = "Input"}
 end
 
 local function createDropdown(section, opts)
@@ -1917,6 +1920,7 @@ local function createDropdown(section, opts)
         Set = meta.Set,
         Get = function() return value end,
         BindId = bindId, _meta = meta,
+        _rawName = opts.Name, _type = "Dropdown",
         _setList = function(newList)
             for i = #list, 1, -1 do list[i] = nil end
             for _, v in ipairs(newList or {}) do list[#list+1] = v end
@@ -1990,7 +1994,8 @@ local function createColorpicker(section, opts)
     attachRowBinds(row, nil, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return color, alpha end, _meta = meta}
+    return {Set = meta.Set, Get = function() return color, alpha end, _meta = meta,
+        _rawName = opts.Name, _type = "Colorpicker"}
 end
 
 local function createKeybind(section, opts)
@@ -2088,11 +2093,22 @@ local function createKeybind(section, opts)
     end
     local meta = {Name = T(opts.Name or ""), Type = "Keybind", Element = row, BindId = bindId,
         Options = opts.Options, State = state, Modes = modes, Default = opts.Value,
-        Set = function(v) value = v; btn.Text = keyName(v) end}
+        Set = function(v)
+            value = v
+            btn.Text = keyName(v)
+            if opts.Key then state[opts.Key] = v end
+            if bind then
+                bind.keys = {}
+                if v then
+                    AddBindKey(bindId, v, state["__mode_" .. tostring(stateId)] or "Toggle")
+                end
+            end
+        end}
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return value end, BindId = bindId, _meta = meta}
+    return {Set = meta.Set, Get = function() return value end, BindId = bindId,
+        _meta = meta, _rawName = opts.Name, _type = "Keybind"}
 end
 
 -- ══════════════════════════════════════════════════════════════
@@ -2368,7 +2384,6 @@ local function createWindow(opts)
             Position = UDim2.new(0,4+(3-i)*3,1,-4-(i-1)*3), Size = UDim2.new(0,2,0,2), ZIndex = 7}, resizeHandle)
     end
 
-    -- === local applyFontToAll ===
     local function applyFontToAll()
         for _, d in ipairs(gui:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextBox") or d:IsA("TextButton") then
@@ -2466,14 +2481,75 @@ local function createWindow(opts)
         self.Name = text
     end
 
+    -- ────────────────────────────────────────────────────────────
+    -- v1.7.2: Element state persistence helpers
+    -- ────────────────────────────────────────────────────────────
+    -- Встроенные вкладки, чьё состояние уже покрыто Theme/Config — их элементы
+    -- не сохраняем в Elements, иначе при импорте они откатят текущую тему.
+    local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
+
+    local function serializeElemKey(v)
+        if typeof(v) == "EnumItem" then return tostring(v) end
+        if type(v) == "string" then return v end
+        return tostring(v)
+    end
+
+    local function deserializeElemKey(s)
+        if type(s) ~= "string" then return s end
+        local enumType, enumName = s:match("^Enum%.(%w+)%.(%w+)$")
+        if enumType and enumName then
+            local ok, val = pcall(function() return Enum[enumType][enumName] end)
+            if ok and val then return val end
+        end
+        return s
+    end
+
     function window:ExportSettings()
-        local data = {Theme = {}, Config = {}}
+        local data = {Theme = {}, Config = {}, Elements = {}}
         for k, v in pairs(Theme) do
             if typeof(v) == "Color3" then data.Theme[k] = {v.R, v.G, v.B} end
         end
         for k, v in pairs(Config) do
             if type(v) == "number" or type(v) == "string" or type(v) == "boolean" then
                 data.Config[k] = v
+            end
+        end
+        -- v1.7.2: сохраняем значения элементов со всех НЕ-встроенных вкладок.
+        -- Это покрывает и вкладки, созданные через loadstring()-скрипты.
+        for _, tab in ipairs(self.Tabs) do
+            local tabId = tab._nameKey or tab.Name
+            if tabId and not BUILTIN_TABS[tabId] then
+                local tabData = {}
+                for _, section in ipairs(tab.Sections) do
+                    local secId = section._tKey or section.Name
+                    if secId then
+                        local secData = {}
+                        for _, el in ipairs(section.Elements) do
+                            local elId = el._rawName
+                            local elType = (el._meta and el._meta.Type) or el._type
+                            if elId and el.Get and elType then
+                                if elType == "Colorpicker" then
+                                    local ok, c, a = pcall(el.Get)
+                                    if ok and typeof(c) == "Color3" then
+                                        secData[elId] = {r = c.R, g = c.G, b = c.B, alpha = a or 0}
+                                    end
+                                elseif elType == "Keybind" then
+                                    local ok, v = pcall(el.Get)
+                                    if ok then secData[elId] = serializeElemKey(v) end
+                                elseif elType == "Button" then
+                                    -- Кнопки не хранят состояние — пропускаем
+                                else
+                                    local ok, v = pcall(el.Get)
+                                    if ok and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
+                                        secData[elId] = v
+                                    end
+                                end
+                            end
+                        end
+                        if next(secData) then tabData[secId] = secData end
+                    end
+                end
+                if next(tabData) then data.Elements[tabId] = tabData end
             end
         end
         local ok, str = pcall(function() return HttpService:JSONEncode(data) end)
@@ -2499,6 +2575,43 @@ local function createWindow(opts)
             if statusBar and Config.StatusBar ~= nil then statusBar.Visible = Config.StatusBar end
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
+        end
+        -- v1.7.2: восстановление значений элементов (включая loadstring-вкладки)
+        if type(data.Elements) == "table" then
+            for _, tab in ipairs(self.Tabs) do
+                local tabId = tab._nameKey or tab.Name
+                if tabId and not BUILTIN_TABS[tabId] then
+                    local tabData = data.Elements[tabId]
+                    if type(tabData) == "table" then
+                        for _, section in ipairs(tab.Sections) do
+                            local secId = section._tKey or section.Name
+                            local secData = secId and tabData[secId]
+                            if type(secData) == "table" then
+                                for _, el in ipairs(section.Elements) do
+                                    local elId = el._rawName
+                                    local elType = (el._meta and el._meta.Type) or el._type
+                                    local savedVal = elId and secData[elId]
+                                    if elId and el.Set and elType and savedVal ~= nil then
+                                        if elType == "Colorpicker" then
+                                            if type(savedVal) == "table" and savedVal.r then
+                                                local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
+                                                pcall(el.Set, c, savedVal.alpha or 0)
+                                            end
+                                        elseif elType == "Keybind" then
+                                            pcall(el.Set, deserializeElemKey(savedVal))
+                                        elseif elType == "Button" then
+                                            -- кнопки не восстанавливаем
+                                        else
+                                            pcall(el.Set, savedVal)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            reevaluateVisibility()
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         return true
