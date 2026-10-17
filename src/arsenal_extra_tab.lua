@@ -1,20 +1,23 @@
---// ============================================================================
---// AirHub - arsenal extra tab
---// Extra tab "arsenal" — Name Tags, Limb Hitbox, Weapon Mods
+--// AirHub - arsenal extra tab (safe clean build)
 --// Requires: 01_core.lua, 07a_ui_core.lua
---// ============================================================================
+--// Tab: Name Tags ESP + Limb Hitbox + Weapon Mods
 
 local H = getgenv().AirHub
-if not H or not H._CoreLoaded then warn("[AirHub] arsenal extra tab: core not loaded") return end
-if H.Quotas and H.Quotas._Loaded then return end
+if not H or not H._CoreLoaded then
+    warn("[AirHub] arsenal extra tab: core not loaded")
+    return
+end
+if H.Quotas and H.Quotas._Loaded then
+    return
+end
 
-local Util               = H.Util
-local Players            = Util.Players
-local RunService         = Util.RunService
-local LocalPlayer        = Util.LocalPlayer
-local ReplicatedStorage  = Util.ReplicatedStorage
-local Track              = Util.Track
-local SanitizeColor      = Util.SanitizeColor
+local Util              = H.Util
+local Players           = Util.Players
+local RunService        = Util.RunService
+local LocalPlayer       = Util.LocalPlayer
+local ReplicatedStorage = Util.ReplicatedStorage
+local Track             = Util.Track
+local SanitizeColor     = Util.SanitizeColor
 
 H.Quotas = H.Quotas or {}
 local Q = H.Quotas
@@ -37,6 +40,7 @@ Q.Settings = Q.Settings or {
     FireRateValue          = 0.02,
     RecoilEnabled          = false,
 }
+
 Q.Internal = Q.Internal or {
     NameTags         = {},
     LimbOriginals    = {},
@@ -44,63 +48,68 @@ Q.Internal = Q.Internal or {
     Conns            = {},
     WeaponLoopActive = false,
 }
+
 Q.Functions = Q.Functions or {}
 
---// ---------------------------------------------------------------------------
---// Shared helpers
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Helpers
+--====================================================================
 local function IsAlive(char)
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
+    return hum ~= nil and hum.Health > 0
 end
 
 local function IsEnemy(plr)
     if plr == LocalPlayer then return false end
-    local lt, tt = LocalPlayer.Team, plr.Team
-    if lt and tt and lt == tt then return false end
+    local lt = LocalPlayer.Team
+    local tt = plr.Team
+    if lt ~= nil and tt ~= nil and lt == tt then
+        return false
+    end
     return true
 end
 
---// ---------------------------------------------------------------------------
---// NAME TAGS
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Name Tags
+--====================================================================
 local function BuildNameTag(plr)
     if plr == LocalPlayer then return end
-    if not plr.Character then return end
-    local head = plr.Character:FindFirstChild("Head")
+    local char = plr.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
     if not head then return end
     local existing = Q.Internal.NameTags[plr]
-    if existing and existing.Parent then return end
+    if existing ~= nil and existing.Parent ~= nil then return end
 
     local gui = Instance.new("BillboardGui")
-    gui.Name          = "AirHub_Quotas_NameTag"
+    gui.Name           = "AirHub_Quotas_NameTag"
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.AlwaysOnTop   = true
+    gui.AlwaysOnTop    = true
     gui.LightInfluence = 1
-    gui.Size          = UDim2.new(0, 300, 0, 30)
-    gui.StudsOffset   = Vector3.new(0, 3, 0)
-    gui.Parent        = head
+    gui.Size           = UDim2.new(0, 300, 0, 30)
+    gui.StudsOffset    = Vector3.new(0, 3, 0)
+    gui.Parent         = head
 
     local label = Instance.new("TextLabel")
-    label.Name                  = "NameLabel"
+    label.Name                   = "NameLabel"
     label.BackgroundTransparency = 1
-    label.Size                  = UDim2.new(1, 0, 1, 0)
-    label.Font                  = Enum.Font.Ubuntu
-    label.Text                  = plr.Name
-    label.TextColor3            = Q.Settings.NameTagsColor
-    label.TextSize              = Q.Settings.NameTagsSize
+    label.Size                   = UDim2.new(1, 0, 1, 0)
+    label.Font                   = Enum.Font.Ubuntu
+    label.Text                   = plr.Name
+    label.TextColor3             = Q.Settings.NameTagsColor
+    label.TextSize               = Q.Settings.NameTagsSize
     label.TextStrokeTransparency = 0
-    label.TextStrokeColor3      = Color3.fromRGB(0, 0, 0)
-    label.TextTransparency      = 1
-    label.Parent                = gui
+    label.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
+    label.TextTransparency       = 1
+    label.Parent                 = gui
 
     Q.Internal.NameTags[plr] = gui
 end
 
 local function RemoveNameTag(plr)
     local gui = Q.Internal.NameTags[plr]
-    if gui and gui.Parent then
+    if gui ~= nil and gui.Parent ~= nil then
         pcall(function() gui:Destroy() end)
     end
     Q.Internal.NameTags[plr] = nil
@@ -114,10 +123,10 @@ local function RefreshNameTagVisibility(plr)
 
     local visible = Q.Settings.NameTagsEnabled
     if visible and Q.Settings.NameTagsAliveCheck then
-        visible = IsAlive(plr.Character) and true or false
+        visible = IsAlive(plr.Character)
     end
     if visible and Q.Settings.NameTagsTeamCheck then
-        visible = IsEnemy(plr) and true or false
+        visible = IsEnemy(plr)
     end
     label.TextTransparency = visible and 0 or 1
     label.TextSize         = Q.Settings.NameTagsSize
@@ -128,7 +137,7 @@ local function StartNameTags()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer then BuildNameTag(plr) end
     end
-    if not Q.Internal.Conns.nameTagStep then
+    if Q.Internal.Conns.nameTagStep == nil then
         Q.Internal.Conns.nameTagStep = RunService.RenderStepped:Connect(function()
             if H.ShuttingDown then return end
             if not Q.Settings.NameTagsEnabled then return end
@@ -137,7 +146,9 @@ local function StartNameTags()
                     local head = plr.Character:FindFirstChild("Head")
                     if head then
                         local gui = Q.Internal.NameTags[plr]
-                        if not gui or not gui.Parent then BuildNameTag(plr) end
+                        if gui == nil or gui.Parent == nil then
+                            BuildNameTag(plr)
+                        end
                         RefreshNameTagVisibility(plr)
                     end
                 end
@@ -150,27 +161,30 @@ local function StopNameTags()
     for plr in pairs(Q.Internal.NameTags) do
         RemoveNameTag(plr)
     end
-    if Q.Internal.Conns.nameTagStep then
+    if Q.Internal.Conns.nameTagStep ~= nil then
         pcall(function() Q.Internal.Conns.nameTagStep:Disconnect() end)
         Q.Internal.Conns.nameTagStep = nil
     end
 end
 
---// ---------------------------------------------------------------------------
---// LIMB HITBOX
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Limb Hitbox
+--====================================================================
 local LIMB_PARTS = {
     "RightUpperLeg", "LeftUpperLeg",
     "HeadHB", "Head",
     "HumanoidRootPart",
 }
 
-local RestoreLimbHitboxForPlayer  -- forward declaration
+-- forward declaration
+local RestoreLimbHitboxForPlayer
 
 local function ApplyLimbHitboxForPlayer(plr)
     if plr == LocalPlayer then return end
     if Q.Settings.LimbHitboxTeamCheck and not IsEnemy(plr) then
-        if RestoreLimbHitboxForPlayer then RestoreLimbHitboxForPlayer(plr) end
+        if RestoreLimbHitboxForPlayer ~= nil then
+            RestoreLimbHitboxForPlayer(plr)
+        end
         return
     end
     local char = plr.Character
@@ -184,8 +198,8 @@ local function ApplyLimbHitboxForPlayer(plr)
     local parts = {}
     for _, name in ipairs(LIMB_PARTS) do
         local p = char:FindFirstChild(name)
-        if p and p:IsA("BasePart") then
-            if not Q.Internal.LimbOriginals[p] then
+        if p ~= nil and p:IsA("BasePart") then
+            if Q.Internal.LimbOriginals[p] == nil then
                 Q.Internal.LimbOriginals[p] = {
                     Size         = p.Size,
                     CanCollide   = p.CanCollide,
@@ -203,12 +217,12 @@ local function ApplyLimbHitboxForPlayer(plr)
     Q.Internal.LimbApplied[plr] = parts
 end
 
-function RestoreLimbHitboxForPlayer(plr)
+RestoreLimbHitboxForPlayer = function(plr)
     local parts = Q.Internal.LimbApplied[plr]
-    if not parts then return end
+    if parts == nil then return end
     for _, p in ipairs(parts) do
         local orig = Q.Internal.LimbOriginals[p]
-        if orig and p.Parent then
+        if orig ~= nil and p.Parent ~= nil then
             pcall(function()
                 p.Size         = orig.Size
                 p.CanCollide   = orig.CanCollide
@@ -224,7 +238,7 @@ local function StartLimbHitbox()
     for _, plr in ipairs(Players:GetPlayers()) do
         ApplyLimbHitboxForPlayer(plr)
     end
-    if not Q.Internal.Conns.limbStep then
+    if Q.Internal.Conns.limbStep == nil then
         Q.Internal.Conns.limbStep = RunService.Heartbeat:Connect(function()
             if H.ShuttingDown then return end
             if not Q.Settings.LimbHitboxEnabled then return end
@@ -234,11 +248,11 @@ local function StartLimbHitbox()
                 Q.Settings.LimbHitboxSize
             )
             for plr, parts in pairs(Q.Internal.LimbApplied) do
-                if not plr.Parent or not plr.Character then
+                if plr.Parent == nil or plr.Character == nil then
                     RestoreLimbHitboxForPlayer(plr)
                 else
                     for _, p in ipairs(parts) do
-                        if p.Parent and p.Size ~= size then
+                        if p.Parent ~= nil and p.Size ~= size then
                             pcall(function()
                                 p.Size         = size
                                 p.CanCollide   = false
@@ -256,22 +270,22 @@ local function StopLimbHitbox()
     for plr in pairs(Q.Internal.LimbApplied) do
         RestoreLimbHitboxForPlayer(plr)
     end
-    if Q.Internal.Conns.limbStep then
+    if Q.Internal.Conns.limbStep ~= nil then
         pcall(function() Q.Internal.Conns.limbStep:Disconnect() end)
         Q.Internal.Conns.limbStep = nil
     end
 end
 
---// ---------------------------------------------------------------------------
---// WEAPON MODS
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Weapon Mods
+--====================================================================
 local function ApplyWeaponMods()
     pcall(function()
         if Q.Settings.InfAmmoEnabled then
-            local pg = LocalPlayer:FindFirstChild("PlayerGui")
-            local gui = pg and pg:FindFirstChild("GUI")
+            local pg     = LocalPlayer:FindFirstChild("PlayerGui")
+            local gui    = pg and pg:FindFirstChild("GUI")
             local client = gui and gui:FindFirstChild("Client")
-            local vars = client and client:FindFirstChild("Variables")
+            local vars   = client and client:FindFirstChild("Variables")
             if vars then
                 local a1 = vars:FindFirstChild("ammocount")
                 local a2 = vars:FindFirstChild("ammocount2")
@@ -284,12 +298,20 @@ local function ApplyWeaponMods()
             if weapons then
                 for _, v in ipairs(weapons:GetDescendants()) do
                     if Q.Settings.FireRateEnabled then
-                        if v.Name == "Auto"     then pcall(function() v.Value = true end) end
-                        if v.Name == "FireRate" then pcall(function() v.Value = Q.Settings.FireRateValue end) end
+                        if v.Name == "Auto" then
+                            pcall(function() v.Value = true end)
+                        end
+                        if v.Name == "FireRate" then
+                            pcall(function() v.Value = Q.Settings.FireRateValue end)
+                        end
                     end
                     if Q.Settings.RecoilEnabled then
-                        if v.Name == "RecoilControl" then pcall(function() v.Value = 0 end) end
-                        if v.Name == "MaxSpread"     then pcall(function() v.Value = 0 end) end
+                        if v.Name == "RecoilControl" then
+                            pcall(function() v.Value = 0 end)
+                        end
+                        if v.Name == "MaxSpread" then
+                            pcall(function() v.Value = 0 end)
+                        end
                     end
                 end
             end
@@ -303,8 +325,9 @@ local function StartWeaponMods()
     task.spawn(function()
         while Q.Internal.WeaponLoopActive and not H.ShuttingDown do
             if Q.Settings.InfAmmoEnabled
-               or Q.Settings.FireRateEnabled
-               or Q.Settings.RecoilEnabled then
+                or Q.Settings.FireRateEnabled
+                or Q.Settings.RecoilEnabled
+            then
                 ApplyWeaponMods()
             end
             task.wait(0.2)
@@ -316,9 +339,9 @@ local function StopWeaponMods()
     Q.Internal.WeaponLoopActive = false
 end
 
---// ---------------------------------------------------------------------------
---// EVENTS
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Player events
+--====================================================================
 Track(Players.PlayerAdded:Connect(function(plr)
     if Q.Settings.NameTagsEnabled then
         task.wait(0.5)
@@ -329,7 +352,7 @@ end))
 
 Track(Players.PlayerRemoving:Connect(function(plr)
     RemoveNameTag(plr)
-    if RestoreLimbHitboxForPlayer then RestoreLimbHitboxForPlayer(plr) end
+    RestoreLimbHitboxForPlayer(plr)
 end))
 
 Track(LocalPlayer.CharacterAdded:Connect(function()
@@ -342,16 +365,15 @@ Track(LocalPlayer.CharacterAdded:Connect(function()
     end
 end))
 
---// ---------------------------------------------------------------------------
---// UI — адаптировано под актуальный AirHub (H._UI.MainFrame)
---// ---------------------------------------------------------------------------
+--====================================================================
+-- UI (AirHub._UI.MainFrame)
+--====================================================================
 local function FillUI()
     local MainFrame = H._UI and H._UI.MainFrame
     if not MainFrame then return false end
 
     local tab = MainFrame:CreateTab({ Name = "arsenal" })
 
-    -- LEFT — Name Tags
     local secNT = tab:CreateSection({ Name = "Name Tags" })
     secNT:AddToggle({
         Name = "Enabled",
@@ -383,8 +405,10 @@ local function FillUI()
         Callback = function(v) Q.Settings.NameTagsAliveCheck = v end,
     })
 
-    -- RIGHT — Limb Hitbox
-    local secLH = tab:CreateSection({ Name = "Limb Hitbox (OP Silent Aim)", Side = "Right" })
+    local secLH = tab:CreateSection({
+        Name = "Limb Hitbox (OP Silent Aim)",
+        Side = "Right",
+    })
     secLH:AddToggle({
         Name = "Enabled",
         Value = Q.Settings.LimbHitboxEnabled,
@@ -400,7 +424,8 @@ local function FillUI()
         Callback = function(v)
             Q.Settings.LimbHitboxSize = v
             if Q.Settings.LimbHitboxEnabled then
-                StopLimbHitbox(); StartLimbHitbox()
+                StopLimbHitbox()
+                StartLimbHitbox()
             end
         end,
     })
@@ -416,12 +441,12 @@ local function FillUI()
         Callback = function(v)
             Q.Settings.LimbHitboxTeamCheck = v
             if Q.Settings.LimbHitboxEnabled then
-                StopLimbHitbox(); StartLimbHitbox()
+                StopLimbHitbox()
+                StartLimbHitbox()
             end
         end,
     })
 
-    -- LEFT — Weapon Mods
     local secWM = tab:CreateSection({ Name = "Weapon Mods" })
     secWM:AddToggle({
         Name = "Infinite Ammo",
@@ -471,9 +496,9 @@ if not FillUI() then
     end)
 end
 
---// ---------------------------------------------------------------------------
---// PUBLIC CLEANUP
---// ---------------------------------------------------------------------------
+--====================================================================
+-- Public cleanup
+--====================================================================
 Q.Functions.StopAll = function()
     Q.Settings.NameTagsEnabled   = false
     Q.Settings.LimbHitboxEnabled = false
