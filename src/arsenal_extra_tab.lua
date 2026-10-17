@@ -1,11 +1,12 @@
 --// ============================================================================
---// AirHub — arsenal extra tab (airhubUI build)
---// Ported from airhub-remake/src/arsenal extra tab
---// Extra tab "arsenal" — Name Tags ESP, Limb Hitbox, Weapon Mods.
+--// AirHub - arsenal extra tab
+--// Extra tab "arsenal" — Name Tags, Limb Hitbox, Weapon Mods
+--// Requires: 01_core.lua, 07a_ui_core.lua
 --// ============================================================================
+
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] arsenal extra tab: core not loaded") return end
-if H.Quotas and H.Quotas._Loaded then warn("[AirHub] arsenal extra tab: already loaded") return end
+if H.Quotas and H.Quotas._Loaded then return end
 
 local Util               = H.Util
 local Players            = Util.Players
@@ -13,33 +14,28 @@ local RunService         = Util.RunService
 local LocalPlayer        = Util.LocalPlayer
 local ReplicatedStorage  = Util.ReplicatedStorage
 local Track              = Util.Track
-local HandleError        = Util.HandleError
 local SanitizeColor      = Util.SanitizeColor
-local ShowError          = Util.ShowError
 
 H.Quotas = H.Quotas or {}
 local Q = H.Quotas
 Q._Loaded = true
 
 Q.Settings = Q.Settings or {
-    -- Name tags
-    NameTagsEnabled       = false,
-    NameTagsSize          = 9,
-    NameTagsColor         = Color3.fromRGB(255, 255, 255),
-    NameTagsTeamCheck     = true,
-    NameTagsAliveCheck    = true,
+    NameTagsEnabled        = false,
+    NameTagsSize           = 9,
+    NameTagsColor          = Color3.fromRGB(255, 255, 255),
+    NameTagsTeamCheck      = true,
+    NameTagsAliveCheck     = true,
 
-    -- Limb hitbox
-    LimbHitboxEnabled     = false,
-    LimbHitboxSize        = 13,
-    LimbHitboxTransparency= 1,
-    LimbHitboxTeamCheck   = true,
+    LimbHitboxEnabled      = false,
+    LimbHitboxSize         = 13,
+    LimbHitboxTransparency = 1,
+    LimbHitboxTeamCheck    = true,
 
-    -- Weapon mods
-    InfAmmoEnabled        = false,
-    FireRateEnabled       = false,
-    FireRateValue         = 0.02,
-    RecoilEnabled         = false,
+    InfAmmoEnabled         = false,
+    FireRateEnabled        = false,
+    FireRateValue          = 0.02,
+    RecoilEnabled          = false,
 }
 Q.Internal = Q.Internal or {
     NameTags         = {},
@@ -50,9 +46,9 @@ Q.Internal = Q.Internal or {
 }
 Q.Functions = Q.Functions or {}
 
---// ============================================================================
---// SHARED HELPERS
---// ============================================================================
+--// ---------------------------------------------------------------------------
+--// Shared helpers
+--// ---------------------------------------------------------------------------
 local function IsAlive(char)
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -66,37 +62,38 @@ local function IsEnemy(plr)
     return true
 end
 
---// ============================================================================
---// NAME TAGS ESP
---// ============================================================================
+--// ---------------------------------------------------------------------------
+--// NAME TAGS
+--// ---------------------------------------------------------------------------
 local function BuildNameTag(plr)
     if plr == LocalPlayer then return end
     if not plr.Character then return end
     local head = plr.Character:FindFirstChild("Head")
     if not head then return end
-    if Q.Internal.NameTags[plr] and Q.Internal.NameTags[plr].Parent then return end
+    local existing = Q.Internal.NameTags[plr]
+    if existing and existing.Parent then return end
 
     local gui = Instance.new("BillboardGui")
-    gui.Name           = "AirHub_Quotas_NameTag"
+    gui.Name          = "AirHub_Quotas_NameTag"
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.AlwaysOnTop    = true
+    gui.AlwaysOnTop   = true
     gui.LightInfluence = 1
-    gui.Size           = UDim2.new(0, 300, 0, 30)
-    gui.StudsOffset    = Vector3.new(0, 3, 0)
-    gui.Parent         = head
+    gui.Size          = UDim2.new(0, 300, 0, 30)
+    gui.StudsOffset   = Vector3.new(0, 3, 0)
+    gui.Parent        = head
 
     local label = Instance.new("TextLabel")
-    label.Name                   = "NameLabel"
+    label.Name                  = "NameLabel"
     label.BackgroundTransparency = 1
-    label.Size                   = UDim2.new(1, 0, 1, 0)
-    label.Font                   = Enum.Font.Ubuntu
-    label.Text                   = plr.Name
-    label.TextColor3             = Q.Settings.NameTagsColor
-    label.TextSize               = Q.Settings.NameTagsSize
+    label.Size                  = UDim2.new(1, 0, 1, 0)
+    label.Font                  = Enum.Font.Ubuntu
+    label.Text                  = plr.Name
+    label.TextColor3            = Q.Settings.NameTagsColor
+    label.TextSize              = Q.Settings.NameTagsSize
     label.TextStrokeTransparency = 0
-    label.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
-    label.TextTransparency       = 1
-    label.Parent                 = gui
+    label.TextStrokeColor3      = Color3.fromRGB(0, 0, 0)
+    label.TextTransparency      = 1
+    label.Parent                = gui
 
     Q.Internal.NameTags[plr] = gui
 end
@@ -117,10 +114,10 @@ local function RefreshNameTagVisibility(plr)
 
     local visible = Q.Settings.NameTagsEnabled
     if visible and Q.Settings.NameTagsAliveCheck then
-        visible = IsAlive(plr.Character)
+        visible = IsAlive(plr.Character) and true or false
     end
     if visible and Q.Settings.NameTagsTeamCheck then
-        visible = IsEnemy(plr)
+        visible = IsEnemy(plr) and true or false
     end
     label.TextTransparency = visible and 0 or 1
     label.TextSize         = Q.Settings.NameTagsSize
@@ -140,9 +137,7 @@ local function StartNameTags()
                     local head = plr.Character:FindFirstChild("Head")
                     if head then
                         local gui = Q.Internal.NameTags[plr]
-                        if not gui or not gui.Parent then
-                            BuildNameTag(plr)
-                        end
+                        if not gui or not gui.Parent then BuildNameTag(plr) end
                         RefreshNameTagVisibility(plr)
                     end
                 end
@@ -161,30 +156,32 @@ local function StopNameTags()
     end
 end
 
---// ============================================================================
+--// ---------------------------------------------------------------------------
 --// LIMB HITBOX
---// ============================================================================
+--// ---------------------------------------------------------------------------
 local LIMB_PARTS = {
     "RightUpperLeg", "LeftUpperLeg",
     "HeadHB", "Head",
     "HumanoidRootPart",
 }
 
+local RestoreLimbHitboxForPlayer  -- forward declaration
+
 local function ApplyLimbHitboxForPlayer(plr)
     if plr == LocalPlayer then return end
     if Q.Settings.LimbHitboxTeamCheck and not IsEnemy(plr) then
-        RestoreLimbHitboxForPlayer and RestoreLimbHitboxForPlayer(plr)
+        if RestoreLimbHitboxForPlayer then RestoreLimbHitboxForPlayer(plr) end
         return
     end
     local char = plr.Character
     if not char then return end
 
-    local parts = {}
     local size = Vector3.new(
         Q.Settings.LimbHitboxSize,
         Q.Settings.LimbHitboxSize,
         Q.Settings.LimbHitboxSize
     )
+    local parts = {}
     for _, name in ipairs(LIMB_PARTS) do
         local p = char:FindFirstChild(name)
         if p and p:IsA("BasePart") then
@@ -206,7 +203,7 @@ local function ApplyLimbHitboxForPlayer(plr)
     Q.Internal.LimbApplied[plr] = parts
 end
 
-local function RestoreLimbHitboxForPlayer(plr)
+function RestoreLimbHitboxForPlayer(plr)
     local parts = Q.Internal.LimbApplied[plr]
     if not parts then return end
     for _, p in ipairs(parts) do
@@ -222,8 +219,6 @@ local function RestoreLimbHitboxForPlayer(plr)
     end
     Q.Internal.LimbApplied[plr] = nil
 end
--- forward declaration for the guard above
-RestoreLimbHitboxForPlayer = RestoreLimbHitboxForPlayer
 
 local function StartLimbHitbox()
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -267,9 +262,9 @@ local function StopLimbHitbox()
     end
 end
 
---// ============================================================================
+--// ---------------------------------------------------------------------------
 --// WEAPON MODS
---// ============================================================================
+--// ---------------------------------------------------------------------------
 local function ApplyWeaponMods()
     pcall(function()
         if Q.Settings.InfAmmoEnabled then
@@ -289,12 +284,12 @@ local function ApplyWeaponMods()
             if weapons then
                 for _, v in ipairs(weapons:GetDescendants()) do
                     if Q.Settings.FireRateEnabled then
-                        if v.Name == "Auto"     then v.Value = true end
-                        if v.Name == "FireRate" then v.Value = Q.Settings.FireRateValue end
+                        if v.Name == "Auto"     then pcall(function() v.Value = true end) end
+                        if v.Name == "FireRate" then pcall(function() v.Value = Q.Settings.FireRateValue end) end
                     end
                     if Q.Settings.RecoilEnabled then
-                        if v.Name == "RecoilControl" then v.Value = 0 end
-                        if v.Name == "MaxSpread"     then v.Value = 0 end
+                        if v.Name == "RecoilControl" then pcall(function() v.Value = 0 end) end
+                        if v.Name == "MaxSpread"     then pcall(function() v.Value = 0 end) end
                     end
                 end
             end
@@ -321,9 +316,9 @@ local function StopWeaponMods()
     Q.Internal.WeaponLoopActive = false
 end
 
---// ============================================================================
---// PLAYER EVENTS
---// ============================================================================
+--// ---------------------------------------------------------------------------
+--// EVENTS
+--// ---------------------------------------------------------------------------
 Track(Players.PlayerAdded:Connect(function(plr)
     if Q.Settings.NameTagsEnabled then
         task.wait(0.5)
@@ -334,7 +329,7 @@ end))
 
 Track(Players.PlayerRemoving:Connect(function(plr)
     RemoveNameTag(plr)
-    RestoreLimbHitboxForPlayer(plr)
+    if RestoreLimbHitboxForPlayer then RestoreLimbHitboxForPlayer(plr) end
 end))
 
 Track(LocalPlayer.CharacterAdded:Connect(function()
@@ -347,30 +342,17 @@ Track(LocalPlayer.CharacterAdded:Connect(function()
     end
 end))
 
---// ============================================================================
---// UI (airhubUI)
---// ============================================================================
-task.spawn(function()
-    local deadline = tick() + 30
-    while tick() < deadline do
-        if H.ShuttingDown then return end
-        if getgenv().airhubUI_Window then break end
-        task.wait(0.25)
-    end
+--// ---------------------------------------------------------------------------
+--// UI — адаптировано под актуальный AirHub (H._UI.MainFrame)
+--// ---------------------------------------------------------------------------
+local function FillUI()
+    local MainFrame = H._UI and H._UI.MainFrame
+    if not MainFrame then return false end
 
-    local Window = getgenv().airhubUI_Window
-    if not Window then
-        warn("[AirHub] arsenal extra tab: airhubUI Window never appeared")
-        return
-    end
+    local tab = MainFrame:CreateTab({ Name = "arsenal" })
 
-    local tab = Window:AddTab({ Name = "arsenal", Icon = ">" })
-
-    --// =======================================================================
-    --// LEFT COLUMN — Name Tags
-    --// =======================================================================
+    -- LEFT — Name Tags
     local secNT = tab:CreateSection({ Name = "Name Tags" })
-
     secNT:AddToggle({
         Name = "Enabled",
         Value = Q.Settings.NameTagsEnabled,
@@ -387,7 +369,7 @@ task.spawn(function()
     })
     secNT:AddColorpicker({
         Name = "Text Color",
-        Default = Q.Settings.NameTagsColor,
+        Value = Q.Settings.NameTagsColor,
         Callback = function(c) Q.Settings.NameTagsColor = SanitizeColor(c) end,
     })
     secNT:AddToggle({
@@ -401,11 +383,8 @@ task.spawn(function()
         Callback = function(v) Q.Settings.NameTagsAliveCheck = v end,
     })
 
-    --// =======================================================================
-    --// LEFT COLUMN — Limb Hitbox
-    --// =======================================================================
-    local secLH = tab:CreateSection({ Name = "Limb Hitbox (OP Silent Aim)" })
-
+    -- RIGHT — Limb Hitbox
+    local secLH = tab:CreateSection({ Name = "Limb Hitbox (OP Silent Aim)", Side = "Right" })
     secLH:AddToggle({
         Name = "Enabled",
         Value = Q.Settings.LimbHitboxEnabled,
@@ -442,11 +421,8 @@ task.spawn(function()
         end,
     })
 
-    --// =======================================================================
-    --// RIGHT COLUMN — Weapon Mods
-    --// =======================================================================
-    local secWM = tab:CreateSection({ Name = "Weapon Mods", Side = "Right" })
-
+    -- LEFT — Weapon Mods
+    local secWM = tab:CreateSection({ Name = "Weapon Mods" })
     secWM:AddToggle({
         Name = "Infinite Ammo",
         Value = Q.Settings.InfAmmoEnabled,
@@ -478,12 +454,26 @@ task.spawn(function()
         end,
     })
 
-    print("[AirHub] arsenal extra tab: tab created")
-end)
+    return true
+end
 
---// ============================================================================
+if not FillUI() then
+    task.spawn(function()
+        for _ = 1, 60 do
+            if H.ShuttingDown then return end
+            if FillUI() then
+                print("[AirHub] arsenal extra tab: loaded OK")
+                return
+            end
+            task.wait(0.5)
+        end
+        warn("[AirHub] arsenal extra tab: MainFrame never appeared after 30s")
+    end)
+end
+
+--// ---------------------------------------------------------------------------
 --// PUBLIC CLEANUP
---// ============================================================================
+--// ---------------------------------------------------------------------------
 Q.Functions.StopAll = function()
     Q.Settings.NameTagsEnabled   = false
     Q.Settings.LimbHitboxEnabled = false
@@ -494,5 +484,3 @@ Q.Functions.StopAll = function()
     StopLimbHitbox()
     StopWeaponMods()
 end
-
-print("[AirHub] arsenal extra tab: loaded OK (airhubUI build)")
