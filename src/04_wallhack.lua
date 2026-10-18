@@ -1,11 +1,11 @@
---// AirHub - 04_wallhack.lua v12
---// CHANGES v12:
---//  - Increased UI limits for China Hat:
---//    * Width (Size): max 100 (was 20)
---//    * Height (Length): max 100 (was 30)
---//    * Offset Y: max 20 (was 5)
---//    * Facets (Sides): max 128 (was 32)
---//  - Updated internal math.clamp for sides to match new limit (128)
+--// AirHub - 04_wallhack.lua v13
+--// CHANGES v13:
+--//  - Updated Default China Hat settings:
+--//    * Width (Size): 3.5 (was 4)
+--//    * Height (Length): 1 (was 6)
+--//    * Offset Y: 0.5 (was 1.8)
+--//    * Facets (Sides): 64 (was 16)
+--//  - Applied these defaults to schema, fallbacks, and internal builders.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -96,12 +96,12 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
         Mode = "Closed", -- "Closed" | "Opened"
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
-        Size = 4,
-        Height = 6,
-        OffsetY = 1.8, Transparency = 0, Rotation = 0,
+        Size = 3.5,
+        Height = 1,
+        OffsetY = 0.5, Transparency = 0, Rotation = 0,
         AutoRotate = false, RotateSpeed = 90,
         Rainbow = false, RainbowSpeed = 0.5,
-        Sides = 16,
+        Sides = 64,
     },
 }
 do
@@ -118,11 +118,17 @@ do
     if WallHack.Visuals.SelfESP.ChinaHat.Tiers ~= nil then
         WallHack.Visuals.SelfESP.ChinaHat.Tiers = nil
     end
+    if WallHack.Visuals.SelfESP.ChinaHat.Size == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.Size = 3.5
+    end
     if WallHack.Visuals.SelfESP.ChinaHat.Height == nil then
-        WallHack.Visuals.SelfESP.ChinaHat.Height = 6
+        WallHack.Visuals.SelfESP.ChinaHat.Height = 1
+    end
+    if WallHack.Visuals.SelfESP.ChinaHat.OffsetY == nil then
+        WallHack.Visuals.SelfESP.ChinaHat.OffsetY = 0.5
     end
     if WallHack.Visuals.SelfESP.ChinaHat.Sides == nil then
-        WallHack.Visuals.SelfESP.ChinaHat.Sides = 16
+        WallHack.Visuals.SelfESP.ChinaHat.Sides = 64
     end
     if WallHack.Visuals.SelfESP.ChinaHat.Mode == nil then
         WallHack.Visuals.SelfESP.ChinaHat.Mode = "Closed"
@@ -603,14 +609,13 @@ local okInit, errInit = pcall(function()
         folder.Name = "AirHubChinaHat"
         folder.Parent = getHatFolder()
 
-        local baseSize = tonumber(C.Size) or 4
-        local H = tonumber(C.Height) or 6
+        local baseSize = tonumber(C.Size) or 3.5
+        local H = tonumber(C.Height) or 1
         local R = baseSize * 0.5
         local color = SafeColor(C.Color, Color3.fromRGB(255,60,60))
         local trans = math.clamp(tonumber(C.Transparency) or 0, 0, 1)
 
-        -- Increased max sides from 32 to 128
-        local sides = math.clamp(tonumber(C.Sides) or 16, 6, 128)
+        local sides = math.clamp(tonumber(C.Sides) or 64, 6, 128)
         local thickness = 0.08
         local scale     = 1.04
 
@@ -750,8 +755,7 @@ local okInit, errInit = pcall(function()
 
             local C = WallHack.Visuals.SelfESP.ChinaHat
 
-            -- Increased max sides to 128
-            local wantSides = math.clamp(tonumber(C.Sides) or 16, 6, 128)
+            local wantSides = math.clamp(tonumber(C.Sides) or 64, 6, 128)
             if Se.HatData.sides ~= wantSides then
                 removeChinaHat()
                 Se.HatData = buildHat(Se.HatHead)
@@ -1345,7 +1349,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v12 (bigger limits)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v13 (updated defaults)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1524,7 +1528,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v12")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v13")
 end
 
 -- ============================================================================
@@ -1652,7 +1656,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_hat_transparency = "Hat transparency",
             tt_vis_se_hat_material = "Roblox material for the hat",
-            tt_vis_se_hat_sides = "Number of facets around the cone (Max 128). Higher = smoother.",
+            tt_vis_se_hat_sides = "Number of facets around the cone. Higher = smoother.",
             tt_vis_sp_enabled = "Show ghost of your server-side position (lag-compensation view)",
             tt_vis_sp_rgb = "Rainbow color for ghosts",
             tt_vis_sp_strength = "Prediction strength",
@@ -1781,7 +1785,7 @@ do
             tt_vis_se_hat_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_hat_transparency = "Прозрачность шляпы",
             tt_vis_se_hat_material = "Материал Roblox для шляпы",
-            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса (Макс 128). Больше = глаже.",
+            tt_vis_se_hat_sides = "Количество фасетов вокруг конуса. Больше = глаже.",
             tt_vis_sp_enabled = "Показывать призрак серверной позиции (lag-compensation)",
             tt_vis_sp_rgb = "Радужный цвет для призраков",
             tt_vis_sp_strength = "Сила предсказания",
@@ -1975,7 +1979,7 @@ seSec:AddSlider({ Name = "vis_se_hat_height", Value = WallHack.Visuals.SelfESP.C
     Min = 1, Max = 100, Decimals = 1, Callback = function(v) setHat("Height", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_height" })
 seSec:AddSlider({ Name = "vis_se_hat_offset", Value = WallHack.Visuals.SelfESP.ChinaHat.OffsetY,
     Min = 0, Max = 20, Decimals = 1, Callback = function(v) setHat("OffsetY", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_offset" })
-seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.ChinaHat.Sides or 16,
+seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.ChinaHat.Sides or 64,
     Min = 6, Max = 128, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
 seSec:AddSlider({ Name = "vis_se_hat_rotation", Value = WallHack.Visuals.SelfESP.ChinaHat.Rotation,
     Min = 0, Max = 360, Callback = function(v) setHat("Rotation", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotation" })
@@ -2010,4 +2014,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v12 (bigger limits)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v13 (updated defaults)")
