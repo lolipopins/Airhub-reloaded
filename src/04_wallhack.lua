@@ -1,11 +1,10 @@
---// AirHub - 04_wallhack.lua v13
---// CHANGES v13:
---//  - Updated Default China Hat settings:
---//    * Width (Size): 3.5 (was 4)
---//    * Height (Length): 1 (was 6)
---//    * Offset Y: 0.5 (was 1.8)
---//    * Facets (Sides): 64 (was 16)
---//  - Applied these defaults to schema, fallbacks, and internal builders.
+--// AirHub - 04_wallhack.lua v14
+--// CHANGES v14:
+--//  - Added ESP Preview GUI (draggable window with 3D R6 dummy)
+--//  - Added "ESP Preview" toggle in Visuals tab
+--//  - Preview dynamically updates color, transparency, thickness, and text based on ESP settings
+--//  - Increased UI limits for China Hat (Width: 100, Height: 100, Offset: 20, Sides: 128)
+--//  - Default China Hat settings: Width 3.5, Height 1, Offset 0.5, Sides 64
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -149,6 +148,13 @@ WallHack.Internal = WallHack.Internal or {
         ResolvedMaterial = Enum.Material.Neon,
         LastSchemaMaterial = nil, LastAppliedMaterial = nil,
     },
+    ESPPreview = {
+        ScreenGui = nil, MainFrame = nil, Conn = nil,
+        Box = { Top = nil, Bottom = nil, Left = nil, Right = nil },
+        NameTag = nil, DistanceTag = nil, WeaponTag = nil,
+        HealthBg = nil, HealthFill = nil,
+        Viewport = nil, Dummy = nil,
+    }
 }
 WallHack.WrappedPlayers = WallHack.WrappedPlayers or {}
 WallHack.Functions      = WallHack.Functions      or {}
@@ -194,6 +200,281 @@ local okInit, errInit = pcall(function()
             return lt ~= tt
         end
         return true
+    end
+
+    -- ========================================================================
+    -- ESP PREVIEW
+    -- ========================================================================
+    local function createPreviewDummy()
+        local model = Instance.new("Model")
+        
+        local torso = Instance.new("Part")
+        torso.Name = "Torso"
+        torso.Size = Vector3.new(2, 2, 1)
+        torso.CFrame = CFrame.new(0, 0, 0)
+        torso.Color = Color3.fromRGB(160, 160, 160)
+        torso.Material = Enum.Material.SmoothPlastic
+        torso.Parent = model
+
+        local head = Instance.new("Part")
+        head.Name = "Head"
+        head.Shape = Enum.PartType.Ball
+        head.Size = Vector3.new(1.2, 1.2, 1.2)
+        head.CFrame = CFrame.new(0, 1.6, 0)
+        head.Color = Color3.fromRGB(200, 200, 200)
+        head.Material = Enum.Material.SmoothPlastic
+        head.Parent = model
+
+        local larm = Instance.new("Part")
+        larm.Name = "Left Arm"
+        larm.Size = Vector3.new(1, 2, 1)
+        larm.CFrame = CFrame.new(-1.5, 0, 0)
+        larm.Color = Color3.fromRGB(160, 160, 160)
+        larm.Material = Enum.Material.SmoothPlastic
+        larm.Parent = model
+
+        local rarm = Instance.new("Part")
+        rarm.Name = "Right Arm"
+        rarm.Size = Vector3.new(1, 2, 1)
+        rarm.CFrame = CFrame.new(1.5, 0, 0)
+        rarm.Color = Color3.fromRGB(160, 160, 160)
+        rarm.Material = Enum.Material.SmoothPlastic
+        rarm.Parent = model
+
+        local lleg = Instance.new("Part")
+        lleg.Name = "Left Leg"
+        lleg.Size = Vector3.new(1, 2, 1)
+        lleg.CFrame = CFrame.new(-0.5, -2, 0)
+        lleg.Color = Color3.fromRGB(160, 160, 160)
+        lleg.Material = Enum.Material.SmoothPlastic
+        lleg.Parent = model
+
+        local rleg = Instance.new("Part")
+        rleg.Name = "Right Leg"
+        rleg.Size = Vector3.new(1, 2, 1)
+        rleg.CFrame = CFrame.new(0.5, -2, 0)
+        rleg.Color = Color3.fromRGB(160, 160, 160)
+        rleg.Material = Enum.Material.SmoothPlastic
+        rleg.Parent = model
+
+        return model
+    end
+
+    local function StartESPPreview()
+        local Prev = WallHack.Internal.ESPPreview
+        if Prev.ScreenGui then return end
+
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "AirHubESPPreview"
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        sg.Parent = game:GetService("CoreGui")
+        Prev.ScreenGui = sg
+
+        local main = Instance.new("Frame")
+        main.Name = "Main"
+        main.Size = UDim2.new(0, 260, 0, 400)
+        main.Position = UDim2.new(0.5, 300, 0.5, 0)
+        main.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        main.BackgroundTransparency = 0.2
+        main.BorderSizePixel = 0
+        main.Active = true
+        main.Draggable = true
+        main.Parent = sg
+        Prev.MainFrame = main
+
+        local uiCorner = Instance.new("UICorner")
+        uiCorner.CornerRadius = UDim.new(0, 8)
+        uiCorner.Parent = main
+
+        local uiStroke = Instance.new("UIStroke")
+        uiStroke.Color = Color3.fromRGB(60, 60, 60)
+        uiStroke.Parent = main
+
+        local title = Instance.new("TextLabel")
+        title.Name = "Title"
+        title.Size = UDim2.new(1, 0, 0, 30)
+        title.BackgroundTransparency = 1
+        title.Text = "ESP Preview"
+        title.TextColor3 = Color3.fromRGB(200, 200, 200)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 14
+        title.Parent = main
+
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.Size = UDim2.new(0, 30, 0, 30)
+        closeBtn.Position = UDim2.new(1, -30, 0, 0)
+        closeBtn.BackgroundTransparency = 1
+        closeBtn.Text = "X"
+        closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+        closeBtn.Font = Enum.Font.GothamBold
+        closeBtn.TextSize = 14
+        closeBtn.Parent = main
+        closeBtn.MouseButton1Click:Connect(function()
+            WallHack.Functions.SetESPPreviewEnabled(false)
+        end)
+
+        local vp = Instance.new("ViewportFrame")
+        vp.Name = "Viewport"
+        vp.Size = UDim2.new(0, 220, 0, 300)
+        vp.Position = UDim2.new(0.5, 0, 0.5, -10)
+        vp.BackgroundTransparency = 1
+        vp.Ambient = Color3.fromRGB(150, 150, 150)
+        vp.LightColor = Color3.fromRGB(255, 255, 255)
+        vp.Parent = main
+        Prev.Viewport = vp
+
+        local cam = Instance.new("Camera")
+        cam.Parent = vp
+        cam.CFrame = CFrame.new(0, 0, 8) * CFrame.Angles(0, math.rad(180), 0)
+        vp.CurrentCamera = cam
+
+        local dummy = createPreviewDummy()
+        dummy.Parent = vp
+        Prev.Dummy = dummy
+
+        -- ESP Overlay elements
+        local overlay = Instance.new("Frame")
+        overlay.Name = "Overlay"
+        overlay.Size = UDim2.new(0, 160, 0, 260)
+        overlay.Position = UDim2.new(0.5, -80, 0.5, -30)
+        overlay.BackgroundTransparency = 1
+        overlay.Parent = main
+
+        local function makeLine(name)
+            local f = Instance.new("Frame")
+            f.Name = name
+            f.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            f.BorderSizePixel = 0
+            f.Parent = overlay
+            return f
+        end
+
+        Prev.Box.Top = makeLine("Top")
+        Prev.Box.Top.Size = UDim2.new(1, 0, 0, 1)
+        Prev.Box.Top.Position = UDim2.new(0, 0, 0, 0)
+
+        Prev.Box.Bottom = makeLine("Bottom")
+        Prev.Box.Bottom.Size = UDim2.new(1, 0, 0, 1)
+        Prev.Box.Bottom.Position = UDim2.new(0, 0, 1, -1)
+
+        Prev.Box.Left = makeLine("Left")
+        Prev.Box.Left.Size = UDim2.new(0, 1, 1, 0)
+        Prev.Box.Left.Position = UDim2.new(0, 0, 0, 0)
+
+        Prev.Box.Right = makeLine("Right")
+        Prev.Box.Right.Size = UDim2.new(0, 1, 1, 0)
+        Prev.Box.Right.Position = UDim2.new(1, -1, 0, 0)
+
+        -- Health Bar
+        local hbBg = Instance.new("Frame")
+        hbBg.Name = "HealthBg"
+        hbBg.Size = UDim2.new(0, 4, 1, 0)
+        hbBg.Position = UDim2.new(-1, -10, 0, 0)
+        hbBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        hbBg.BackgroundTransparency = 0.5
+        hbBg.BorderSizePixel = 0
+        hbBg.Parent = overlay
+        Prev.HealthBg = hbBg
+
+        local hbFill = Instance.new("Frame")
+        hbFill.Name = "HealthFill"
+        hbFill.Size = UDim2.new(1, 0, 0.5, 0)
+        hbFill.Position = UDim2.new(0, 0, 0.5, 0)
+        hbFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        hbFill.BorderSizePixel = 0
+        hbFill.Parent = hbBg
+        Prev.HealthFill = hbFill
+
+        -- Name
+        local nameTag = Instance.new("TextLabel")
+        nameTag.Name = "NameTag"
+        nameTag.Size = UDim2.new(1, 100, 0, 20)
+        nameTag.Position = UDim2.new(0.5, -50, 0, -25)
+        nameTag.BackgroundTransparency = 1
+        nameTag.Text = "keydim4293"
+        nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+        nameTag.Font = Enum.Font.GothamBold
+        nameTag.TextSize = 14
+        nameTag.Parent = overlay
+        Prev.NameTag = nameTag
+
+        -- Weapon
+        local weaponTag = Instance.new("TextLabel")
+        weaponTag.Name = "WeaponTag"
+        weaponTag.Size = UDim2.new(1, 100, 0, 20)
+        weaponTag.Position = UDim2.new(0.5, -50, 0, -5)
+        weaponTag.BackgroundTransparency = 1
+        weaponTag.Text = "Weapon"
+        weaponTag.TextColor3 = Color3.fromRGB(200, 200, 255)
+        weaponTag.Font = Enum.Font.Gotham
+        weaponTag.TextSize = 12
+        weaponTag.Parent = overlay
+        Prev.WeaponTag = weaponTag
+
+        -- Distance
+        local distTag = Instance.new("TextLabel")
+        distTag.Name = "DistanceTag"
+        distTag.Size = UDim2.new(1, 100, 0, 20)
+        distTag.Position = UDim2.new(0.5, -50, 1, 5)
+        distTag.BackgroundTransparency = 1
+        distTag.Text = "120 st"
+        distTag.TextColor3 = Color3.fromRGB(200, 200, 200)
+        distTag.Font = Enum.Font.GothamBold
+        distTag.TextSize = 12
+        distTag.Parent = overlay
+        Prev.DistanceTag = distTag
+
+        -- Update Loop
+        Prev.Conn = RunService.RenderStepped:Connect(function()
+            local BS = WallHack.Visuals.BoxSettings
+            local NS = WallHack.Visuals.NameSettings
+
+            -- Rotate dummy slowly
+            if dummy and dummy.PrimaryPart then
+                -- dummy:SetPrimaryPartCFrame(dummy.PrimaryPart.CFrame * CFrame.Angles(0, math.rad(1), 0))
+            end
+
+            local boxColor = SafeColor(BS.Color, Color3.fromRGB(255,255,255))
+            local boxTrans = tonumber(BS.Transparency) or 0.7
+            local boxThick = tonumber(BS.Thickness) or 1
+
+            for _, line in pairs(Prev.Box) do
+                if line then
+                    line.BackgroundColor3 = boxColor
+                    line.BackgroundTransparency = boxTrans
+                    if line.Name == "Top" or line.Name == "Bottom" then
+                        line.Size = UDim2.new(1, 0, 0, boxThick)
+                    else
+                        line.Size = UDim2.new(0, boxThick, 1, 0)
+                    end
+                end
+            end
+
+            Prev.NameTag.Text = "keydim4293"
+            Prev.NameTag.TextColor3 = SafeColor(NS.Color, Color3.fromRGB(255,255,255))
+            Prev.NameTag.TextSize = tonumber(NS.Size) or 14
+            
+            Prev.DistanceTag.Visible = NS.ShowDistance
+            Prev.HealthBg.Visible = NS.ShowHealth
+            Prev.WeaponTag.Visible = true
+
+            if Prev.HealthFill then
+                Prev.HealthFill.Size = UDim2.new(1, 0, 0.65, 0) -- fake health 65%
+            end
+        end)
+    end
+
+    local function StopESPPreview()
+        local Prev = WallHack.Internal.ESPPreview
+        if Prev.Conn then
+            pcall(function() Prev.Conn:Disconnect() end)
+            Prev.Conn = nil
+        end
+        if Prev.ScreenGui then
+            pcall(function() Prev.ScreenGui:Destroy() end)
+            Prev.ScreenGui = nil
+        end
     end
 
     -- ========================================================================
@@ -1250,7 +1531,7 @@ local okInit, errInit = pcall(function()
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LocalPlayer then UnWrap(v) end
         end
-        StopHUD(); StopSelfESP()
+        StopHUD(); StopSelfESP(); StopESPPreview()
     end
     WallHack.Functions.Restart = function()
         ReWrapToken += 1
@@ -1272,6 +1553,14 @@ local okInit, errInit = pcall(function()
     WallHack.Functions.StartSelfESP   = StartSelfESP
     WallHack.Functions.StopSelfESP    = StopSelfESP
     WallHack.Functions.RefreshSelfESP = refreshSelfESP
+
+    WallHack.Functions.StartESPPreview = StartESPPreview
+    WallHack.Functions.StopESPPreview  = StopESPPreview
+    WallHack.Functions.SetESPPreviewEnabled = function(v)
+        WallHack.Visuals.ESPPreview = WallHack.Visuals.ESPPreview or {}
+        WallHack.Visuals.ESPPreview.Enabled = v and true or false
+        if v then StartESPPreview() else StopESPPreview() end
+    end
 
     WallHack.Functions.SetSelfESPEnabled = function(v)
         WallHack.Visuals.SelfESP.Enabled = v and true or false
@@ -1336,6 +1625,7 @@ if not okInit then
     for _, k in ipairs({
         "Exit","Restart","StartHUD","StopHUD","SetHUDEnabled",
         "StartSelfESP","StopSelfESP","RefreshSelfESP",
+        "StartESPPreview","StopESPPreview","SetESPPreviewEnabled",
         "SetSelfESPEnabled","SetSelfESPChamsEnabled","SetSelfESPChinaHatEnabled",
         "SetChinaHatMaterial","ForceMaterialRefresh",
         "ApplyGlowToAll","ApplyGlowForPlayer",
@@ -1349,7 +1639,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v13 (updated defaults)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v14 (ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1528,7 +1818,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v13")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v14")
 end
 
 -- ============================================================================
@@ -1602,6 +1892,7 @@ do
             vis_name_enabled = "Enabled", vis_name_color = "Color",
             vis_name_size = "Size", vis_name_distance = "Show Distance",
             vis_name_health = "Show Health",
+            vis_esp_preview = "ESP Preview",
 
             tt_vis_enabled = "Master switch for boxes, chams, tracers, name tags",
             tt_vis_team = "Uses Aimbot's Team Check settings",
@@ -1671,6 +1962,7 @@ do
             tt_vis_name_size = "Text size in pixels",
             tt_vis_name_distance = "Append distance in studs",
             tt_vis_name_health = "Append current health",
+            tt_vis_esp_preview = "Show a live 3D preview of the ESP in a separate window",
         }
         local ru = {
             vis_wallhack = "Wallhack", vis_boxes = "Боксы", vis_hud = "HUD",
@@ -1731,6 +2023,7 @@ do
             vis_name_enabled = "Включены", vis_name_color = "Цвет",
             vis_name_size = "Размер", vis_name_distance = "Показывать дистанцию",
             vis_name_health = "Показывать здоровье",
+            vis_esp_preview = "Превью ESP",
 
             tt_vis_enabled = "Главный выключатель боксов, чамсов, трассеров, имён",
             tt_vis_team = "Использует настройки команды из Aimbot",
@@ -1800,6 +2093,7 @@ do
             tt_vis_name_size = "Размер текста",
             tt_vis_name_distance = "Добавить дистанцию",
             tt_vis_name_health = "Добавить текущее здоровье",
+            tt_vis_esp_preview = "Показывает живое 3D-превью ESP в отдельном окне",
         }
         for k, v in pairs(en) do UI.L.en[k] = v end
         for k, v in pairs(ru) do UI.L.ru[k] = v end
@@ -1855,6 +2149,8 @@ visWH:AddToggle({ Name = "vis_team_check", Value = WallHack.Settings.TeamCheck,
     Callback = function(v) WallHack.Settings.TeamCheck = v end, Tooltip = "tt_vis_team" })
 visWH:AddToggle({ Name = "vis_alive_check", Value = WallHack.Settings.AliveCheck,
     Callback = function(v) WallHack.Settings.AliveCheck = v end, Tooltip = "tt_vis_alive" })
+visWH:AddToggle({ Name = "vis_esp_preview", Value = false,
+    Callback = function(v) WallHack.Functions.SetESPPreviewEnabled(v) end, Tooltip = "tt_vis_esp_preview" })
 
 local visBox = VisualsTab:CreateSection({ Name = "vis_boxes" })
 visBox:AddToggle({ Name = "vis_box_enabled", Value = WallHack.Visuals.BoxSettings.Enabled,
@@ -2014,4 +2310,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v13 (updated defaults)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v14 (ESP Preview)")
