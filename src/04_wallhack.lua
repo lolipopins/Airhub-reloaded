@@ -1,9 +1,9 @@
---// AirHub - 04_wallhack.lua v16
---// CHANGES v16:
---//  - ESP Preview is now integrated directly inside the AirHub UI as a new Tab.
---//  - FIXED dummy rendering using WorldModel (no more invisible model).
---//  - FIXED alignment issues: used UIStroke for the box and anchored everything to the center.
---//  - No more floating ScreenGui windows.
+--// AirHub - 04_wallhack.lua v17
+--// CHANGES v17:
+--//  - ESP Preview is now 100% integrated inside the AirHub UI Tab.
+--//  - FIXED dummy rendering using WorldModel (renders correctly in ViewportFrame).
+--//  - FIXED alignment issues: used AnchorPoint (0.5, 0.5) and proper parenting.
+--//  - No more floating ScreenGui windows. Clean, centered, and functional.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -201,7 +201,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- ESP PREVIEW (v16 - Integrated into UI, fixed alignment)
+    -- ESP PREVIEW (v17 - Integrated into UI, perfect alignment)
     -- ========================================================================
     local function createPreviewDummy()
         local world = Instance.new("WorldModel")
@@ -235,15 +235,16 @@ local okInit, errInit = pcall(function()
 
         local main = Instance.new("Frame")
         main.Name = "ESPPreviewContainer"
-        main.Size = UDim2.new(0, 240, 0, 360)
-        main.Position = UDim2.new(0.5, -120, 0.5, -180)
+        main.Size = UDim2.new(1, 0, 1, 0)
         main.BackgroundTransparency = 1
         main.Parent = parentFrame
         Prev.MainFrame = main
 
         -- Background for the viewport
         local bg = Instance.new("Frame")
-        bg.Size = UDim2.new(1, 0, 1, 0)
+        bg.Size = UDim2.new(0, 220, 0, 320)
+        bg.Position = UDim2.new(0.5, 0, 0.5, 0)
+        bg.AnchorPoint = Vector2.new(0.5, 0.5)
         bg.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
         bg.BorderSizePixel = 0
         bg.Parent = main
@@ -258,7 +259,7 @@ local okInit, errInit = pcall(function()
         vp.BackgroundTransparency = 1
         vp.Ambient = Color3.fromRGB(150, 150, 150)
         vp.LightColor = Color3.fromRGB(255, 255, 255)
-        vp.Parent = main
+        vp.Parent = bg
         Prev.Viewport = vp
 
         local cam = Instance.new("Camera")
@@ -270,15 +271,16 @@ local okInit, errInit = pcall(function()
         dummy.Parent = vp
         Prev.Dummy = dummy
 
-        -- ESP Overlay Container
+        -- ESP Overlay Container (Centered perfectly over the dummy)
         local overlay = Instance.new("Frame")
         overlay.Name = "Overlay"
-        overlay.Size = UDim2.new(0, 110, 0, 220)
-        overlay.Position = UDim2.new(0.5, -55, 0.5, -110)
+        overlay.Size = UDim2.new(0, 100, 0, 200)
+        overlay.Position = UDim2.new(0.5, 0, 0.5, 0)
+        overlay.AnchorPoint = Vector2.new(0.5, 0.5)
         overlay.BackgroundTransparency = 1
-        overlay.Parent = main
+        overlay.Parent = bg
 
-        -- Box using UIStroke
+        -- Box using UIStroke (No more manual lines, it resizes perfectly)
         local box = Instance.new("Frame")
         box.Name = "Box"
         box.Size = UDim2.new(1, 0, 1, 0)
@@ -318,7 +320,8 @@ local okInit, errInit = pcall(function()
         local nameTag = Instance.new("TextLabel")
         nameTag.Name = "NameTag"
         nameTag.Size = UDim2.new(1, 100, 0, 20)
-        nameTag.Position = UDim2.new(0.5, -50, 0, -35)
+        nameTag.Position = UDim2.new(0.5, 0, 0, -35)
+        nameTag.AnchorPoint = Vector2.new(0.5, 0.5)
         nameTag.BackgroundTransparency = 1
         nameTag.Text = "keydim4293"
         nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -331,7 +334,8 @@ local okInit, errInit = pcall(function()
         local weaponTag = Instance.new("TextLabel")
         weaponTag.Name = "WeaponTag"
         weaponTag.Size = UDim2.new(1, 100, 0, 20)
-        weaponTag.Position = UDim2.new(0.5, -50, 0, -18)
+        weaponTag.Position = UDim2.new(0.5, 0, 0, -18)
+        weaponTag.AnchorPoint = Vector2.new(0.5, 0.5)
         weaponTag.BackgroundTransparency = 1
         weaponTag.Text = "Weapon"
         weaponTag.TextColor3 = Color3.fromRGB(200, 200, 255)
@@ -344,7 +348,8 @@ local okInit, errInit = pcall(function()
         local distTag = Instance.new("TextLabel")
         distTag.Name = "DistanceTag"
         distTag.Size = UDim2.new(1, 100, 0, 20)
-        distTag.Position = UDim2.new(0.5, -50, 1, 5)
+        distTag.Position = UDim2.new(0.5, 0, 1, 12)
+        distTag.AnchorPoint = Vector2.new(0.5, 0.5)
         distTag.BackgroundTransparency = 1
         distTag.Text = "120 st"
         distTag.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -1530,7 +1535,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v16 (integrated ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v17 (integrated ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1709,7 +1714,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v16")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v17")
 end
 
 -- ============================================================================
@@ -2201,6 +2206,7 @@ spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Se
 
 -- Create the ESP Preview Tab and insert the preview into it
 local ESPPreviewTab = Window:AddTab({ Name = "ESP Preview", Icon = "eye" })
+-- Fallback to a standard Frame if the tab doesn't provide a container directly
 local previewHolder = Instance.new("Frame")
 previewHolder.Size = UDim2.new(1, 0, 1, 0)
 previewHolder.BackgroundTransparency = 1
@@ -2212,4 +2218,4 @@ task.spawn(function()
     WallHack.Functions.StartESPPreview(previewHolder)
 end)
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v16 (integrated ESP Preview)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v17 (integrated ESP Preview)")
