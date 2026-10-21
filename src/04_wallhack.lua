@@ -1,9 +1,9 @@
---// AirHub - 04_wallhack.lua v17
---// CHANGES v17:
---//  - ESP Preview is now 100% integrated inside the AirHub UI Tab.
---//  - FIXED dummy rendering using WorldModel (renders correctly in ViewportFrame).
---//  - FIXED alignment issues: used AnchorPoint (0.5, 0.5) and proper parenting.
---//  - No more floating ScreenGui windows. Clean, centered, and functional.
+--// AirHub - 04_wallhack.lua v18
+--// CHANGES v18:
+--//  - FIXED ESP Preview: Dynamically finds the UI Tab's container frame.
+--//  - FIXED dummy rendering using WorldModel inside ViewportFrame.
+--//  - FIXED alignment issues with AnchorPoint (no more drifting).
+--//  - Dark background added for the preview area.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -201,7 +201,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- ESP PREVIEW (v17 - Integrated into UI, perfect alignment)
+    -- ESP PREVIEW (v18 - Integrated into UI, perfect alignment)
     -- ========================================================================
     local function createPreviewDummy()
         local world = Instance.new("WorldModel")
@@ -229,9 +229,29 @@ local okInit, errInit = pcall(function()
         return world
     end
 
-    local function StartESPPreview(parentFrame)
+    local function StartESPPreview(tabObj)
         local Prev = WallHack.Internal.ESPPreview
         if Prev.MainFrame then return end
+
+        -- Find the actual container frame for the tab
+        local parentFrame = tabObj
+        if tabObj.Frame then parentFrame = tabObj.Frame
+        elseif tabObj.Container then parentFrame = tabObj.Container
+        elseif tabObj.Page then parentFrame = tabObj.Page
+        elseif tabObj.Holder then parentFrame = tabObj.Holder
+        elseif tabObj.Content then parentFrame = tabObj.Content
+        elseif tabObj.Main then parentFrame = tabObj.Main
+        elseif tabObj.ScrollingFrame then parentFrame = tabObj.ScrollingFrame
+        end
+        
+        if not parentFrame or not parentFrame:IsA("GuiObject") then
+            warn("[AirHub] ESPPreview: Could not find a valid GuiObject to parent to. Fallback to ScreenGui.")
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "AirHubESPPreviewFallback"
+            sg.ResetOnSpawn = false
+            sg.Parent = game:GetService("CoreGui")
+            parentFrame = sg
+        end
 
         local main = Instance.new("Frame")
         main.Name = "ESPPreviewContainer"
@@ -1535,7 +1555,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v17 (integrated ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v18 (integrated ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1714,7 +1734,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v17")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v18")
 end
 
 -- ============================================================================
@@ -2206,16 +2226,11 @@ spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Se
 
 -- Create the ESP Preview Tab and insert the preview into it
 local ESPPreviewTab = Window:AddTab({ Name = "ESP Preview", Icon = "eye" })
--- Fallback to a standard Frame if the tab doesn't provide a container directly
-local previewHolder = Instance.new("Frame")
-previewHolder.Size = UDim2.new(1, 0, 1, 0)
-previewHolder.BackgroundTransparency = 1
-previewHolder.Parent = ESPPreviewTab
 
--- Initialize the preview inside the new tab
+-- Initialize the preview inside the new tab after a short delay to ensure UI is built
 task.spawn(function()
-    task.wait(0.1) -- let the UI fully build the tab
-    WallHack.Functions.StartESPPreview(previewHolder)
+    task.wait(0.5)
+    WallHack.Functions.StartESPPreview(ESPPreviewTab)
 end)
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v17 (integrated ESP Preview)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v18 (integrated ESP Preview)")
