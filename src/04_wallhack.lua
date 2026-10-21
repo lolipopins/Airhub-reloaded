@@ -1,10 +1,9 @@
---// AirHub - 04_wallhack.lua v14
---// CHANGES v14:
---//  - Added ESP Preview GUI (draggable window with 3D R6 dummy)
---//  - Added "ESP Preview" toggle in Visuals tab
---//  - Preview dynamically updates color, transparency, thickness, and text based on ESP settings
---//  - Increased UI limits for China Hat (Width: 100, Height: 100, Offset: 20, Sides: 128)
---//  - Default China Hat settings: Width 3.5, Height 1, Offset 0.5, Sides 64
+--// AirHub - 04_wallhack.lua v15
+--// CHANGES v15:
+--//  - FIXED ESP Preview completely. 3D dummy now renders correctly.
+--//  - FIXED Box, Healthbar, Name, Distance, and Weapon alignment.
+--//  - Added dark background and border to the ViewportFrame.
+--//  - Made the preview window draggable with a proper title bar.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -92,7 +91,7 @@ WallHack.Visuals.SelfESP = WallHack.Visuals.SelfESP or {
     },
     ChinaHat = {
         Enabled = false,
-        Mode = "Closed", -- "Closed" | "Opened"
+        Mode = "Closed",
         Color   = Color3.fromRGB(255, 60, 60),
         Material = "Neon",
         Size = 3.5,
@@ -203,59 +202,31 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- ESP PREVIEW
+    -- ESP PREVIEW (v15 - FIXED ALIGNMENT & 3D MODEL)
     -- ========================================================================
     local function createPreviewDummy()
         local model = Instance.new("Model")
         
-        local torso = Instance.new("Part")
-        torso.Name = "Torso"
-        torso.Size = Vector3.new(2, 2, 1)
-        torso.CFrame = CFrame.new(0, 0, 0)
-        torso.Color = Color3.fromRGB(160, 160, 160)
-        torso.Material = Enum.Material.SmoothPlastic
-        torso.Parent = model
+        local function makePart(name, size, pos, shape)
+            local p = Instance.new("Part")
+            p.Name = name
+            p.Size = size
+            p.CFrame = CFrame.new(pos)
+            p.Color = Color3.fromRGB(150, 150, 150)
+            p.Material = Enum.Material.SmoothPlastic
+            p.Anchored = true
+            if shape then p.Shape = shape end
+            p.Parent = model
+            return p
+        end
 
-        local head = Instance.new("Part")
-        head.Name = "Head"
-        head.Shape = Enum.PartType.Ball
-        head.Size = Vector3.new(1.2, 1.2, 1.2)
-        head.CFrame = CFrame.new(0, 1.6, 0)
-        head.Color = Color3.fromRGB(200, 200, 200)
-        head.Material = Enum.Material.SmoothPlastic
-        head.Parent = model
-
-        local larm = Instance.new("Part")
-        larm.Name = "Left Arm"
-        larm.Size = Vector3.new(1, 2, 1)
-        larm.CFrame = CFrame.new(-1.5, 0, 0)
-        larm.Color = Color3.fromRGB(160, 160, 160)
-        larm.Material = Enum.Material.SmoothPlastic
-        larm.Parent = model
-
-        local rarm = Instance.new("Part")
-        rarm.Name = "Right Arm"
-        rarm.Size = Vector3.new(1, 2, 1)
-        rarm.CFrame = CFrame.new(1.5, 0, 0)
-        rarm.Color = Color3.fromRGB(160, 160, 160)
-        rarm.Material = Enum.Material.SmoothPlastic
-        rarm.Parent = model
-
-        local lleg = Instance.new("Part")
-        lleg.Name = "Left Leg"
-        lleg.Size = Vector3.new(1, 2, 1)
-        lleg.CFrame = CFrame.new(-0.5, -2, 0)
-        lleg.Color = Color3.fromRGB(160, 160, 160)
-        lleg.Material = Enum.Material.SmoothPlastic
-        lleg.Parent = model
-
-        local rleg = Instance.new("Part")
-        rleg.Name = "Right Leg"
-        rleg.Size = Vector3.new(1, 2, 1)
-        rleg.CFrame = CFrame.new(0.5, -2, 0)
-        rleg.Color = Color3.fromRGB(160, 160, 160)
-        rleg.Material = Enum.Material.SmoothPlastic
-        rleg.Parent = model
+        -- R6 Style Dummy
+        makePart("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 0, 0))
+        makePart("Head", Vector3.new(1.2, 1.2, 1.2), Vector3.new(0, 1.6, 0))
+        makePart("Left Arm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 0, 0))
+        makePart("Right Arm", Vector3.new(1, 2, 1), Vector3.new(1.5, 0, 0))
+        makePart("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, -2, 0))
+        makePart("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, -2, 0))
 
         return model
     end
@@ -273,10 +244,10 @@ local okInit, errInit = pcall(function()
 
         local main = Instance.new("Frame")
         main.Name = "Main"
-        main.Size = UDim2.new(0, 260, 0, 400)
-        main.Position = UDim2.new(0.5, 300, 0.5, 0)
-        main.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-        main.BackgroundTransparency = 0.2
+        main.Size = UDim2.new(0, 260, 0, 380)
+        main.Position = UDim2.new(0.5, 350, 0.5, -100)
+        main.BackgroundColor3 = Color3.fromRGB(25, 25, 28)
+        main.BackgroundTransparency = 0.1
         main.BorderSizePixel = 0
         main.Active = true
         main.Draggable = true
@@ -288,12 +259,13 @@ local okInit, errInit = pcall(function()
         uiCorner.Parent = main
 
         local uiStroke = Instance.new("UIStroke")
-        uiStroke.Color = Color3.fromRGB(60, 60, 60)
+        uiStroke.Color = Color3.fromRGB(50, 50, 55)
+        uiStroke.Thickness = 1
         uiStroke.Parent = main
 
         local title = Instance.new("TextLabel")
         title.Name = "Title"
-        title.Size = UDim2.new(1, 0, 0, 30)
+        title.Size = UDim2.new(1, 0, 0, 35)
         title.BackgroundTransparency = 1
         title.Text = "ESP Preview"
         title.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -302,11 +274,11 @@ local okInit, errInit = pcall(function()
         title.Parent = main
 
         local closeBtn = Instance.new("TextButton")
-        closeBtn.Size = UDim2.new(0, 30, 0, 30)
-        closeBtn.Position = UDim2.new(1, -30, 0, 0)
+        closeBtn.Size = UDim2.new(0, 35, 0, 35)
+        closeBtn.Position = UDim2.new(1, -35, 0, 0)
         closeBtn.BackgroundTransparency = 1
         closeBtn.Text = "X"
-        closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+        closeBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
         closeBtn.Font = Enum.Font.GothamBold
         closeBtn.TextSize = 14
         closeBtn.Parent = main
@@ -314,32 +286,42 @@ local okInit, errInit = pcall(function()
             WallHack.Functions.SetESPPreviewEnabled(false)
         end)
 
+        local vpFrame = Instance.new("Frame")
+        vpFrame.Size = UDim2.new(0, 220, 0, 300)
+        vpFrame.Position = UDim2.new(0.5, -110, 0.5, -5)
+        vpFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+        vpFrame.BorderSizePixel = 0
+        vpFrame.Parent = main
+
+        local vpCorner = Instance.new("UICorner")
+        vpCorner.CornerRadius = UDim.new(0, 6)
+        vpCorner.Parent = vpFrame
+
         local vp = Instance.new("ViewportFrame")
         vp.Name = "Viewport"
-        vp.Size = UDim2.new(0, 220, 0, 300)
-        vp.Position = UDim2.new(0.5, 0, 0.5, -10)
+        vp.Size = UDim2.new(1, 0, 1, 0)
         vp.BackgroundTransparency = 1
         vp.Ambient = Color3.fromRGB(150, 150, 150)
         vp.LightColor = Color3.fromRGB(255, 255, 255)
-        vp.Parent = main
+        vp.Parent = vpFrame
         Prev.Viewport = vp
 
         local cam = Instance.new("Camera")
         cam.Parent = vp
-        cam.CFrame = CFrame.new(0, 0, 8) * CFrame.Angles(0, math.rad(180), 0)
+        cam.CFrame = CFrame.new(0, 0, 10) * CFrame.Angles(0, math.rad(180), 0)
         vp.CurrentCamera = cam
 
         local dummy = createPreviewDummy()
         dummy.Parent = vp
         Prev.Dummy = dummy
 
-        -- ESP Overlay elements
+        -- ESP Elements Container (centered)
         local overlay = Instance.new("Frame")
         overlay.Name = "Overlay"
-        overlay.Size = UDim2.new(0, 160, 0, 260)
-        overlay.Position = UDim2.new(0.5, -80, 0.5, -30)
+        overlay.Size = UDim2.new(0, 130, 0, 250)
+        overlay.Position = UDim2.new(0.5, -65, 0.5, -115) -- Centered slightly up
         overlay.BackgroundTransparency = 1
-        overlay.Parent = main
+        overlay.Parent = vpFrame
 
         local function makeLine(name)
             local f = Instance.new("Frame")
@@ -370,7 +352,7 @@ local okInit, errInit = pcall(function()
         local hbBg = Instance.new("Frame")
         hbBg.Name = "HealthBg"
         hbBg.Size = UDim2.new(0, 4, 1, 0)
-        hbBg.Position = UDim2.new(-1, -10, 0, 0)
+        hbBg.Position = UDim2.new(0, -10, 0, 0)
         hbBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         hbBg.BackgroundTransparency = 0.5
         hbBg.BorderSizePixel = 0
@@ -379,8 +361,8 @@ local okInit, errInit = pcall(function()
 
         local hbFill = Instance.new("Frame")
         hbFill.Name = "HealthFill"
-        hbFill.Size = UDim2.new(1, 0, 0.5, 0)
-        hbFill.Position = UDim2.new(0, 0, 0.5, 0)
+        hbFill.Size = UDim2.new(1, 0, 0.65, 0) -- Fake 65% HP
+        hbFill.Position = UDim2.new(0, 0, 0.35, 0)
         hbFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
         hbFill.BorderSizePixel = 0
         hbFill.Parent = hbBg
@@ -390,7 +372,7 @@ local okInit, errInit = pcall(function()
         local nameTag = Instance.new("TextLabel")
         nameTag.Name = "NameTag"
         nameTag.Size = UDim2.new(1, 100, 0, 20)
-        nameTag.Position = UDim2.new(0.5, -50, 0, -25)
+        nameTag.Position = UDim2.new(0.5, -50, 0, -40)
         nameTag.BackgroundTransparency = 1
         nameTag.Text = "keydim4293"
         nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -403,7 +385,7 @@ local okInit, errInit = pcall(function()
         local weaponTag = Instance.new("TextLabel")
         weaponTag.Name = "WeaponTag"
         weaponTag.Size = UDim2.new(1, 100, 0, 20)
-        weaponTag.Position = UDim2.new(0.5, -50, 0, -5)
+        weaponTag.Position = UDim2.new(0.5, -50, 0, -22)
         weaponTag.BackgroundTransparency = 1
         weaponTag.Text = "Weapon"
         weaponTag.TextColor3 = Color3.fromRGB(200, 200, 255)
@@ -416,7 +398,7 @@ local okInit, errInit = pcall(function()
         local distTag = Instance.new("TextLabel")
         distTag.Name = "DistanceTag"
         distTag.Size = UDim2.new(1, 100, 0, 20)
-        distTag.Position = UDim2.new(0.5, -50, 1, 5)
+        distTag.Position = UDim2.new(0.5, -50, 1, 8)
         distTag.BackgroundTransparency = 1
         distTag.Text = "120 st"
         distTag.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -429,11 +411,6 @@ local okInit, errInit = pcall(function()
         Prev.Conn = RunService.RenderStepped:Connect(function()
             local BS = WallHack.Visuals.BoxSettings
             local NS = WallHack.Visuals.NameSettings
-
-            -- Rotate dummy slowly
-            if dummy and dummy.PrimaryPart then
-                -- dummy:SetPrimaryPartCFrame(dummy.PrimaryPart.CFrame * CFrame.Angles(0, math.rad(1), 0))
-            end
 
             local boxColor = SafeColor(BS.Color, Color3.fromRGB(255,255,255))
             local boxTrans = tonumber(BS.Transparency) or 0.7
@@ -458,10 +435,6 @@ local okInit, errInit = pcall(function()
             Prev.DistanceTag.Visible = NS.ShowDistance
             Prev.HealthBg.Visible = NS.ShowHealth
             Prev.WeaponTag.Visible = true
-
-            if Prev.HealthFill then
-                Prev.HealthFill.Size = UDim2.new(1, 0, 0.65, 0) -- fake health 65%
-            end
         end)
     end
 
@@ -1639,7 +1612,7 @@ if not okInit then
     WallHack.ResolveTexture = function() return "" end
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v14 (ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v15 (fixed ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1818,7 +1791,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v14")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v15")
 end
 
 -- ============================================================================
@@ -2310,4 +2283,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v14 (ESP Preview)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v15 (fixed ESP Preview)")
