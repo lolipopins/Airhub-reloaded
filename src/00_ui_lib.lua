@@ -1,6 +1,5 @@
-
 --=============================================================
--- airhubUI v1.7.3 — Fixed: config save crash (Elements in pcall), NaN guards
+-- airhubUI v1.8.0 — Added: Sub-tabs, Rainbow Speed & Persistence, AirHub Config Support, UI Polish
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -16,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.7.3",
+    Version = "1.8.0",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -32,7 +31,7 @@ local Config = {
 
 -- ══════════════════════════════════════════════════════════════
 -- LOCALIZATION
--- ══════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════════════
 local L = {
     en = {
         tab_settings = "Settings", tab_configs = "Configs", tab_binds = "Binds",
@@ -261,9 +260,6 @@ local L = {
     },
 }
 
--- ══════════════════════════════════════════════════════════════
--- T()
--- ══════════════════════════════════════════════════════════════
 local function T(key, ...)
     if not key then return "" end
     local lang = L[Config.Language or "en"] or L.en
@@ -1167,7 +1163,8 @@ local function buildColorpickerUI(parent, opts)
     local rainbowSpeed = opts.RainbowSpeed or 1
     local onChange = opts.OnChange or function() end
     local W = opts.Width or 240
-    local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,300)}, parent)
+    local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,320)}, parent)
+    
     local sv = new("Frame", {BackgroundColor3 = Color3.fromHSV(h,1,1), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,110), ClipsDescendants = true,
         ZIndex = (parent.ZIndex or 1) + 10}, root)
@@ -1180,6 +1177,7 @@ local function buildColorpickerUI(parent, opts)
     local valO = new("Frame", {BackgroundColor3 = Color3.fromRGB(0,0,0),
         BackgroundTransparency = 1-v, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0),
         ZIndex = (parent.ZIndex or 1) + 13}, sv)
+    
     local hue = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,118), Size = UDim2.new(1,0,0,12),
         ZIndex = (parent.ZIndex or 1) + 10}, root)
@@ -1192,6 +1190,7 @@ local function buildColorpickerUI(parent, opts)
         ColorSequenceKeypoint.new(4/6, Color3.fromRGB(0,0,255)),
         ColorSequenceKeypoint.new(5/6, Color3.fromRGB(255,0,255)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(255,0,0))}}, hue)
+    
     local alphaBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,138), Size = UDim2.new(1,0,0,12),
         ClipsDescendants = true, ZIndex = (parent.ZIndex or 1) + 10}, root)
@@ -1213,11 +1212,14 @@ local function buildColorpickerUI(parent, opts)
         AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(1-alpha,0,0.5,0),
         Size = UDim2.new(0,14,0,14), ZIndex = (parent.ZIndex or 1) + 13}, alphaBg)
     addCorner(alphaKnob, UDim.new(1,0)); addStroke(alphaKnob, Theme.Accent, 2)
+    
     local hex = new("TextBox", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,160),
         Size = UDim2.new(1,0,0,24), Font = Config.CurrentFontFamily, Text = "", TextSize = 11,
         ClearTextOnFocus = false, ZIndex = (parent.ZIndex or 1) + 10}, root)
     themeBg(hex, "ElementHover"); themeText(hex, "Text")
     addCorner(hex, UDim.new(0,6)); addPadding(hex, 8)
+    
+    -- Rainbow Toggle Row
     local rbRow = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,192),
         Size = UDim2.new(1,0,0,28), ZIndex = (parent.ZIndex or 1) + 10}, root)
     themeBg(rbRow, "ElementHover"); addCorner(rbRow, UDim.new(0,6))
@@ -1236,6 +1238,38 @@ local function buildColorpickerUI(parent, opts)
     addCorner(rbKnob, UDim.new(1,0))
     local rbToggle = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
         Text = "", ZIndex = (parent.ZIndex or 1) + 13}, rbRow)
+        
+    -- Rainbow Speed Slider
+    local rbSpeedFrame = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,226),
+        Size = UDim2.new(1,0,0,34), ZIndex = (parent.ZIndex or 1) + 10}, root)
+    themeBg(rbSpeedFrame, "ElementHover"); addCorner(rbSpeedFrame, UDim.new(0,6))
+    local rbSpeedLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,10,0,4),
+        Size = UDim2.new(0.6,-10,0,14), Font = Config.CurrentFontFamily, Text = "Rainbow Speed",
+        TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = (parent.ZIndex or 1) + 11}, rbSpeedFrame)
+    themeText(rbSpeedLbl, "SubText")
+    local rbSpeedVal = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-40,0,4),
+        Size = UDim2.new(0,30,0,14), Font = Config.CurrentFontFamily, Text = tostring(rainbowSpeed),
+        TextSize = 10, TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right,
+        ZIndex = (parent.ZIndex or 1) + 11}, rbSpeedFrame)
+    local rbSpeedTrack = new("Frame", {BorderSizePixel = 0,
+        Position = UDim2.new(0,10,1,-12), Size = UDim2.new(1,-20,0,4)}, rbSpeedFrame)
+    themeBg(rbSpeedTrack, "Panel"); addCorner(rbSpeedTrack, UDim.new(1,0))
+    local rbSpeedFill = new("Frame", {BorderSizePixel = 0,
+        Size = UDim2.new((rainbowSpeed - 0.1) / 4.9,0,1,0)}, rbSpeedTrack)
+    themeBg(rbSpeedFill, "Accent"); addCorner(rbSpeedFill, UDim.new(1,0))
+    local rbSpeedKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new((rainbowSpeed - 0.1) / 4.9,0,0.5,0),
+        Size = UDim2.new(0,10,0,10)}, rbSpeedTrack)
+    addCorner(rbSpeedKnob, UDim.new(1,0)); addStroke(rbSpeedKnob, Theme.Accent, 2)
+    
+    local function updateSpeedVis(val)
+        local rel = math.clamp((val - 0.1) / 4.9, 0, 1)
+        rbSpeedFill.Size = UDim2.new(rel,0,1,0)
+        rbSpeedKnob.Position = UDim2.new(rel,0,0.5,0)
+        rbSpeedVal.Text = string.format("%.1f", val)
+    end
+
     local rainbowCtrl = {
         active = rainbowEnabled, speed = rainbowSpeed, root = root,
         keepAlive = opts.KeepAlive or false,
@@ -1254,6 +1288,7 @@ local function buildColorpickerUI(parent, opts)
         end,
     }
     table.insert(RainbowControllers, rainbowCtrl)
+    
     local function hexStr(c) return string.format("#%02X%02X%02X",
         math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)) end
     local function applyMain()
@@ -1265,6 +1300,7 @@ local function buildColorpickerUI(parent, opts)
         if hex and hex.Parent then hex.Text = hexStr(color) end
     end
     applyMain()
+    
     rbToggle.MouseButton1Click:Connect(function()
         rainbowEnabled = not rainbowEnabled
         tween(rbSw, {BackgroundColor3 = rainbowEnabled and Theme.Accent or Color3.fromRGB(214, 218, 226)})
@@ -1277,7 +1313,8 @@ local function buildColorpickerUI(parent, opts)
             pcall(onChange, color, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed})
         end
     end)
-    local svDrag, hueDrag, alphaDrag = false, false, false
+    
+    local svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
     local function disableRainbow()
         if rainbowEnabled then
             rainbowEnabled = false; rainbowCtrl.active = false
@@ -1286,6 +1323,18 @@ local function buildColorpickerUI(parent, opts)
             pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         end
     end
+    
+    rbSpeedTrack.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            speedDrag = true
+            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
+            rainbowSpeed = 0.1 + 4.9 * rel
+            updateSpeedVis(rainbowSpeed)
+            rainbowCtrl.speed = rainbowSpeed
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
+    end)
+    
     sv.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
             svDrag = true; disableRainbow()
@@ -1337,10 +1386,17 @@ local function buildColorpickerUI(parent, opts)
             end
             pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
         end
+        if speedDrag then
+            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
+            rainbowSpeed = 0.1 + 4.9 * rel
+            updateSpeedVis(rainbowSpeed)
+            rainbowCtrl.speed = rainbowSpeed
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
     end))
     _T(UserInputService.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            svDrag, hueDrag, alphaDrag = false, false, false
+            svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
         end
     end))
     hex.FocusLost:Connect(function()
@@ -1354,9 +1410,22 @@ local function buildColorpickerUI(parent, opts)
             applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         else hex.Text = hexStr(color) end
     end)
+    
     return root, {
-        Get = function() return color, alpha end,
-        Set = function(c, a) color = c; if a then alpha = a end; h, s, v = Color3.toHSV(c); applyMain() end,
+        Get = function() return color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed} end,
+        Set = function(c, a, rbData) 
+            color = c; if a then alpha = a end; h, s, v = Color3.toHSV(c); 
+            if rbData then
+                rainbowEnabled = rbData.rainbowEnabled or false
+                rainbowSpeed = rbData.rainbowSpeed or 1
+                rainbowCtrl.active = rainbowEnabled
+                rainbowCtrl.speed = rainbowSpeed
+                tween(rbSw, {BackgroundColor3 = rainbowEnabled and Theme.Accent or Color3.fromRGB(214, 218, 226)})
+                tween(rbKnob, {Position = rainbowEnabled and UDim2.new(1,-14,0,2) or UDim2.new(0,2,0,2)})
+                updateSpeedVis(rainbowSpeed)
+            end
+            applyMain() 
+        end,
         GetRainbow = function() return rainbowEnabled, rainbowSpeed end,
         Destroy = function() rainbowCtrl.active = false; rainbowCtrl.keepAlive = false end,
     }
@@ -1937,6 +2006,8 @@ end
 local function createColorpicker(section, opts)
     local color = opts.Default or Color3.fromRGB(77, 107, 254)
     local alpha = opts.DefaultAlpha or 0
+    local rainbowEnabled = opts.Rainbow or false
+    local rainbowSpeed = opts.RainbowSpeed or 1
     local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
     themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
     addStroke(row, Theme.Outline, 1, 0.35)
@@ -1952,7 +2023,7 @@ local function createColorpicker(section, opts)
     local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
     click.MouseButton1Click:Connect(function()
         local sub = new("Frame", {BackgroundColor3 = Theme.Panel, BorderSizePixel = 0,
-            Size = UDim2.new(0,280,0,300), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
+            Size = UDim2.new(0,280,0,320), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
         addCorner(sub, UDim.new(0,10)); addStroke(sub, Theme.Outline, 1, 0.1)
         local subTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,16,0,10),
             Size = UDim2.new(1,-28,0,16), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
@@ -1960,12 +2031,17 @@ local function createColorpicker(section, opts)
             ZIndex = Config.PopupZ + 21}, sub)
         themeText(subTitle, "Text")
         local cpHolder = new("Frame", {BackgroundTransparency = 1,
-            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,240),
+            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,260),
             ZIndex = Config.PopupZ + 21}, sub)
         local cpApi = buildColorpickerUI(cpHolder, {
             Color = color, Alpha = alpha, Width = 240,
-            OnChange = function(c, a)
+            Rainbow = rainbowEnabled, RainbowSpeed = rainbowSpeed,
+            OnChange = function(c, a, rbData)
                 color = c; if a then alpha = a end
+                if rbData then
+                    rainbowEnabled = rbData.rainbowEnabled
+                    rainbowSpeed = rbData.rainbowSpeed
+                end
                 swatch.BackgroundColor3 = c
                 if opts.Callback then pcall(opts.Callback, c, a) end
             end,
@@ -1986,7 +2062,7 @@ local function createColorpicker(section, opts)
                 local vp = workspace.CurrentCamera.ViewportSize
                 local x, y = ap.X + as.X + 8, ap.Y
                 if x + 280 > vp.X then x = ap.X - 288 end
-                if y + 300 > vp.Y then y = vp.Y - 300 - 8 end
+                if y + 320 > vp.Y then y = vp.Y - 320 - 8 end
                 if y < 4 then y = 4 end
                 sub.Position = UDim2.fromOffset(x, y)
             end
@@ -1994,12 +2070,22 @@ local function createColorpicker(section, opts)
     end)
     local meta = {Name = T(opts.Name or ""), Type = "Colorpicker", Element = row,
         Options = opts.Options, State = getSectionState(section),
-        Set = function(c, a) color = c; if a then alpha = a end; swatch.BackgroundColor3 = c end}
+        Set = function(c, a, rbData) 
+            color = c; if a then alpha = a end; swatch.BackgroundColor3 = c 
+            if rbData then
+                rainbowEnabled = rbData.rainbowEnabled
+                rainbowSpeed = rbData.rainbowSpeed
+            end
+        end}
     attachRowBinds(row, nil, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {Set = meta.Set, Get = function() return color, alpha end, _meta = meta,
-        _rawName = opts.Name, _type = "Colorpicker"}
+    return {
+        Set = meta.Set, 
+        Get = function() return color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed} end, 
+        _meta = meta,
+        _rawName = opts.Name, _type = "Colorpicker"
+    }
 end
 
 local function createKeybind(section, opts)
@@ -2167,10 +2253,10 @@ local function createSection(tab, opts)
 end
 
 -- ══════════════════════════════════════════════════════════════
--- TAB
+-- TAB & SUB-TAB
 -- ══════════════════════════════════════════════════════════════
 local function createTab(window, opts)
-    local tab = {Name = T(opts.Name or ""), Sections = {}, _nameKey = opts.Name, _icon = opts.Icon}
+    local tab = {Name = T(opts.Name or ""), Sections = {}, _nameKey = opts.Name, _icon = opts.Icon, SubTabs = {}}
     local btn = new("TextButton", {BorderSizePixel = 0, Size = UDim2.new(1,-12,0,32),
         Font = Config.CurrentFontFamily, Text = "  " .. (opts.Icon and opts.Icon .. "  " or "") .. T(opts.Name or ""),
         TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, AutoButtonColor = false}, window.SidebarList)
@@ -2181,16 +2267,31 @@ local function createTab(window, opts)
     themeBg(dot, "Accent"); addCorner(dot, UDim.new(1,0))
     local page = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Visible = false},
         window.PageHolder)
+    
+    -- Sub-tab structure
+    local subTabBar = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,32),
+        CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.X,
+        ScrollBarThickness = 0, Visible = false, ZIndex = 5}, page)
+    new("UIListLayout", {Padding = UDim.new(0,6), FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Center}, subTabBar)
+    
+    local subTabContent = new("Frame", {BackgroundTransparency = 1,
+        Position = UDim2.new(0,0,0,32), Size = UDim2.new(1,0,1,-32), ZIndex = 4}, page)
+    
+    local defaultContent = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), ZIndex = 4}, page)
+    
     local sl = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(0.5,-5,1,0),
         CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollBarThickness = 0}, page)
+        ScrollBarThickness = 0}, defaultContent)
     local sr = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
         Position = UDim2.new(0.5,5,0,0), Size = UDim2.new(0.5,-5,1,0),
         CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollBarThickness = 0}, page)
+        ScrollBarThickness = 0}, defaultContent)
     new("UIListLayout", {Padding = UDim.new(0,10)}, sl)
     new("UIListLayout", {Padding = UDim.new(0,10)}, sr)
+    
     tab.Page, tab.ColumnLeft, tab.ColumnRight = page, sl, sr
     tab.Button, tab.AccentDot = btn, dot
     tab._refresh = function()
@@ -2206,6 +2307,78 @@ local function createTab(window, opts)
         tab.Name = T(opts.Name or "")
     end
     btn.MouseButton1Click:Connect(function() window:SelectTab(tab) end)
+    
+    local activeSubTab = nil
+    function tab:CreateSubTab(o)
+        o = o or {}
+        if #self.SubTabs == 0 then
+            -- First subtab created: hide default layout, show subtab bar
+            defaultContent.Visible = false
+            subTabBar.Visible = true
+        end
+        
+        local subTabObj = {
+            Name = T(o.Name or "SubTab"), _nameKey = o.Name, Tab = tab,
+            Sections = {}, _icon = o.Icon, Button = nil, Page = nil
+        }
+        
+        local sbBtn = new("TextButton", {BorderSizePixel = 0, Size = UDim2.new(0,0,0,26),
+            AutomaticSize = Enum.AutomaticSize.X,
+            Font = Config.CurrentFontFamily, Text = (o.Icon and o.Icon .. " " or "") .. T(o.Name or "SubTab"),
+            TextSize = 11, AutoButtonColor = false, ZIndex = 6}, subTabBar)
+        addCorner(sbBtn, UDim.new(0,6)); addPadding(sbBtn, 12, 0)
+        themeBg(sbBtn, "Element"); themeText(sbBtn, "SubText")
+        
+        local sbPage = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Visible = false, ZIndex = 4}, subTabContent)
+        
+        local sl2 = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
+            Position = UDim2.new(0,0,0,0), Size = UDim2.new(0.5,-5,1,0),
+            CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollBarThickness = 0}, sbPage)
+        local sr2 = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
+            Position = UDim2.new(0.5,5,0,0), Size = UDim2.new(0.5,-5,1,0),
+            CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollBarThickness = 0}, sbPage)
+        new("UIListLayout", {Padding = UDim.new(0,10)}, sl2)
+        new("UIListLayout", {Padding = UDim.new(0,10)}, sr2)
+        
+        subTabObj.ColumnLeft, subTabObj.ColumnRight = sl2, sr2
+        subTabObj.Button, subTabObj.Page = sbBtn, sbPage
+        
+        subTabObj._refresh = function()
+            if activeSubTab == subTabObj then
+                sbBtn.BackgroundColor3 = Theme.Accent; sbBtn.TextColor3 = Theme.OnAccent
+            else
+                sbBtn.BackgroundColor3 = Theme.Element; sbBtn.TextColor3 = Theme.SubText
+            end
+        end
+        
+        sbBtn.MouseButton1Click:Connect(function()
+            if activeSubTab == subTabObj then return end
+            if activeSubTab then
+                activeSubTab.Page.Visible = false
+                activeSubTab._refresh()
+            end
+            activeSubTab = subTabObj
+            activeSubTab.Page.Visible = true
+            activeSubTab._refresh()
+        end)
+        
+        table.insert(self.SubTabs, subTabObj)
+        
+        if #self.SubTabs == 1 then
+            activeSubTab = subTabObj
+            activeSubTab.Page.Visible = true
+            activeSubTab._refresh()
+        end
+        
+        function subTabObj:CreateSection(secOpts)
+            return createSection(self, secOpts)
+        end
+        
+        return subTabObj
+    end
+    
     function tab:CreateSection(o) return createSection(self, o) end
     return tab
 end
@@ -2223,6 +2396,14 @@ local function createWindow(opts)
 
     local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)
     local HIDDEN_POS = UDim2.new(0.5, 0, 0.5, 30)
+
+    -- Outer shadow container
+    local shadowFrame = new("Frame", {Name = "Shadow", BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = BASE_POS,
+        Size = UDim2.new(0,Config.WindowWidth+20,0,Config.WindowHeight+20),
+        BackgroundColor3 = Color3.fromRGB(0,0,0), BackgroundTransparency = 0.8,
+        ZIndex = 0}, gui)
+    addCorner(shadowFrame, UDim.new(0, 18))
 
     local main = new("Frame", {Name = "Main", BorderSizePixel = 0,
         AnchorPoint = Vector2.new(0.5, 0.5), Position = BASE_POS,
@@ -2299,6 +2480,33 @@ local function createWindow(opts)
                         end
                     end
                     section.Frame.Visible = (not isActive) or sectionMatches > 0
+                end
+            end
+            -- Also search subtabs
+            for _, subTab in ipairs(tab.SubTabs) do
+                for _, section in ipairs(subTab.Sections) do
+                    if section.Frame and section.Frame.Parent then
+                        local sectionMatches = 0
+                        for _, child in ipairs(section.Content:GetChildren()) do
+                            if child:IsA("GuiObject") then
+                                local nameLbl = RowNameLabels[child]
+                                if not isActive then
+                                    child.Visible = true; sectionMatches = sectionMatches + 1
+                                    if nameLbl then highlightLabel(nameLbl, "") end
+                                else
+                                    local sn = child:GetAttribute("SearchName")
+                                    if sn and string.find(sn, q, 1, true) then
+                                        child.Visible = true; sectionMatches = sectionMatches + 1
+                                        if nameLbl then highlightLabel(nameLbl, q) end
+                                    else
+                                        child.Visible = false
+                                        if nameLbl then highlightLabel(nameLbl, "") end
+                                    end
+                                end
+                            end
+                        end
+                        section.Frame.Visible = (not isActive) or sectionMatches > 0
+                    end
                 end
             end
         end
@@ -2448,8 +2656,12 @@ local function createWindow(opts)
         closeAllPopups(); gui.Enabled = true
         main.Position = HIDDEN_POS
         main.BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
+        shadowFrame.Position = HIDDEN_POS
+        shadowFrame.BackgroundTransparency = 1
         if animScale then animScale.Scale = 0.88 end
         tween(main, {Position = BASE_POS, BackgroundTransparency = Config.MenuTransparency},
+            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        tween(shadowFrame, {Position = BASE_POS, BackgroundTransparency = 0.8},
             Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
         if animScale then
             tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -2462,6 +2674,8 @@ local function createWindow(opts)
         tween(main, {Position = HIDDEN_POS,
             BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
             Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        tween(shadowFrame, {Position = HIDDEN_POS, BackgroundTransparency = 1},
+            Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         if animScale then
             tween(animScale, {Scale = 0.88}, Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         end
@@ -2470,6 +2684,8 @@ local function createWindow(opts)
                 gui.Enabled = false
                 main.Position = BASE_POS
                 main.BackgroundTransparency = Config.MenuTransparency
+                shadowFrame.Position = BASE_POS
+                shadowFrame.BackgroundTransparency = 0.8
                 if animScale then animScale.Scale = 1 end
                 self._hiding = false; self._showing = false
             end
@@ -2485,7 +2701,7 @@ local function createWindow(opts)
     end
 
     -- ────────────────────────────────────────────────────────────
-    -- v1.7.3: Element state persistence (robust)
+    -- Element state persistence
     -- ────────────────────────────────────────────────────────────
     local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
 
@@ -2520,45 +2736,58 @@ local function createWindow(opts)
             if isFiniteNum(v) then data.Config[k] = v
             elseif type(v) == "string" or type(v) == "boolean" then data.Config[k] = v end
         end
-        -- Elements (wrapped in pcall; if it fails, config still saves)
+        -- Elements
         local elemsOk, elems = pcall(function()
             local elems = {}
             for _, tab in ipairs(self.Tabs) do
                 local tabId = tab._nameKey or tab.Name
                 if tabId and not BUILTIN_TABS[tabId] then
                     local tabData = {}
-                    for _, section in ipairs(tab.Sections) do
-                        local secId = section._tKey or section.Name
-                        if secId then
-                            local secData = {}
-                            for _, el in ipairs(section.Elements) do
-                                local elId = el._rawName
-                                local elType = (el._meta and el._meta.Type) or el._type
-                                if elId and el.Get and elType then
-                                    if elType == "Colorpicker" then
-                                        local ok, c, a = pcall(el.Get)
-                                        if ok and typeof(c) == "Color3" then
-                                            secData[elId] = {r = c.R, g = c.G, b = c.B, alpha = isFiniteNum(a) and a or 0}
-                                        end
-                                    elseif elType == "Keybind" then
-                                        local ok, v = pcall(el.Get)
-                                        if ok then secData[elId] = serializeElemKey(v) end
-                                    elseif elType == "Button" then
-                                        -- skip (no persistent state)
-                                    else
-                                        local ok, v = pcall(el.Get)
-                                        if ok then
-                                            if type(v) == "boolean" or type(v) == "string" then
-                                                secData[elId] = v
-                                            elseif isFiniteNum(v) then
-                                                secData[elId] = v
+                    local function collectSections(tbl, sectionsList)
+                        for _, section in ipairs(sectionsList) do
+                            local secId = section._tKey or section.Name
+                            if secId then
+                                local secData = {}
+                                for _, el in ipairs(section.Elements) do
+                                    local elId = el._rawName
+                                    local elType = (el._meta and el._meta.Type) or el._type
+                                    if elId and el.Get and elType then
+                                        if elType == "Colorpicker" then
+                                            local ok, c, a, rbData = pcall(el.Get)
+                                            if ok and typeof(c) == "Color3" then
+                                                secData[elId] = {
+                                                    r = c.R, g = c.G, b = c.B, alpha = isFiniteNum(a) and a or 0,
+                                                    rainbowEnabled = rbData and rbData.rainbowEnabled or false,
+                                                    rainbowSpeed = rbData and rbData.rainbowSpeed or 1
+                                                }
+                                            end
+                                        elseif elType == "Keybind" then
+                                            local ok, v = pcall(el.Get)
+                                            if ok then secData[elId] = serializeElemKey(v) end
+                                        elseif elType == "Button" then
+                                            -- skip
+                                        else
+                                            local ok, v = pcall(el.Get)
+                                            if ok then
+                                                if type(v) == "boolean" or type(v) == "string" then
+                                                    secData[elId] = v
+                                                elseif isFiniteNum(v) then
+                                                    secData[elId] = v
+                                                end
                                             end
                                         end
                                     end
                                 end
+                                if next(secData) then tbl[secId] = secData end
                             end
-                            if next(secData) then tabData[secId] = secData end
                         end
+                    end
+                    collectSections(tabData, tab.Sections)
+                    for _, subTab in ipairs(tab.SubTabs) do
+                        local subId = "__sub_" .. (subTab._nameKey or subTab.Name)
+                        local subData = {}
+                        collectSections(subData, subTab.Sections)
+                        if next(subData) then tabData[subId] = subData end
                     end
                     if next(tabData) then elems[tabId] = tabData end
                 end
@@ -2597,7 +2826,7 @@ local function createWindow(opts)
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
         end
-        -- Elements (wrapped in pcall; import failure shouldn't break theme/config restore)
+        -- Elements
         if type(data.Elements) == "table" then
             local elemsOk, elemsErr = pcall(function()
                 for _, tab in ipairs(self.Tabs) do
@@ -2605,29 +2834,43 @@ local function createWindow(opts)
                     if tabId and not BUILTIN_TABS[tabId] then
                         local tabData = data.Elements[tabId]
                         if type(tabData) == "table" then
-                            for _, section in ipairs(tab.Sections) do
-                                local secId = section._tKey or section.Name
-                                local secData = secId and tabData[secId]
-                                if type(secData) == "table" then
-                                    for _, el in ipairs(section.Elements) do
-                                        local elId = el._rawName
-                                        local elType = (el._meta and el._meta.Type) or el._type
-                                        local savedVal = elId and secData[elId]
-                                        if elId and el.Set and elType and savedVal ~= nil then
-                                            if elType == "Colorpicker" then
-                                                if type(savedVal) == "table" and isFiniteNum(savedVal.r) then
-                                                    local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
-                                                    pcall(el.Set, c, savedVal.alpha or 0)
+                            local function applySections(tbl, sectionsList)
+                                for _, section in ipairs(sectionsList) do
+                                    local secId = section._tKey or section.Name
+                                    local secData = secId and tbl[secId]
+                                    if type(secData) == "table" then
+                                        for _, el in ipairs(section.Elements) do
+                                            local elId = el._rawName
+                                            local elType = (el._meta and el._meta.Type) or el._type
+                                            local savedVal = elId and secData[elId]
+                                            if elId and el.Set and elType and savedVal ~= nil then
+                                                if elType == "Colorpicker" then
+                                                    if type(savedVal) == "table" and isFiniteNum(savedVal.r) then
+                                                        local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
+                                                        local rbData = {
+                                                            rainbowEnabled = savedVal.rainbowEnabled or false,
+                                                            rainbowSpeed = savedVal.rainbowSpeed or 1
+                                                        }
+                                                        pcall(el.Set, c, savedVal.alpha or 0, rbData)
+                                                    end
+                                                elseif elType == "Keybind" then
+                                                    pcall(el.Set, deserializeElemKey(savedVal))
+                                                elseif elType == "Button" then
+                                                    -- skip
+                                                else
+                                                    pcall(el.Set, savedVal)
                                                 end
-                                            elseif elType == "Keybind" then
-                                                pcall(el.Set, deserializeElemKey(savedVal))
-                                            elseif elType == "Button" then
-                                                -- skip
-                                            else
-                                                pcall(el.Set, savedVal)
                                             end
                                         end
                                     end
+                                end
+                            end
+                            applySections(tabData, tab.Sections)
+                            for _, subTab in ipairs(tab.SubTabs) do
+                                local subId = "__sub_" .. (subTab._nameKey or subTab.Name)
+                                local subData = tabData[subId]
+                                if type(subData) == "table" then
+                                    applySections(subData, subTab.Sections)
                                 end
                             end
                         end
@@ -2641,6 +2884,21 @@ local function createWindow(opts)
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         return true
+    end
+
+    -- API for AirHub Integration
+    function window:GetUIState()
+        local str = self:ExportSettings()
+        if not str then return nil end
+        local ok, data = pcall(function() return HttpService:JSONDecode(str) end)
+        return ok and data or nil
+    end
+
+    function window:SetUIState(dataTable)
+        if type(dataTable) ~= "table" then return false end
+        local ok, str = pcall(function() return HttpService:JSONEncode(dataTable) end)
+        if not ok then return false end
+        return self:ImportSettings(str)
     end
 
     function window:SaveConfigToDisk(name)
@@ -2715,10 +2973,16 @@ local function createWindow(opts)
                 Config.TooltipDelay = math.clamp(v, 0, 1)
             elseif k == "WindowWidth" and type(v) == "number" then
                 Config.WindowWidth = math.clamp(v, Config.MinWidth, 1400)
-                if not minimized then main.Size = UDim2.new(0, Config.WindowWidth, 0, main.Size.Y.Offset) end
+                if not minimized then 
+                    main.Size = UDim2.new(0, Config.WindowWidth, 0, main.Size.Y.Offset) 
+                    shadowFrame.Size = UDim2.new(0, Config.WindowWidth + 20, 0, shadowFrame.Size.Y.Offset)
+                end
             elseif k == "WindowHeight" and type(v) == "number" then
                 Config.WindowHeight = math.clamp(v, Config.MinHeight, 1000)
-                if not minimized then main.Size = UDim2.new(0, main.Size.X.Offset, 0, Config.WindowHeight) end
+                if not minimized then 
+                    main.Size = UDim2.new(0, main.Size.X.Offset, 0, Config.WindowHeight) 
+                    shadowFrame.Size = UDim2.new(0, shadowFrame.Size.X.Offset, 0, Config.WindowHeight + 20)
+                end
             elseif k == "FontFamily" and type(v) == "string" then
                 if FontCatalog[v] then Config.CurrentFontFamily = FontCatalog[v]; Config.CurrentFontName = v; needFont = true end
             elseif k == "FontScale" and type(v) == "number" then
@@ -2740,16 +3004,17 @@ local function createWindow(opts)
     end
 
     -- drag
-    local drag, dStart, sPos
+    local drag, dStart, sPos, shadowPos
     titlebar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            drag = true; dStart = i.Position; sPos = main.Position; closeAllPopups()
+            drag = true; dStart = i.Position; sPos = main.Position; shadowPos = shadowFrame.Position; closeAllPopups()
         end
     end)
     _T(UserInputService.InputChanged:Connect(function(i)
         if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
             local d = i.Position - dStart
             main.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + d.X, sPos.Y.Scale, sPos.Y.Offset + d.Y)
+            shadowFrame.Position = UDim2.new(shadowPos.X.Scale, shadowPos.X.Offset + d.X, shadowPos.Y.Scale, shadowPos.Y.Offset + d.Y)
         end
     end))
     _T(UserInputService.InputEnded:Connect(function(i)
@@ -2765,8 +3030,10 @@ local function createWindow(opts)
     _T(UserInputService.InputChanged:Connect(function(i)
         if rz and i.UserInputType == Enum.UserInputType.MouseMovement then
             local d = i.Position - rStart
-            main.Size = UDim2.new(0, math.max(Config.MinWidth, rInit.X.Offset + d.X),
-                0, math.max(Config.MinHeight, rInit.Y.Offset + d.Y))
+            local newW = math.max(Config.MinWidth, rInit.X.Offset + d.X)
+            local newH = math.max(Config.MinHeight, rInit.Y.Offset + d.Y)
+            main.Size = UDim2.new(0, newW, 0, newH)
+            shadowFrame.Size = UDim2.new(0, newW + 20, 0, newH + 20)
         end
     end))
     _T(UserInputService.InputEnded:Connect(function(i)
