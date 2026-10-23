@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.9.1 — Fixed: Colorpicker "Done" button crash & Rainbow update
+-- airhubUI v1.9.2 — Fixed: Menu close (perf throttle), connection leaks
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.9.1",
+    Version = "1.9.2",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -27,6 +27,7 @@ local Config = {
     MenuTransparency = 0.06, TabTransparency = 0, SectionTransparency = 0, ElementTransparency = 0,
     NotificationDuration = 3, NotificationPosition = "top-right",
     TooltipDelay = 0.05,
+    RainbowCallbackInterval = 4, -- Throttle heavy callback to every N-th frame
 }
 
 -- ══════════════════════════════════════════════════════════════
@@ -687,6 +688,7 @@ local function _T(c) table.insert(AllConnections, c); return c end
 local BindRegistry, BindOrder = {}, {}
 local RainbowControllers = {}
 local PopupStack = {}
+local rainbowFrameCounter = 0
 
 local function getSafeParent()
     if gethui then
@@ -915,6 +917,7 @@ end))
 local rainbowTime = 0
 _T(RunService.RenderStepped:Connect(function(dt)
     if #RainbowControllers == 0 then return end
+    rainbowFrameCounter = rainbowFrameCounter + 1
     rainbowTime = (rainbowTime + dt * 0.20) % 1
     for i = #RainbowControllers, 1, -1 do
         local c = RainbowControllers[i]
@@ -922,7 +925,7 @@ _T(RunService.RenderStepped:Connect(function(dt)
         elseif not c.root or not c.root.Parent then
             if not c.keepAlive then table.remove(RainbowControllers, i) end
         elseif c.active and type(c.setFromRainbow) == "function" then
-            pcall(c.setFromRainbow, (rainbowTime * (c.speed or 1)) % 1)
+            pcall(c.setFromRainbow, (rainbowTime * (c.speed or 1)) % 1, rainbowFrameCounter)
         end
     end
 end))
@@ -1165,6 +1168,10 @@ local function buildColorpickerUI(parent, opts)
     local W = opts.Width or 260
     local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,390)}, parent)
     
+    -- Track connections for proper cleanup
+    local localConnections = {}
+    local function TC(c) table.insert(localConnections, c); _T(c); return c end
+    
     -- 1. Preview Swatch
     local previewBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,32), ClipsDescendants = true}, root)
@@ -1191,7 +1198,6 @@ local function buildColorpickerUI(parent, opts)
     local valO = new("Frame", {BackgroundColor3 = Color3.fromRGB(0,0,0),
         BackgroundTransparency = 1-v, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0)}, sv)
     
-    -- SV Knob
     local svKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0.5,
         AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(s,0,1-v,0), Size = UDim2.new(0,12,0,12)}, sv)
     addCorner(svKnob, UDim.new(1,0)); addStroke(svKnob, Theme.Outline, 2)
@@ -1236,7 +1242,6 @@ local function buildColorpickerUI(parent, opts)
     local inputHolder = new("Frame", {BackgroundTransparency = 1, Position = UDim2.new(0,0,0,212),
         Size = UDim2.new(1,0,0,50)}, root)
         
-    -- Hex Input
     local hexBg = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,0),
         Size = UDim2.new(1,0,0,22)}, inputHolder)
     themeBg(hexBg, "ElementHover"); addCorner(hexBg, UDim.new(0,4))
@@ -1249,7 +1254,6 @@ local function buildColorpickerUI(parent, opts)
         TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false}, hexBg)
     themeText(hexInp, "Text")
     
-    -- RGB Inputs
     local function makeRGBInput(xOff, w, name)
         local bg = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,xOff,0,26),
             Size = UDim2.new(0,w,0,22)}, inputHolder)
@@ -1326,8 +1330,8 @@ local function buildColorpickerUI(parent, opts)
     
     local rainbowCtrl = {
         active = rainbowEnabled, speed = rainbowSpeed, root = root,
-        keepAlive = true, -- Keep alive even if popup is destroyed
-        setFromRainbow = function(hv)
+        keepAlive = true,
+        setFromRainbow = function(hv, frame)
             h = hv; s = 1; v = 1
             color = Color3.fromHSV(h, s, v)
             if sv and sv.Parent then sv.BackgroundColor3 = Color3.fromHSV(h,1,1) end
@@ -1337,14 +1341,16 @@ local function buildColorpickerUI(parent, opts)
             if alphaFill and alphaFill.Parent then alphaFill.BackgroundColor3 = color end
             if previewColor and previewColor.Parent then previewColor.BackgroundColor3 = color end
             
-            local hexStr = string.format("#%02X%02X%02X",
-                math.floor(color.R*255+0.5), math.floor(color.G*255+0.5), math.floor(color.B*255+0.5))
-            if hexInp and hexInp.Parent then hexInp.Text = hexStr end
-            if rInp and rInp.Parent then rInp.Text = tostring(math.floor(color.R*255+0.5)) end
-            if gInp and gInp.Parent then gInp.Text = tostring(math.floor(color.G*255+0.5)) end
-            if bInp and bInp.Parent then bInp.Text = tostring(math.floor(color.B*255+0.5)) end
-            
-            pcall(onChange, color, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed})
+            -- Throttle the heavy callback
+            if frame and (frame % (Config.RainbowCallbackInterval or 4) == 0) then
+                local hexStr = string.format("#%02X%02X%02X",
+                    math.floor(color.R*255+0.5), math.floor(color.G*255+0.5), math.floor(color.B*255+0.5))
+                if hexInp and hexInp.Parent then hexInp.Text = hexStr end
+                if rInp and rInp.Parent then rInp.Text = tostring(math.floor(color.R*255+0.5)) end
+                if gInp and gInp.Parent then gInp.Text = tostring(math.floor(color.G*255+0.5)) end
+                if bInp and bInp.Parent then bInp.Text = tostring(math.floor(color.B*255+0.5)) end
+                pcall(onChange, color, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed})
+            end
         end,
     }
     table.insert(RainbowControllers, rainbowCtrl)
@@ -1379,10 +1385,8 @@ local function buildColorpickerUI(parent, opts)
         end
     end
     
-    -- Drag variables
     local svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
     
-    -- SV Drag
     sv.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             svDrag = true; disableRainbow()
@@ -1392,7 +1396,6 @@ local function buildColorpickerUI(parent, opts)
             pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         end
     end)
-    -- Hue Drag
     hueBg.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             hueDrag = true; disableRainbow()
@@ -1400,7 +1403,6 @@ local function buildColorpickerUI(parent, opts)
             applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         end
     end)
-    -- Alpha Drag
     alphaBg.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             alphaDrag = true
@@ -1415,7 +1417,6 @@ local function buildColorpickerUI(parent, opts)
             pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
         end
     end)
-    -- Speed Drag
     rbSpeedTrack.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             speedDrag = true
@@ -1427,20 +1428,19 @@ local function buildColorpickerUI(parent, opts)
         end
     end)
     
-    -- Global Input Changed
-    _T(UserInputService.InputChanged:Connect(function(i)
+    TC(UserInputService.InputChanged:Connect(function(i)
         if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
-        if svDrag then
+        if svDrag and sv and sv.Parent then
             local rx = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
             local ry = math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
             s, v = rx, 1 - ry; applyMain()
             pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         end
-        if hueDrag then
+        if hueDrag and hueBg and hueBg.Parent then
             h = math.clamp((i.Position.X - hueBg.AbsolutePosition.X) / hueBg.AbsoluteSize.X, 0, 1)
             applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
         end
-        if alphaDrag then
+        if alphaDrag and alphaBg and alphaBg.Parent then
             local rel = math.clamp((i.Position.X - alphaBg.AbsolutePosition.X) / alphaBg.AbsoluteSize.X, 0, 1)
             alpha = 1 - rel
             alphaKnob.Position = UDim2.new(rel, 0, 0.5, 0)
@@ -1451,7 +1451,7 @@ local function buildColorpickerUI(parent, opts)
             if previewColor then previewColor.BackgroundTransparency = alpha end
             pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
         end
-        if speedDrag then
+        if speedDrag and rbSpeedTrack and rbSpeedTrack.Parent then
             local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
             rainbowSpeed = 0.1 + 4.9 * rel
             updateSpeedVis(rainbowSpeed)
@@ -1459,13 +1459,12 @@ local function buildColorpickerUI(parent, opts)
             pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
         end
     end))
-    _T(UserInputService.InputEnded:Connect(function(i)
+    TC(UserInputService.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
         end
     end))
     
-    -- Hex Input Logic
     hexInp.FocusLost:Connect(function()
         local txt = hexInp.Text:gsub("#","")
         if #txt == 6 then
@@ -1479,10 +1478,9 @@ local function buildColorpickerUI(parent, opts)
                 return
             end
         end
-        hexInp.Text = hexStr(color) -- Revert
+        hexInp.Text = hexStr(color)
     end)
     
-    -- RGB Input Logic
     local function applyRGB()
         local r = tonumber(rInp.Text) or math.floor(color.R*255+0.5)
         local g = tonumber(gInp.Text) or math.floor(color.G*255+0.5)
@@ -1499,7 +1497,6 @@ local function buildColorpickerUI(parent, opts)
     gInp.FocusLost:Connect(applyRGB)
     bInp.FocusLost:Connect(applyRGB)
     
-    -- Rainbow Toggle Logic
     rbToggle.MouseButton1Click:Connect(function()
         rainbowEnabled = not rainbowEnabled
         tween(rbSw, {BackgroundColor3 = rainbowEnabled and Theme.Accent or Color3.fromRGB(214, 218, 226)})
@@ -1513,7 +1510,6 @@ local function buildColorpickerUI(parent, opts)
         end
     end)
     
-    -- Close Button
     closeBtn.MouseButton1Click:Connect(function()
         rainbowCtrl.keepAlive = false
         rainbowCtrl.active = false
@@ -1536,7 +1532,13 @@ local function buildColorpickerUI(parent, opts)
             applyMain() 
         end,
         GetRainbow = function() return rainbowEnabled, rainbowSpeed end,
-        Destroy = function() rainbowCtrl.active = false; rainbowCtrl.keepAlive = false end,
+        Destroy = function() 
+            rainbowCtrl.active = false
+            rainbowCtrl.keepAlive = false
+            svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
+            for _, c in ipairs(localConnections) do pcall(function() c:Disconnect() end) end
+            localConnections = {}
+        end,
     }
 end
 
@@ -2112,6 +2114,9 @@ local function createDropdown(section, opts)
     }
 end
 
+-- ══════════════════════════════════════════════════════════════
+-- CREATE COLORPICKER (row element)
+-- ══════════════════════════════════════════════════════════════
 local function createColorpicker(section, opts)
     local color = opts.Default or Color3.fromRGB(77, 107, 254)
     local alpha = opts.DefaultAlpha or 0
@@ -2149,16 +2154,18 @@ local function createColorpicker(section, opts)
         _rawName = opts.Name, _type = "Colorpicker"
     }
     
-    -- Main persistent rainbow controller for the swatch
     local swatchRainbowCtrl = {
         active = rainbowEnabled, speed = rainbowSpeed, root = swatch,
         keepAlive = true,
-        setFromRainbow = function(hv)
+        setFromRainbow = function(hv, frame)
             local c = Color3.fromHSV(hv, 1, 1)
             color = c
             swatch.BackgroundColor3 = c
             if activeCpApi then activeCpApi.Set(c, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed}) end
-            if opts.Callback then pcall(opts.Callback, c, alpha) end
+            -- Throttle the heavy theme callback
+            if frame and (frame % (Config.RainbowCallbackInterval or 4) == 0) then
+                if opts.Callback then pcall(opts.Callback, c, alpha) end
+            end
         end,
     }
     table.insert(RainbowControllers, swatchRainbowCtrl)
@@ -2209,7 +2216,6 @@ local function createColorpicker(section, opts)
                 sub.Position = UDim2.fromOffset(x, y)
             end
         end, function() 
-            -- When popup is closed externally (click outside, escape)
             if activeCpApi then activeCpApi.Destroy() end
             activeCpApi = nil
         end)
@@ -2401,7 +2407,6 @@ local function createTab(window, opts)
     local page = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Visible = false},
         window.PageHolder)
     
-    -- Sub-tab structure
     local subTabBar = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,32),
         CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.X,
@@ -2529,7 +2534,6 @@ local function createWindow(opts)
     local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)
     local HIDDEN_POS = UDim2.new(0.5, 0, 0.5, 30)
 
-    -- Outer shadow container
     local shadowFrame = new("Frame", {Name = "Shadow", BorderSizePixel = 0,
         AnchorPoint = Vector2.new(0.5, 0.5), Position = BASE_POS,
         Size = UDim2.new(0,Config.WindowWidth+20,0,Config.WindowHeight+20),
@@ -2614,7 +2618,6 @@ local function createWindow(opts)
                     section.Frame.Visible = (not isActive) or sectionMatches > 0
                 end
             end
-            -- Also search subtabs
             for _, subTab in ipairs(tab.SubTabs) do
                 for _, section in ipairs(subTab.Sections) do
                     if section.Frame and section.Frame.Parent then
@@ -2663,7 +2666,10 @@ local function createWindow(opts)
     end
     local btnClose = mkBtn("x", -32, Theme.Danger)
     local btnMin = mkBtn("-", -58, Theme.ElementHover)
-    btnClose.MouseButton1Click:Connect(function() gui.Enabled = false end)
+    -- X button uses window:Hide() for consistency
+    btnClose.MouseButton1Click:Connect(function()
+        if window and window.Hide then window:Hide() else gui.Enabled = false end
+    end)
     local minimized = false
     local restoreSize = UDim2.new(0,Config.WindowWidth,0,Config.WindowHeight)
     btnMin.MouseButton1Click:Connect(function()
@@ -2798,11 +2804,14 @@ local function createWindow(opts)
         if animScale then
             tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         end
-        task.delay(Config.MenuAnim, function() self._showing = false end)
+        task.delay(Config.MenuAnim + 0.02, function() 
+            if self._showing then self._showing = false end
+        end)
     end
     function window:Hide()
         if not gui.Enabled or self._hiding then return end
-        self._hiding = true; closeAllPopups()
+        self._hiding = true
+        pcall(closeAllPopups)
         tween(main, {Position = HIDDEN_POS,
             BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
             Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
@@ -2811,14 +2820,22 @@ local function createWindow(opts)
         if animScale then
             tween(animScale, {Scale = 0.88}, Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         end
+        local hideToken = self._hiding
         task.delay(Config.MenuCloseAnim + 0.02, function()
-            if self._hiding then
+            if self._hiding == hideToken then
                 gui.Enabled = false
                 main.Position = BASE_POS
                 main.BackgroundTransparency = Config.MenuTransparency
                 shadowFrame.Position = BASE_POS
                 shadowFrame.BackgroundTransparency = 0.8
                 if animScale then animScale.Scale = 1 end
+                self._hiding = false; self._showing = false
+            end
+        end)
+        -- Fallback: force close if animation hangs
+        task.delay(1.0, function()
+            if self._hiding == hideToken then
+                gui.Enabled = false
                 self._hiding = false; self._showing = false
             end
         end)
@@ -2832,9 +2849,6 @@ local function createWindow(opts)
         self.Name = text
     end
 
-    -- ────────────────────────────────────────────────────────────
-    -- Element state persistence
-    -- ────────────────────────────────────────────────────────────
     local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
 
     local function serializeElemKey(v)
@@ -2868,7 +2882,6 @@ local function createWindow(opts)
             if isFiniteNum(v) then data.Config[k] = v
             elseif type(v) == "string" or type(v) == "boolean" then data.Config[k] = v end
         end
-        -- Elements
         local elemsOk, elems = pcall(function()
             local elems = {}
             for _, tab in ipairs(self.Tabs) do
@@ -2958,7 +2971,6 @@ local function createWindow(opts)
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
         end
-        -- Elements
         if type(data.Elements) == "table" then
             local elemsOk, elemsErr = pcall(function()
                 for _, tab in ipairs(self.Tabs) do
@@ -3018,7 +3030,6 @@ local function createWindow(opts)
         return true
     end
 
-    -- API for AirHub Integration
     function window:GetUIState()
         local str = self:ExportSettings()
         if not str then return nil end
@@ -3135,7 +3146,6 @@ local function createWindow(opts)
         if Config[key] ~= nil then Config[key] = v; applyTransparencyTo(cat) end
     end
 
-    -- drag
     local drag, dStart, sPos, shadowPos
     titlebar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -3152,7 +3162,6 @@ local function createWindow(opts)
     _T(UserInputService.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end end))
 
-    -- resize
     local rz, rStart, rInit
     resizeHandle.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
