@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.9.2 — Fixed: Menu close (perf throttle), connection leaks
+-- airhubUI v1.9.3 — Fixed: RightShift toggle (removed _showing/_hiding deadlock)
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.9.2",
+    Version = "1.9.3",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -27,7 +27,7 @@ local Config = {
     MenuTransparency = 0.06, TabTransparency = 0, SectionTransparency = 0, ElementTransparency = 0,
     NotificationDuration = 3, NotificationPosition = "top-right",
     TooltipDelay = 0.05,
-    RainbowCallbackInterval = 4, -- Throttle heavy callback to every N-th frame
+    RainbowCallbackInterval = 4,
 }
 
 -- ══════════════════════════════════════════════════════════════
@@ -1168,11 +1168,9 @@ local function buildColorpickerUI(parent, opts)
     local W = opts.Width or 260
     local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,390)}, parent)
     
-    -- Track connections for proper cleanup
     local localConnections = {}
     local function TC(c) table.insert(localConnections, c); _T(c); return c end
     
-    -- 1. Preview Swatch
     local previewBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,32), ClipsDescendants = true}, root)
     addCorner(previewBg, UDim.new(0,6)); addStroke(previewBg, Theme.Outline, 1)
@@ -1187,7 +1185,6 @@ local function buildColorpickerUI(parent, opts)
     local previewColor = new("Frame", {BackgroundColor3 = color, BackgroundTransparency = alpha,
         BorderSizePixel = 0, Size = UDim2.new(1,0,1,0)}, previewBg)
     
-    -- 2. SV Square
     local sv = new("Frame", {BackgroundColor3 = Color3.fromHSV(h,1,1), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,40), Size = UDim2.new(1,0,0,120), ClipsDescendants = true}, root)
     addCorner(sv, UDim.new(0,6)); addStroke(sv, Theme.Outline, 1)
@@ -1202,7 +1199,6 @@ local function buildColorpickerUI(parent, opts)
         AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(s,0,1-v,0), Size = UDim2.new(0,12,0,12)}, sv)
     addCorner(svKnob, UDim.new(1,0)); addStroke(svKnob, Theme.Outline, 2)
     
-    -- 3. Hue Slider
     local hueBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,168), Size = UDim2.new(1,0,0,14), ClipsDescendants = true}, root)
     addCorner(hueBg, UDim.new(1,0)); addStroke(hueBg, Theme.Outline, 1)
@@ -1218,7 +1214,6 @@ local function buildColorpickerUI(parent, opts)
         AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(h,0,0.5,0), Size = UDim2.new(0,12,0,12)}, hueBg)
     addCorner(hueKnob, UDim.new(1,0)); addStroke(hueKnob, Theme.Outline, 2)
     
-    -- 4. Alpha Slider
     local alphaBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
         Position = UDim2.new(0,0,0,190), Size = UDim2.new(1,0,0,14), ClipsDescendants = true}, root)
     addCorner(alphaBg, UDim.new(1,0)); addStroke(alphaBg, Theme.Outline, 1)
@@ -1238,7 +1233,6 @@ local function buildColorpickerUI(parent, opts)
         AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(1-alpha,0,0.5,0), Size = UDim2.new(0,12,0,12)}, alphaBg)
     addCorner(alphaKnob, UDim.new(1,0)); addStroke(alphaKnob, Theme.Outline, 2)
     
-    -- 5. Inputs (Hex + RGB)
     local inputHolder = new("Frame", {BackgroundTransparency = 1, Position = UDim2.new(0,0,0,212),
         Size = UDim2.new(1,0,0,50)}, root)
         
@@ -1272,7 +1266,6 @@ local function buildColorpickerUI(parent, opts)
     local gInp = makeRGBInput((W-10)/3 + 5, (W-10)/3, "G")
     local bInp = makeRGBInput((W-10)/3*2 + 10, (W-10)/3, "B")
     
-    -- 6. Rainbow Toggle
     local rbRow = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,272),
         Size = UDim2.new(1,0,0,28)}, root)
     themeBg(rbRow, "ElementHover"); addCorner(rbRow, UDim.new(0,6))
@@ -1289,7 +1282,6 @@ local function buildColorpickerUI(parent, opts)
     addCorner(rbKnob, UDim.new(1,0))
     local rbToggle = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, rbRow)
     
-    -- 7. Rainbow Speed Slider
     local rbSpeedFrame = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,306),
         Size = UDim2.new(1,0,0,34)}, root)
     themeBg(rbSpeedFrame, "ElementHover"); addCorner(rbSpeedFrame, UDim.new(0,6))
@@ -1311,16 +1303,12 @@ local function buildColorpickerUI(parent, opts)
         Size = UDim2.new(0,10,0,10)}, rbSpeedTrack)
     addCorner(rbSpeedKnob, UDim.new(1,0)); addStroke(rbSpeedKnob, Theme.Accent, 2)
     
-    -- 8. Close Button
     local closeBtn = new("TextButton", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,350),
         Size = UDim2.new(1,0,0,28), Font = Config.CurrentFontFamily, Text = "Done", TextSize = 11,
         AutoButtonColor = false}, root)
     themeBg(closeBtn, "Accent"); closeBtn.TextColor3 = Theme.OnAccent
     addCorner(closeBtn, UDim.new(0,6))
     
-    -- ────────────────────────────────────────────────────────────
-    -- Logic
-    -- ────────────────────────────────────────────────────────────
     local function updateSpeedVis(val)
         local rel = math.clamp((val - 0.1) / 4.9, 0, 1)
         rbSpeedFill.Size = UDim2.new(rel,0,1,0)
@@ -1340,8 +1328,6 @@ local function buildColorpickerUI(parent, opts)
             if svKnob and svKnob.Parent then svKnob.Position = UDim2.new(1,0,0,0) end
             if alphaFill and alphaFill.Parent then alphaFill.BackgroundColor3 = color end
             if previewColor and previewColor.Parent then previewColor.BackgroundColor3 = color end
-            
-            -- Throttle the heavy callback
             if frame and (frame % (Config.RainbowCallbackInterval or 4) == 0) then
                 local hexStr = string.format("#%02X%02X%02X",
                     math.floor(color.R*255+0.5), math.floor(color.G*255+0.5), math.floor(color.B*255+0.5))
@@ -1364,11 +1350,9 @@ local function buildColorpickerUI(parent, opts)
         if satO and satO.Parent then satO.BackgroundTransparency = 1-s end
         if valO and valO.Parent then valO.BackgroundTransparency = 1-v end
         if svKnob and svKnob.Parent then svKnob.Position = UDim2.new(s,0,1-v,0) end
-        
         if alphaFill and alphaFill.Parent then alphaFill.BackgroundColor3 = color end
         if previewColor and previewColor.Parent then previewColor.BackgroundColor3 = color end
         if previewColor and previewColor.Parent then previewColor.BackgroundTransparency = alpha end
-        
         if hexInp and hexInp.Parent then hexInp.Text = hexStr(color) end
         if rInp and rInp.Parent then rInp.Text = tostring(math.floor(color.R*255+0.5)) end
         if gInp and gInp.Parent then gInp.Text = tostring(math.floor(color.G*255+0.5)) end
@@ -2114,9 +2098,6 @@ local function createDropdown(section, opts)
     }
 end
 
--- ══════════════════════════════════════════════════════════════
--- CREATE COLORPICKER (row element)
--- ══════════════════════════════════════════════════════════════
 local function createColorpicker(section, opts)
     local color = opts.Default or Color3.fromRGB(77, 107, 254)
     local alpha = opts.DefaultAlpha or 0
@@ -2162,7 +2143,6 @@ local function createColorpicker(section, opts)
             color = c
             swatch.BackgroundColor3 = c
             if activeCpApi then activeCpApi.Set(c, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed}) end
-            -- Throttle the heavy theme callback
             if frame and (frame % (Config.RainbowCallbackInterval or 4) == 0) then
                 if opts.Callback then pcall(opts.Callback, c, alpha) end
             end
@@ -2666,10 +2646,6 @@ local function createWindow(opts)
     end
     local btnClose = mkBtn("x", -32, Theme.Danger)
     local btnMin = mkBtn("-", -58, Theme.ElementHover)
-    -- X button uses window:Hide() for consistency
-    btnClose.MouseButton1Click:Connect(function()
-        if window and window.Hide then window:Hide() else gui.Enabled = false end
-    end)
     local minimized = false
     local restoreSize = UDim2.new(0,Config.WindowWidth,0,Config.WindowHeight)
     btnMin.MouseButton1Click:Connect(function()
@@ -2748,7 +2724,78 @@ local function createWindow(opts)
         SidebarList = sidebarScroll, PageHolder = pageInner, Overlay = Overlay,
         Tabs = {}, ActiveTab = nil, Name = opts.Name or "airhubUI", OnUnload = opts.OnUnload,
         Theme = Theme, Config = Config, _animScale = animScale,
-        _hiding = false, _showing = false, _titleLbl = titleLbl, _statusBar = statusBar}
+        _isOpen = true,
+        _hiding = false, _showing = false,
+        _titleLbl = titleLbl, _statusBar = statusBar}
+
+    -- ────────────────────────────────────────────────────────────
+    -- FIXED Show/Hide/Toggle with single _isOpen flag
+    -- ────────────────────────────────────────────────────────────
+    function window:Show()
+        if self._isOpen then return end
+        self._isOpen = true
+        self._hiding = false
+        closeAllPopups()
+        gui.Enabled = true
+        main.Position = HIDDEN_POS
+        main.BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
+        shadowFrame.Position = HIDDEN_POS
+        shadowFrame.BackgroundTransparency = 1
+        if animScale then animScale.Scale = 0.88 end
+        tween(main, {Position = BASE_POS, BackgroundTransparency = Config.MenuTransparency},
+            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        tween(shadowFrame, {Position = BASE_POS, BackgroundTransparency = 0.8},
+            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        if animScale then
+            tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        end
+    end
+    function window:Hide()
+        if not self._isOpen then return end
+        self._isOpen = false
+        self._hiding = true
+        pcall(closeAllPopups)
+        local animTime = Config.MenuCloseAnim
+        tween(main, {Position = HIDDEN_POS,
+            BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
+            animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        tween(shadowFrame, {Position = HIDDEN_POS, BackgroundTransparency = 1},
+            animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        if animScale then
+            tween(animScale, {Scale = 0.88}, animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        end
+        task.delay(animTime + 0.02, function()
+            if not self._isOpen then
+                gui.Enabled = false
+                main.Position = BASE_POS
+                main.BackgroundTransparency = Config.MenuTransparency
+                shadowFrame.Position = BASE_POS
+                shadowFrame.BackgroundTransparency = 0.8
+                if animScale then animScale.Scale = 1 end
+            end
+            self._hiding = false
+        end)
+        -- Safety fallback in case task.delay glitches
+        task.spawn(function()
+            task.wait(animTime + 0.5)
+            if not self._isOpen and gui.Enabled then
+                gui.Enabled = false
+                self._hiding = false
+            end
+        end)
+    end
+    function window:Toggle()
+        if self._isOpen then
+            self:Hide()
+        else
+            self:Show()
+        end
+    end
+
+    -- X close button uses Hide (consistent state)
+    btnClose.MouseButton1Click:Connect(function()
+        if window and window.Hide then window:Hide() else gui.Enabled = false end
+    end)
 
     function window:SetLanguage(lang)
         if not L[lang] then return false end
@@ -2788,61 +2835,6 @@ local function createWindow(opts)
         return t
     end
 
-    function window:Show()
-        if self._showing then return end
-        self._hiding = false; self._showing = true
-        closeAllPopups(); gui.Enabled = true
-        main.Position = HIDDEN_POS
-        main.BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
-        shadowFrame.Position = HIDDEN_POS
-        shadowFrame.BackgroundTransparency = 1
-        if animScale then animScale.Scale = 0.88 end
-        tween(main, {Position = BASE_POS, BackgroundTransparency = Config.MenuTransparency},
-            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-        tween(shadowFrame, {Position = BASE_POS, BackgroundTransparency = 0.8},
-            Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-        if animScale then
-            tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        end
-        task.delay(Config.MenuAnim + 0.02, function() 
-            if self._showing then self._showing = false end
-        end)
-    end
-    function window:Hide()
-        if not gui.Enabled or self._hiding then return end
-        self._hiding = true
-        pcall(closeAllPopups)
-        tween(main, {Position = HIDDEN_POS,
-            BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
-            Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        tween(shadowFrame, {Position = HIDDEN_POS, BackgroundTransparency = 1},
-            Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        if animScale then
-            tween(animScale, {Scale = 0.88}, Config.MenuCloseAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        end
-        local hideToken = self._hiding
-        task.delay(Config.MenuCloseAnim + 0.02, function()
-            if self._hiding == hideToken then
-                gui.Enabled = false
-                main.Position = BASE_POS
-                main.BackgroundTransparency = Config.MenuTransparency
-                shadowFrame.Position = BASE_POS
-                shadowFrame.BackgroundTransparency = 0.8
-                if animScale then animScale.Scale = 1 end
-                self._hiding = false; self._showing = false
-            end
-        end)
-        -- Fallback: force close if animation hangs
-        task.delay(1.0, function()
-            if self._hiding == hideToken then
-                gui.Enabled = false
-                self._hiding = false; self._showing = false
-            end
-        end)
-    end
-    function window:Toggle()
-        if gui.Enabled and not self._hiding then self:Hide() else self:Show() end
-    end
     function window:SetSearch(q) searchBox.Text = q or ""; searchBox:ReleaseFocus() end
     function window:SetTitle(text)
         if self._titleLbl then self._titleLbl.Text = text end
@@ -3189,6 +3181,9 @@ local function createWindow(opts)
     function window:Unload()
         if type(self.OnUnload) == "function" then pcall(self.OnUnload, self) end
         closeAllPopups()
+        self._isOpen = false
+        self._hiding = false
+        self._showing = false
         for _, c in ipairs(AllConnections) do pcall(function() c:Disconnect() end) end
         AllConnections = {}
         for k in pairs(BindRegistry) do BindRegistry[k] = nil end
