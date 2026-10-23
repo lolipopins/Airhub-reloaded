@@ -1,9 +1,9 @@
---// AirHub - 04_wallhack.lua v18
---// CHANGES v18:
---//  - FIXED ESP Preview: Dynamically finds the UI Tab's container frame.
---//  - FIXED dummy rendering using WorldModel inside ViewportFrame.
---//  - FIXED alignment issues with AnchorPoint (no more drifting).
---//  - Dark background added for the preview area.
+--// AirHub - 04_wallhack.lua v19
+--// CHANGES v19:
+--//  - REMOVED: ESP Preview tab and all related code.
+--//  - ADDED: Material Chams with presets (Neon Glow, Ice, Gold, Toxic, Fire, Ghost, Steel, Obsidian, Rainbow, Custom).
+--//  - Material Chams applies real Roblox materials to enemy BaseParts, with color/transparency/reflectance control.
+--//  - Auto-restore on death / disable / respawn.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 04_wallhack: core not loaded") return end
@@ -58,6 +58,18 @@ do
     WallHack.Visuals.GlowSettings = WallHack.Visuals.ChamsSettings
 end
 local Chams = WallHack.Visuals.ChamsSettings
+
+-- Material Chams (NEW)
+WallHack.Visuals.MaterialChamsSettings = WallHack.Visuals.MaterialChamsSettings or {
+    Enabled = false,
+    Preset = "Neon Glow",
+    Material = "Neon",
+    Color = Color3.fromRGB(255, 0, 255),
+    Transparency = 0.2,
+    Reflectance = 0,
+    Rainbow = false,
+    RainbowSpeed = 0.5,
+}
 
 WallHack.Visuals.HUDSettings = WallHack.Visuals.HUDSettings or {
     Enabled = false, Position = "TopLeft",
@@ -147,13 +159,20 @@ WallHack.Internal = WallHack.Internal or {
         ResolvedMaterial = Enum.Material.Neon,
         LastSchemaMaterial = nil, LastAppliedMaterial = nil,
     },
-    ESPPreview = {
-        MainFrame = nil, Conn = nil,
-        Box = nil, Stroke = nil, NameTag = nil, DistanceTag = nil, WeaponTag = nil,
-        HealthBg = nil, HealthFill = nil,
-        Viewport = nil, Dummy = nil,
-    }
+    MaterialChams = {
+        Originals = {},
+        LastTick = 0,
+        Conn = nil,
+    },
 }
+-- Ensure MaterialChams table exists even for old installs
+if not WallHack.Internal.MaterialChams then
+    WallHack.Internal.MaterialChams = { Originals = {}, LastTick = 0, Conn = nil }
+end
+-- Cleanup legacy ESP Preview internal (safe if exists)
+if WallHack.Internal.ESPPreview then
+    WallHack.Internal.ESPPreview = nil
+end
 WallHack.WrappedPlayers = WallHack.WrappedPlayers or {}
 WallHack.Functions      = WallHack.Functions      or {}
 
@@ -198,209 +217,6 @@ local okInit, errInit = pcall(function()
             return lt ~= tt
         end
         return true
-    end
-
-    -- ========================================================================
-    -- ESP PREVIEW (v18 - Integrated into UI, perfect alignment)
-    -- ========================================================================
-    local function createPreviewDummy()
-        local world = Instance.new("WorldModel")
-        
-        local function makePart(name, size, pos, shape)
-            local p = Instance.new("Part")
-            p.Name = name
-            p.Size = size
-            p.CFrame = CFrame.new(pos)
-            p.Color = Color3.fromRGB(150, 150, 150)
-            p.Material = Enum.Material.SmoothPlastic
-            p.Anchored = true
-            if shape then p.Shape = shape end
-            p.Parent = world
-            return p
-        end
-
-        makePart("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 0, 0))
-        makePart("Head", Vector3.new(1.2, 1.2, 1.2), Vector3.new(0, 1.6, 0), Enum.PartType.Ball)
-        makePart("Left Arm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 0, 0))
-        makePart("Right Arm", Vector3.new(1, 2, 1), Vector3.new(1.5, 0, 0))
-        makePart("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, -2, 0))
-        makePart("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, -2, 0))
-
-        return world
-    end
-
-    local function StartESPPreview(tabObj)
-        local Prev = WallHack.Internal.ESPPreview
-        if Prev.MainFrame then return end
-
-        -- Find the actual container frame for the tab
-        local parentFrame = tabObj
-        if tabObj.Frame then parentFrame = tabObj.Frame
-        elseif tabObj.Container then parentFrame = tabObj.Container
-        elseif tabObj.Page then parentFrame = tabObj.Page
-        elseif tabObj.Holder then parentFrame = tabObj.Holder
-        elseif tabObj.Content then parentFrame = tabObj.Content
-        elseif tabObj.Main then parentFrame = tabObj.Main
-        elseif tabObj.ScrollingFrame then parentFrame = tabObj.ScrollingFrame
-        end
-        
-        if not parentFrame or not parentFrame:IsA("GuiObject") then
-            warn("[AirHub] ESPPreview: Could not find a valid GuiObject to parent to. Fallback to ScreenGui.")
-            local sg = Instance.new("ScreenGui")
-            sg.Name = "AirHubESPPreviewFallback"
-            sg.ResetOnSpawn = false
-            sg.Parent = game:GetService("CoreGui")
-            parentFrame = sg
-        end
-
-        local main = Instance.new("Frame")
-        main.Name = "ESPPreviewContainer"
-        main.Size = UDim2.new(1, 0, 1, 0)
-        main.BackgroundTransparency = 1
-        main.Parent = parentFrame
-        Prev.MainFrame = main
-
-        -- Background for the viewport
-        local bg = Instance.new("Frame")
-        bg.Size = UDim2.new(0, 220, 0, 320)
-        bg.Position = UDim2.new(0.5, 0, 0.5, 0)
-        bg.AnchorPoint = Vector2.new(0.5, 0.5)
-        bg.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-        bg.BorderSizePixel = 0
-        bg.Parent = main
-        
-        local bgCorner = Instance.new("UICorner")
-        bgCorner.CornerRadius = UDim.new(0, 8)
-        bgCorner.Parent = bg
-
-        local vp = Instance.new("ViewportFrame")
-        vp.Name = "Viewport"
-        vp.Size = UDim2.new(1, 0, 1, 0)
-        vp.BackgroundTransparency = 1
-        vp.Ambient = Color3.fromRGB(150, 150, 150)
-        vp.LightColor = Color3.fromRGB(255, 255, 255)
-        vp.Parent = bg
-        Prev.Viewport = vp
-
-        local cam = Instance.new("Camera")
-        cam.Parent = vp
-        cam.CFrame = CFrame.new(0, -0.4, 8) * CFrame.Angles(0, math.rad(180), 0)
-        vp.CurrentCamera = cam
-
-        local dummy = createPreviewDummy()
-        dummy.Parent = vp
-        Prev.Dummy = dummy
-
-        -- ESP Overlay Container (Centered perfectly over the dummy)
-        local overlay = Instance.new("Frame")
-        overlay.Name = "Overlay"
-        overlay.Size = UDim2.new(0, 100, 0, 200)
-        overlay.Position = UDim2.new(0.5, 0, 0.5, 0)
-        overlay.AnchorPoint = Vector2.new(0.5, 0.5)
-        overlay.BackgroundTransparency = 1
-        overlay.Parent = bg
-
-        -- Box using UIStroke (No more manual lines, it resizes perfectly)
-        local box = Instance.new("Frame")
-        box.Name = "Box"
-        box.Size = UDim2.new(1, 0, 1, 0)
-        box.BackgroundTransparency = 1
-        box.BorderSizePixel = 0
-        box.Parent = overlay
-        Prev.Box = box
-
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Thickness = 1
-        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        stroke.Parent = box
-        Prev.Stroke = stroke
-
-        -- Health Bar
-        local hbBg = Instance.new("Frame")
-        hbBg.Name = "HealthBg"
-        hbBg.Size = UDim2.new(0, 4, 1, 0)
-        hbBg.Position = UDim2.new(0, -8, 0, 0)
-        hbBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        hbBg.BackgroundTransparency = 0.5
-        hbBg.BorderSizePixel = 0
-        hbBg.Parent = overlay
-        Prev.HealthBg = hbBg
-
-        local hbFill = Instance.new("Frame")
-        hbFill.Name = "HealthFill"
-        hbFill.Size = UDim2.new(1, 0, 0.65, 0)
-        hbFill.Position = UDim2.new(0, 0, 0.35, 0)
-        hbFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-        hbFill.BorderSizePixel = 0
-        hbFill.Parent = hbBg
-        Prev.HealthFill = hbFill
-
-        -- Name
-        local nameTag = Instance.new("TextLabel")
-        nameTag.Name = "NameTag"
-        nameTag.Size = UDim2.new(1, 100, 0, 20)
-        nameTag.Position = UDim2.new(0.5, 0, 0, -35)
-        nameTag.AnchorPoint = Vector2.new(0.5, 0.5)
-        nameTag.BackgroundTransparency = 1
-        nameTag.Text = "keydim4293"
-        nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
-        nameTag.Font = Enum.Font.GothamBold
-        nameTag.TextSize = 14
-        nameTag.Parent = overlay
-        Prev.NameTag = nameTag
-
-        -- Weapon
-        local weaponTag = Instance.new("TextLabel")
-        weaponTag.Name = "WeaponTag"
-        weaponTag.Size = UDim2.new(1, 100, 0, 20)
-        weaponTag.Position = UDim2.new(0.5, 0, 0, -18)
-        weaponTag.AnchorPoint = Vector2.new(0.5, 0.5)
-        weaponTag.BackgroundTransparency = 1
-        weaponTag.Text = "Weapon"
-        weaponTag.TextColor3 = Color3.fromRGB(200, 200, 255)
-        weaponTag.Font = Enum.Font.Gotham
-        weaponTag.TextSize = 12
-        weaponTag.Parent = overlay
-        Prev.WeaponTag = weaponTag
-
-        -- Distance
-        local distTag = Instance.new("TextLabel")
-        distTag.Name = "DistanceTag"
-        distTag.Size = UDim2.new(1, 100, 0, 20)
-        distTag.Position = UDim2.new(0.5, 0, 1, 12)
-        distTag.AnchorPoint = Vector2.new(0.5, 0.5)
-        distTag.BackgroundTransparency = 1
-        distTag.Text = "120 st"
-        distTag.TextColor3 = Color3.fromRGB(200, 200, 200)
-        distTag.Font = Enum.Font.GothamBold
-        distTag.TextSize = 12
-        distTag.Parent = overlay
-        Prev.DistanceTag = distTag
-
-        -- Update Loop
-        Prev.Conn = RunService.RenderStepped:Connect(function()
-            local BS = WallHack.Visuals.BoxSettings
-            local NS = WallHack.Visuals.NameSettings
-
-            if Prev.Stroke then
-                Prev.Stroke.Color = SafeColor(BS.Color, Color3.fromRGB(255,255,255))
-                Prev.Stroke.Transparency = 1 - (tonumber(BS.Transparency) or 0.7) 
-                Prev.Stroke.Thickness = tonumber(BS.Thickness) or 1
-            end
-
-            if Prev.NameTag then
-                Prev.NameTag.TextColor3 = SafeColor(NS.Color, Color3.fromRGB(255,255,255))
-                Prev.NameTag.TextSize = tonumber(NS.Size) or 14
-            end
-            
-            if Prev.DistanceTag then
-                Prev.DistanceTag.Visible = NS.ShowDistance
-            end
-            if Prev.HealthBg then
-                Prev.HealthBg.Visible = NS.ShowHealth
-            end
-        end)
     end
 
     -- ========================================================================
@@ -530,6 +346,26 @@ local okInit, errInit = pcall(function()
         if raw < 10 then return math.floor(raw * 1000 + 0.5) end
         return math.floor(raw + 0.5)
     end
+
+    -- ========================================================================
+    -- MATERIAL CHAMS PRESETS
+    -- ========================================================================
+    local MATERIAL_CHAMS_PRESETS = {
+        ["Neon Glow"] = { Material = "Neon",       Color = Color3.fromRGB(255, 0, 255),    Transparency = 0.2, Reflectance = 0,    Rainbow = false },
+        ["Ice"]       = { Material = "Glass",      Color = Color3.fromRGB(150, 220, 255),  Transparency = 0.4, Reflectance = 0.2,  Rainbow = false },
+        ["Gold"]      = { Material = "Metal",      Color = Color3.fromRGB(255, 200, 0),    Transparency = 0,   Reflectance = 0.3,  Rainbow = false },
+        ["Toxic"]     = { Material = "Neon",       Color = Color3.fromRGB(0, 255, 50),     Transparency = 0.3, Reflectance = 0,    Rainbow = false },
+        ["Fire"]      = { Material = "Neon",       Color = Color3.fromRGB(255, 100, 0),    Transparency = 0.1, Reflectance = 0,    Rainbow = false },
+        ["Ghost"]     = { Material = "ForceField", Color = Color3.fromRGB(255, 255, 255),  Transparency = 0.5, Reflectance = 0,    Rainbow = false },
+        ["Steel"]     = { Material = "Metal",      Color = Color3.fromRGB(180, 180, 180),  Transparency = 0,   Reflectance = 0.1,  Rainbow = false },
+        ["Obsidian"]  = { Material = "Slate",      Color = Color3.fromRGB(20, 20, 20),     Transparency = 0,   Reflectance = 0,    Rainbow = false },
+        ["Rainbow"]   = { Material = "Neon",       Color = Color3.fromRGB(255, 0, 0),      Transparency = 0.2, Reflectance = 0,    Rainbow = true  },
+        ["Custom"]    = nil,
+    }
+    local MATERIAL_CHAMS_PRESET_LIST = {
+        "Neon Glow", "Ice", "Gold", "Toxic", "Fire",
+        "Ghost", "Steel", "Obsidian", "Rainbow", "Custom",
+    }
 
     -- ========================================================================
     -- HUD
@@ -1045,7 +881,7 @@ local okInit, errInit = pcall(function()
     end
 
     -- ========================================================================
-    -- ENEMY CHAMS
+    -- ENEMY CHAMS (Highlight)
     -- ========================================================================
     local function removeEnemyTextureChams(data)
         if not data.TextureDecals then return end
@@ -1159,6 +995,149 @@ local okInit, errInit = pcall(function()
     local function ApplyGlowToAll()
         for _, plr in pairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer then ApplyGlowForPlayer(plr) end
+        end
+    end
+
+    -- ========================================================================
+    -- MATERIAL CHAMS (NEW)
+    -- ========================================================================
+    local function getMaterialChamsTargetColor(S, time)
+        if S.Rainbow then
+            local hue = (time * (S.RainbowSpeed or 0.5)) % 1
+            return Color3.fromHSV(hue, 1, 1)
+        end
+        return SafeColor(S.Color, Color3.fromRGB(255, 0, 255))
+    end
+
+    local function applyMaterialChamsToPlayer(plr, now)
+        if not plr or plr == LocalPlayer then return end
+        local data = WallHack.WrappedPlayers[plr.Name]
+        if not data then return end
+
+        local MC = WallHack.Internal.MaterialChams
+        local S  = WallHack.Visuals.MaterialChamsSettings
+
+        local shouldApply = WallHack.Settings.Enabled
+            and S.Enabled
+            and data.Checks.Alive
+            and data.Checks.Team
+
+        local char = plr.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if not (char and hum and hum.Health > 0) then shouldApply = false end
+
+        if not shouldApply then
+            restoreMaterialChams(plr)
+            return
+        end
+
+        local materialEnum = resolveMaterial(S.Material)
+        if not materialEnum then return end
+        local color = getMaterialChamsTargetColor(S, now or os.clock())
+        local trans = math.clamp(tonumber(S.Transparency) or 0, 0, 1)
+        local refl  = math.clamp(tonumber(S.Reflectance) or 0, 0, 1)
+
+        MC.Originals[plr.Name] = MC.Originals[plr.Name] or {}
+        local originals = MC.Originals[plr.Name]
+
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                if not originals[part] then
+                    originals[part] = {
+                        Material     = part.Material,
+                        Color        = part.Color,
+                        Transparency = part.Transparency,
+                        Reflectance  = part.Reflectance,
+                    }
+                end
+                pcall(function()
+                    if part.Material ~= materialEnum then
+                        stripMaterialOverrides(part)
+                        part.Material = materialEnum
+                    end
+                    if part.Color ~= color then part.Color = color end
+                    if part.Transparency ~= trans then part.Transparency = trans end
+                    if part.Reflectance ~= refl then part.Reflectance = refl end
+                end)
+            end
+        end
+    end
+
+    function restoreMaterialChams(plr)
+        if not plr then return end
+        local MC = WallHack.Internal.MaterialChams
+        local originals = MC.Originals[plr.Name]
+        if not originals then return end
+
+        local char = plr.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local o = originals[part]
+                    if o then
+                        pcall(function()
+                            part.Material     = o.Material
+                            part.Color        = o.Color
+                            part.Transparency = o.Transparency
+                            part.Reflectance  = o.Reflectance
+                        end)
+                    end
+                end
+            end
+        end
+
+        MC.Originals[plr.Name] = nil
+    end
+
+    local function ApplyMaterialChamsToAll()
+        local now = os.clock()
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                applyMaterialChamsToPlayer(plr, now)
+            end
+        end
+    end
+
+    local function StopMaterialChamsLoop()
+        local MC = WallHack.Internal.MaterialChams
+        if MC.Conn then
+            pcall(function() MC.Conn:Disconnect() end)
+            MC.Conn = nil
+        end
+    end
+
+    local function StartMaterialChamsLoop()
+        local MC = WallHack.Internal.MaterialChams
+        if MC.Conn then return end
+        MC.Conn = RunService.RenderStepped:Connect(function()
+            if H.ShuttingDown then return end
+            local S = WallHack.Visuals.MaterialChamsSettings
+            local MC2 = WallHack.Internal.MaterialChams
+            if not (WallHack.Settings.Enabled and S.Enabled) then return end
+            local now = os.clock()
+            -- 10 Hz non-rainbow, 30 Hz rainbow for smooth animation
+            local rate = S.Rainbow and (1/30) or (1/10)
+            if now - (MC2.LastTick or 0) < rate then return end
+            MC2.LastTick = now
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer then
+                    pcall(applyMaterialChamsToPlayer, plr, now)
+                end
+            end
+        end)
+    end
+
+    local function RefreshMaterialChams()
+        if WallHack.Visuals.MaterialChamsSettings.Enabled and WallHack.Settings.Enabled then
+            StartMaterialChamsLoop()
+            ApplyMaterialChamsToAll()
+        else
+            StopMaterialChamsLoop()
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer then
+                    restoreMaterialChams(plr)
+                end
+            end
         end
     end
 
@@ -1399,7 +1378,11 @@ local okInit, errInit = pcall(function()
             ApplyGlowForPlayer(plr)
             val.CharacterAddedConn = plr.CharacterAdded:Connect(function()
                 if H.ShuttingDown then return end
+                restoreMaterialChams(plr)
                 ApplyGlowForPlayer(plr)
+                task.wait(0.2)
+                if H.ShuttingDown then return end
+                applyMaterialChamsToPlayer(plr, os.clock())
             end)
         end
     end
@@ -1415,6 +1398,7 @@ local okInit, errInit = pcall(function()
         if v.NameTag and v.NameTag.Remove then pcall(function() v.NameTag:Remove() end) end
         if v.Glow then pcall(function() v.Glow:Destroy() end) end
         removeEnemyTextureChams(v)
+        restoreMaterialChams(plr)
         WallHack.WrappedPlayers[plr.Name] = nil
     end
 
@@ -1453,7 +1437,7 @@ local okInit, errInit = pcall(function()
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LocalPlayer then UnWrap(v) end
         end
-        StopHUD(); StopSelfESP()
+        StopHUD(); StopSelfESP(); StopMaterialChamsLoop()
     end
     WallHack.Functions.Restart = function()
         ReWrapToken += 1
@@ -1475,8 +1459,6 @@ local okInit, errInit = pcall(function()
     WallHack.Functions.StartSelfESP   = StartSelfESP
     WallHack.Functions.StopSelfESP    = StopSelfESP
     WallHack.Functions.RefreshSelfESP = refreshSelfESP
-
-    WallHack.Functions.StartESPPreview = StartESPPreview
 
     WallHack.Functions.SetSelfESPEnabled = function(v)
         WallHack.Visuals.SelfESP.Enabled = v and true or false
@@ -1519,6 +1501,30 @@ local okInit, errInit = pcall(function()
     end
     WallHack.Functions.ForceMaterialRefresh = ForceMaterialRefresh
 
+    -- Material Chams API
+    WallHack.Functions.RefreshMaterialChams   = RefreshMaterialChams
+    WallHack.Functions.ApplyMaterialChamsToAll = ApplyMaterialChamsToAll
+    WallHack.Functions.StartMaterialChamsLoop = StartMaterialChamsLoop
+    WallHack.Functions.StopMaterialChamsLoop  = StopMaterialChamsLoop
+    WallHack.Functions.ListMaterialChamsPresets = function()
+        local out = {}
+        for i, n in ipairs(MATERIAL_CHAMS_PRESET_LIST) do out[i] = n end
+        return out
+    end
+    WallHack.Functions.SetMaterialChamsPreset = function(presetName)
+        local preset = MATERIAL_CHAMS_PRESETS[presetName]
+        if not preset then return false end
+        local S = WallHack.Visuals.MaterialChamsSettings
+        S.Preset = presetName
+        S.Material = preset.Material
+        S.Color = preset.Color
+        S.Transparency = preset.Transparency
+        S.Reflectance = preset.Reflectance
+        S.Rainbow = preset.Rainbow
+        RefreshMaterialChams()
+        return true
+    end
+
     for _, materialName in ipairs(VALID_PART_MATERIALS) do
         WallHack.Functions[materialName] = function()
             return WallHack.Functions.SetChinaHatMaterial(materialName)
@@ -1531,8 +1537,14 @@ local okInit, errInit = pcall(function()
 
     WallHack.ApplyGlowToAll     = ApplyGlowToAll
     WallHack.ApplyGlowForPlayer = ApplyGlowForPlayer
+    WallHack.ApplyMaterialChamsToAll     = ApplyMaterialChamsToAll
+    WallHack.ApplyMaterialChamsForPlayer = applyMaterialChamsToPlayer
+    WallHack.RestoreMaterialChams        = restoreMaterialChams
+    WallHack.MaterialChamsPresets        = MATERIAL_CHAMS_PRESETS
+    WallHack.MaterialChamsPresetList     = MATERIAL_CHAMS_PRESET_LIST
     WallHack.SafeColor          = SafeColor
     WallHack.ResolveTexture     = resolveTexture
+    WallHack.ResolveMaterial    = resolveMaterial
 end)
 
 if not okInit then
@@ -1541,21 +1553,30 @@ if not okInit then
     for _, k in ipairs({
         "Exit","Restart","StartHUD","StopHUD","SetHUDEnabled",
         "StartSelfESP","StopSelfESP","RefreshSelfESP",
-        "StartESPPreview",
         "SetSelfESPEnabled","SetSelfESPChamsEnabled","SetSelfESPChinaHatEnabled",
         "SetChinaHatMaterial","ForceMaterialRefresh",
         "ApplyGlowToAll","ApplyGlowForPlayer",
+        "RefreshMaterialChams","ApplyMaterialChamsToAll",
+        "StartMaterialChamsLoop","StopMaterialChamsLoop",
     }) do WallHack.Functions[k] = WallHack.Functions[k] or noop end
     WallHack.Functions.GetHUDEnabled       = WallHack.Functions.GetHUDEnabled       or function() return false end
     WallHack.Functions.GetSelfESPEnabled   = WallHack.Functions.GetSelfESPEnabled   or function() return false end
     WallHack.Functions.GetChinaHatMaterial = WallHack.Functions.GetChinaHatMaterial or function() return nil end
     WallHack.Functions.ListValidMaterials  = WallHack.Functions.ListValidMaterials  or function() return {} end
     WallHack.Functions.ListTexturePresets  = WallHack.Functions.ListTexturePresets  or function() return {"None"} end
+    WallHack.Functions.ListMaterialChamsPresets = WallHack.Functions.ListMaterialChamsPresets or function() return {"Custom"} end
+    WallHack.Functions.SetMaterialChamsPreset   = WallHack.Functions.SetMaterialChamsPreset   or function() return false end
     WallHack.SafeColor = function(c, fb) return fb or Color3.fromRGB(255,255,255) end
     WallHack.ResolveTexture = function() return "" end
+    WallHack.ResolveMaterial = function() return Enum.Material.Neon end
+    WallHack.ApplyMaterialChamsToAll = WallHack.ApplyMaterialChamsToAll or noop
+    WallHack.ApplyMaterialChamsForPlayer = WallHack.ApplyMaterialChamsForPlayer or noop
+    WallHack.RestoreMaterialChams = WallHack.RestoreMaterialChams or noop
+    WallHack.MaterialChamsPresets = WallHack.MaterialChamsPresets or {}
+    WallHack.MaterialChamsPresetList = WallHack.MaterialChamsPresetList or {"Custom"}
 end
 
-print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v18 (integrated ESP Preview)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
+print(okInit and "[AirHub] 04_wallhack: WallHack loaded OK v19 (Material Chams)" or "[AirHub] 04_wallhack: WallHack loaded in STUB mode")
 
 -- ============================================================================
 -- PART 3 — SERVERPOSITION
@@ -1734,7 +1755,7 @@ else
 
     ServerPosition.Start = StartServerPosition
     ServerPosition.Stop  = StopServerPosition
-    print("[AirHub] 04_wallhack: ServerPosition loaded OK v18")
+    print("[AirHub] 04_wallhack: ServerPosition loaded OK v19")
 end
 
 -- ============================================================================
@@ -1751,7 +1772,8 @@ do
     if UI and UI.L and UI.L.en and UI.L.ru then
         local en = {
             vis_wallhack = "WallHack", vis_boxes = "Boxes", vis_hud = "HUD",
-            vis_chams = "Chams", vis_selfesp = "Self ESP", vis_sp = "Server Position (Ghost)",
+            vis_chams = "Chams", vis_mat_chams = "Material Chams",
+            vis_selfesp = "Self ESP", vis_sp = "Server Position (Ghost)",
             vis_tracers = "Tracers", vis_names = "Name Tags",
             vis_enabled = "Enabled", vis_team_check = "Team Check", vis_alive_check = "Alive Check",
             vis_box_enabled = "Enabled", vis_box_type = "Type",
@@ -1772,6 +1794,14 @@ do
             vis_chams_texture_id = "Custom Texture ID",
             vis_chams_texture_transparency = "Texture Transparency",
             vis_chams_texture_faces = "Texture Faces",
+            vis_mat_chams_enabled = "Enabled",
+            vis_mat_chams_preset = "Preset",
+            vis_mat_chams_material = "Material",
+            vis_mat_chams_color = "Color",
+            vis_mat_chams_transparency = "Transparency",
+            vis_mat_chams_reflectance = "Reflectance",
+            vis_mat_chams_rainbow = "Rainbow",
+            vis_mat_chams_rainbow_speed = "Rainbow Speed",
             vis_se_enabled = "Enable Self ESP",
             vis_se_group_chams = "Chams",
             vis_se_group_hat = "China Hat",
@@ -1808,7 +1838,6 @@ do
             vis_name_enabled = "Enabled", vis_name_color = "Color",
             vis_name_size = "Size", vis_name_distance = "Show Distance",
             vis_name_health = "Show Health",
-            vis_esp_preview = "ESP Preview",
 
             tt_vis_enabled = "Master switch for boxes, chams, tracers, name tags",
             tt_vis_team = "Uses Aimbot's Team Check settings",
@@ -1827,7 +1856,7 @@ do
             tt_vis_hud_fps = "Show FPS",
             tt_vis_hud_ping = "Show ping in ms",
             tt_vis_hud_session = "Show session uptime",
-            tt_vis_chams_enabled = "Apply visual effect to enemy characters",
+            tt_vis_chams_enabled = "Apply visual effect to enemy characters (Highlight-based)",
             tt_vis_chams_mode = "Fill = solid | Outline = edges | Both | Pulse = animated | Texture = custom image | Wireframe = edges only",
             tt_vis_chams_fill_color = "Interior fill color",
             tt_vis_chams_fill_transparency = "Fill transparency (0=opaque)",
@@ -1838,6 +1867,14 @@ do
             tt_vis_chams_texture_id = "Only used when preset = Custom. Paste rbxassetid://NUMBER here",
             tt_vis_chams_texture_transparency = "Texture image transparency",
             tt_vis_chams_texture_faces = "Front = only front | AllFaces = all 6 faces (recommended)",
+            tt_vis_mat_chams_enabled = "Replace enemy body materials in-world (Neon/Glass/Metal/etc.)",
+            tt_vis_mat_chams_preset = "Quick preset — auto-fills material/color/transparency/reflectance",
+            tt_vis_mat_chams_material = "Roblox material to apply to enemy parts",
+            tt_vis_mat_chams_color = "Part color override",
+            tt_vis_mat_chams_transparency = "Part transparency (0 = solid)",
+            tt_vis_mat_chams_reflectance = "Part reflectance (0-1)",
+            tt_vis_mat_chams_rainbow = "Cycle color through rainbow",
+            tt_vis_mat_chams_rainbow_speed = "Rainbow cycle speed",
             tt_vis_se_enabled = "Master switch for self chams and china hat",
             tt_vis_se_chams_enabled = "Apply visual effect to your own character",
             tt_vis_se_chams_mode = "Fill = solid | Outline = edges | Both | Texture = custom image | Wireframe = edges only",
@@ -1878,11 +1915,11 @@ do
             tt_vis_name_size = "Text size in pixels",
             tt_vis_name_distance = "Append distance in studs",
             tt_vis_name_health = "Append current health",
-            tt_vis_esp_preview = "Show a live 3D preview of the ESP in a separate window",
         }
         local ru = {
             vis_wallhack = "Wallhack", vis_boxes = "Боксы", vis_hud = "HUD",
-            vis_chams = "Чамсы", vis_selfesp = "Сам ESP", vis_sp = "Серверная позиция (призрак)",
+            vis_chams = "Чамсы", vis_mat_chams = "Материальные чамсы",
+            vis_selfesp = "Сам ESP", vis_sp = "Серверная позиция (призрак)",
             vis_tracers = "Трассеры", vis_names = "Имена",
             vis_enabled = "Включен", vis_team_check = "Проверка команды", vis_alive_check = "Проверка живых",
             vis_box_enabled = "Включены", vis_box_type = "Тип",
@@ -1903,6 +1940,14 @@ do
             vis_chams_texture_id = "Свой ID текстуры",
             vis_chams_texture_transparency = "Прозрачность текстуры",
             vis_chams_texture_faces = "Грани текстуры",
+            vis_mat_chams_enabled = "Включены",
+            vis_mat_chams_preset = "Пресет",
+            vis_mat_chams_material = "Материал",
+            vis_mat_chams_color = "Цвет",
+            vis_mat_chams_transparency = "Прозрачность",
+            vis_mat_chams_reflectance = "Отражение",
+            vis_mat_chams_rainbow = "Радуга",
+            vis_mat_chams_rainbow_speed = "Скорость радуги",
             vis_se_enabled = "Включить сам ESP",
             vis_se_group_chams = "Чамсы",
             vis_se_group_hat = "Китайская шляпа",
@@ -1939,7 +1984,6 @@ do
             vis_name_enabled = "Включены", vis_name_color = "Цвет",
             vis_name_size = "Размер", vis_name_distance = "Показывать дистанцию",
             vis_name_health = "Показывать здоровье",
-            vis_esp_preview = "Превью ESP",
 
             tt_vis_enabled = "Главный выключатель боксов, чамсов, трассеров, имён",
             tt_vis_team = "Использует настройки команды из Aimbot",
@@ -1958,7 +2002,7 @@ do
             tt_vis_hud_fps = "Показывать FPS",
             tt_vis_hud_ping = "Показывать пинг в мс",
             tt_vis_hud_session = "Показывать время работы",
-            tt_vis_chams_enabled = "Применить визуальный эффект к врагам",
+            tt_vis_chams_enabled = "Применить визуальный эффект к врагам (через Highlight)",
             tt_vis_chams_mode = "Fill = сплошной | Outline = края | Both | Pulse = пульсация | Texture = картинка | Wireframe = контур",
             tt_vis_chams_fill_color = "Цвет внутренней заливки",
             tt_vis_chams_fill_transparency = "Прозрачность заливки",
@@ -1969,6 +2013,14 @@ do
             tt_vis_chams_texture_id = "Используется только при preset = Custom. Вставь rbxassetid://NUMBER",
             tt_vis_chams_texture_transparency = "Прозрачность картинки",
             tt_vis_chams_texture_faces = "Front = только фронт | AllFaces = все 6 граней (рекомендуется)",
+            tt_vis_mat_chams_enabled = "Заменить материал частей тела врагов (Neon/Glass/Metal и т.д.)",
+            tt_vis_mat_chams_preset = "Быстрый пресет — авто-заполняет материал/цвет/прозрачность/отражение",
+            tt_vis_mat_chams_material = "Материал Roblox для частей врагов",
+            tt_vis_mat_chams_color = "Цвет частей",
+            tt_vis_mat_chams_transparency = "Прозрачность частей (0 = сплошной)",
+            tt_vis_mat_chams_reflectance = "Отражение (0-1)",
+            tt_vis_mat_chams_rainbow = "Циклическая смена цвета",
+            tt_vis_mat_chams_rainbow_speed = "Скорость цикла радуги",
             tt_vis_se_enabled = "Главный выключатель чамсов и шляпы",
             tt_vis_se_chams_enabled = "Применить эффект к своему персонажу",
             tt_vis_se_chams_mode = "Fill = сплошной | Outline = края | Both | Texture = картинка | Wireframe = контур",
@@ -2009,7 +2061,6 @@ do
             tt_vis_name_size = "Размер текста",
             tt_vis_name_distance = "Добавить дистанцию",
             tt_vis_name_health = "Добавить текущее здоровье",
-            tt_vis_esp_preview = "Показывает живое 3D-превью ESP в отдельном окне",
         }
         for k, v in pairs(en) do UI.L.en[k] = v end
         for k, v in pairs(ru) do UI.L.ru[k] = v end
@@ -2024,6 +2075,7 @@ local Util             = H.Util
 local SafeColor        = WallHack.SafeColor or function(c, fb) return fb or c end
 
 local function refreshChams() if WallHack.ApplyGlowToAll then pcall(WallHack.ApplyGlowToAll) end end
+local function refreshMaterialChams() if WallHack.Functions.RefreshMaterialChams then pcall(WallHack.Functions.RefreshMaterialChams) end end
 local function refreshSelfESP() if WallHack.Functions.RefreshSelfESP then pcall(WallHack.Functions.RefreshSelfESP) end end
 local function startHUD() if WallHack.Functions.StartHUD then pcall(WallHack.Functions.StartHUD) end end
 local function stopHUD()  if WallHack.Functions.StopHUD  then pcall(WallHack.Functions.StopHUD)  end end
@@ -2033,6 +2085,7 @@ local function stopSelfESP()  if WallHack.Functions.StopSelfESP  then pcall(Wall
 local function setBox(k, v)    WallHack.Visuals.BoxSettings[k] = v end
 local function setHUD(k, v)    WallHack.Visuals.HUDSettings[k] = v end
 local function setChamsEnemy(k, v) WallHack.Visuals.ChamsSettings[k] = v end
+local function setMatChams(k, v)   WallHack.Visuals.MaterialChamsSettings[k] = v end
 local function setChamsSelf(k, v)  WallHack.Visuals.SelfESP.Chams[k] = v end
 local function setHat(k, v)    WallHack.Visuals.SelfESP.ChinaHat[k] = v end
 local function setTracer(k, v) WallHack.Visuals.TracerSettings[k] = v end
@@ -2056,11 +2109,15 @@ if not texturePresetList or #texturePresetList == 0 then
     texturePresetList = { "None", "Custom" }
 end
 local hatModes = { "Closed", "Opened" }
+local matChamsPresets = WallHack.Functions.ListMaterialChamsPresets()
+if not matChamsPresets or #matChamsPresets == 0 then
+    matChamsPresets = { "Neon Glow", "Ice", "Gold", "Toxic", "Fire", "Ghost", "Steel", "Obsidian", "Rainbow", "Custom" }
+end
 
 -- LEFT
 local visWH = VisualsTab:CreateSection({ Name = "vis_wallhack" })
 visWH:AddToggle({ Name = "vis_enabled", Value = WallHack.Settings.Enabled,
-    Callback = function(v) WallHack.Settings.Enabled = v; refreshChams() end, Tooltip = "tt_vis_enabled" })
+    Callback = function(v) WallHack.Settings.Enabled = v; refreshChams(); refreshMaterialChams() end, Tooltip = "tt_vis_enabled" })
 visWH:AddToggle({ Name = "vis_team_check", Value = WallHack.Settings.TeamCheck,
     Callback = function(v) WallHack.Settings.TeamCheck = v end, Tooltip = "tt_vis_team" })
 visWH:AddToggle({ Name = "vis_alive_check", Value = WallHack.Settings.AliveCheck,
@@ -2148,6 +2205,42 @@ chamsSec:AddSlider({ Name = "vis_chams_texture_transparency", Value = Chams.Text
 chamsSec:AddDropdown({ Name = "vis_chams_texture_faces", Value = Chams.TextureFaces or "AllFaces",
     List = textureFaces, Callback = function(v) Chams.TextureFaces = v; refreshChams() end, Tooltip = "tt_vis_chams_texture_faces" })
 
+-- MATERIAL CHAMS (NEW SECTION)
+local matChamsSec = VisualsTab:CreateSection({ Name = "vis_mat_chams", Side = "Right" })
+local MCS = WallHack.Visuals.MaterialChamsSettings
+matChamsSec:AddToggle({ Name = "vis_mat_chams_enabled", Value = MCS.Enabled,
+    Callback = function(v) setMatChams("Enabled", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_enabled" })
+matChamsSec:AddDropdown({ Name = "vis_mat_chams_preset", Value = MCS.Preset or "Neon Glow",
+    List = matChamsPresets,
+    Callback = function(v)
+        MCS.Preset = v
+        local preset = WallHack.MaterialChamsPresets and WallHack.MaterialChamsPresets[v]
+        if preset then
+            MCS.Material      = preset.Material
+            MCS.Color         = preset.Color
+            MCS.Transparency  = preset.Transparency
+            MCS.Reflectance   = preset.Reflectance
+            MCS.Rainbow       = preset.Rainbow
+        end
+        refreshMaterialChams()
+    end, Tooltip = "tt_vis_mat_chams_preset" })
+matChamsSec:AddDropdown({ Name = "vis_mat_chams_material", Value = MCS.Material or "Neon",
+    List = hatMaterials,
+    Callback = function(v) setMatChams("Material", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_material" })
+matChamsSec:AddColorpicker({ Name = "vis_mat_chams_color", Default = MCS.Color or Color3.fromRGB(255,0,255),
+    Callback = function(v) MCS.Color = SafeColor(v, Color3.fromRGB(255,0,255)); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_color" })
+matChamsSec:AddSlider({ Name = "vis_mat_chams_transparency", Value = MCS.Transparency or 0,
+    Min = 0, Max = 1, Decimals = 2,
+    Callback = function(v) setMatChams("Transparency", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_transparency" })
+matChamsSec:AddSlider({ Name = "vis_mat_chams_reflectance", Value = MCS.Reflectance or 0,
+    Min = 0, Max = 1, Decimals = 2,
+    Callback = function(v) setMatChams("Reflectance", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_reflectance" })
+matChamsSec:AddToggle({ Name = "vis_mat_chams_rainbow", Value = MCS.Rainbow or false,
+    Callback = function(v) setMatChams("Rainbow", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_rainbow" })
+matChamsSec:AddSlider({ Name = "vis_mat_chams_rainbow_speed", Value = MCS.RainbowSpeed or 0.5,
+    Min = 0.1, Max = 3, Decimals = 2,
+    Callback = function(v) setMatChams("RainbowSpeed", v); refreshMaterialChams() end, Tooltip = "tt_vis_mat_chams_rainbow_speed" })
+
 local seSec = VisualsTab:CreateSection({ Name = "vis_selfesp", Side = "Right" })
 seSec:AddToggle({ Name = "vis_se_enabled", Value = WallHack.Visuals.SelfESP.Enabled,
     Callback = function(v) WallHack.Visuals.SelfESP.Enabled = v; if v then startSelfESP() else stopSelfESP() end end, Tooltip = "tt_vis_se_enabled" })
@@ -2224,13 +2317,4 @@ spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.S
 spSec:AddSlider({ Name = "vis_sp_maxlimb", Value = (SP and SP.Settings and SP.Settings.MaxLimb) or 6,
     Min = 1, Max = 20, Callback = function(v) if SP and SP.Settings then SP.Settings.MaxLimb = v end end, Tooltip = "tt_vis_sp_maxlimb" })
 
--- Create the ESP Preview Tab and insert the preview into it
-local ESPPreviewTab = Window:AddTab({ Name = "ESP Preview", Icon = "eye" })
-
--- Initialize the preview inside the new tab after a short delay to ensure UI is built
-task.spawn(function()
-    task.wait(0.5)
-    WallHack.Functions.StartESPPreview(ESPPreviewTab)
-end)
-
-print("[AirHub] 04_wallhack: UI 'Visuals' tab created v18 (integrated ESP Preview)")
+print("[AirHub] 04_wallhack: UI 'Visuals' tab created v19 (Material Chams + no ESP Preview)")
