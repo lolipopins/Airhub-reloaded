@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.8.0 — Added: Sub-tabs, Rainbow Speed & Persistence, AirHub Config Support, UI Polish
+-- airhubUI v1.8.1 — Fixed: Rainbow persists on popup close, Added: Sub-tabs, Rainbow Speed
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.8.0",
+    Version = "1.8.1",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -2312,7 +2312,6 @@ local function createTab(window, opts)
     function tab:CreateSubTab(o)
         o = o or {}
         if #self.SubTabs == 0 then
-            -- First subtab created: hide default layout, show subtab bar
             defaultContent.Visible = false
             subTabBar.Visible = true
         end
