@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.9.0 — Complete Colorpicker Overhaul, Bugfixes
+-- airhubUI v1.9.1 — Fixed: Colorpicker "Done" button crash & Rainbow update
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.9.0",
+    Version = "1.9.1",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -1152,7 +1152,7 @@ local function watchVisibility(element, predicate, state)
 end
 
 -- ══════════════════════════════════════════════════════════════
--- COLORPICKER UI (COMPLETE REWRITE)
+-- COLORPICKER UI
 -- ══════════════════════════════════════════════════════════════
 local function buildColorpickerUI(parent, opts)
     opts = opts or {}
@@ -2176,7 +2176,7 @@ local function createColorpicker(section, opts)
             Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,360),
             ZIndex = Config.PopupZ + 21}, sub)
             
-        activeCpApi = buildColorpickerUI(cpHolder, {
+        local _, cpApi = buildColorpickerUI(cpHolder, {
             Color = color, Alpha = alpha, Width = 260,
             Rainbow = rainbowEnabled, RainbowSpeed = rainbowSpeed,
             OnChange = function(c, a, rbData)
@@ -2196,6 +2196,7 @@ local function createColorpicker(section, opts)
                 closeTopPopup()
             end
         })
+        activeCpApi = cpApi
         
         pushPopup(sub, function()
             if row and row.Parent and sub.Parent then
