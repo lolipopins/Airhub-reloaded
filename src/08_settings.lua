@@ -392,7 +392,7 @@ mainSec:AddButton({
 --// RIGHT COLUMN — Info
 --// ---------------------------------------------------------------------------
 local infoSec = SettingsTab:CreateSection({ Name = "Info", Side = "Right" })
-infoSec:AddLabel({ Text = "airhubUI v1.7.1 · airhub-remake port" })
+infoSec:AddLabel({ Text = "airhubUI v1.8.0 · airhub-remake port" })
 infoSec:AddLabel({ Text = "RightShift — toggle menu" })
 infoSec:AddLabel({ Text = "MMB on any row — bind menu" })
 infoSec:AddLabel({ Text = "RMB on any row — options menu" })
