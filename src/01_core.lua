@@ -310,6 +310,16 @@ local function Config_Serialize()
     if Hg.Noclip then data.Noclip = Config_Encode(Hg.Noclip.Settings) end
     data.Logging = Config_Encode(Hg.Logging)
     data.Sound = Config_Encode(Hg.Sound)
+    
+    -- Save UI state
+    local uiWin = getgenv().airhubUI_Window
+    if uiWin and uiWin.GetUIState then
+        local uiState = uiWin:GetUIState()
+        if uiState then
+            data.UI = uiState
+        end
+    end
+
     return data
 end
 
@@ -555,6 +565,14 @@ local function Config_Apply(data)
     if data.Sound then
         local s = Config_Decode(data.Sound)
         if type(s) == "table" then Hg.Sound = s end
+    end
+    
+    -- Load UI state
+    if data.UI then
+        local uiWin = getgenv().airhubUI_Window
+        if uiWin and uiWin.SetUIState then
+            uiWin:SetUIState(data.UI)
+        end
     end
 
     return true
