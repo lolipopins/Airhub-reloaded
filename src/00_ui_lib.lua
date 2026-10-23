@@ -1,5 +1,5 @@
 --=============================================================
--- airhubUI v1.8.1 — Fixed: Rainbow persists on popup close, Added: Sub-tabs, Rainbow Speed
+-- airhubUI v1.9.0 — Complete Colorpicker Overhaul, Bugfixes
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -15,7 +15,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.8.1",
+    Version = "1.9.0",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -1152,7 +1152,7 @@ local function watchVisibility(element, predicate, state)
 end
 
 -- ══════════════════════════════════════════════════════════════
--- COLORPICKER UI
+-- COLORPICKER UI (COMPLETE REWRITE)
 -- ══════════════════════════════════════════════════════════════
 local function buildColorpickerUI(parent, opts)
     opts = opts or {}
@@ -1162,26 +1162,44 @@ local function buildColorpickerUI(parent, opts)
     local rainbowEnabled = opts.Rainbow or false
     local rainbowSpeed = opts.RainbowSpeed or 1
     local onChange = opts.OnChange or function() end
-    local W = opts.Width or 240
-    local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,320)}, parent)
+    local W = opts.Width or 260
+    local root = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(0,W,0,390)}, parent)
     
+    -- 1. Preview Swatch
+    local previewBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,32), ClipsDescendants = true}, root)
+    addCorner(previewBg, UDim.new(0,6)); addStroke(previewBg, Theme.Outline, 1)
+    for i = 0, 4 do
+        for j = 0, 1 do
+            new("Frame", {BackgroundColor3 = Color3.fromRGB(200,204,210), BorderSizePixel = 0,
+                Position = UDim2.new(i/5,0,j/2,0), Size = UDim2.new(1/10,0,1/2,0)}, previewBg)
+            new("Frame", {BackgroundColor3 = Color3.fromRGB(200,204,210), BorderSizePixel = 0,
+                Position = UDim2.new((i+0.5)/5,0,1/2,0), Size = UDim2.new(1/10,0,1/2,0)}, previewBg)
+        end
+    end
+    local previewColor = new("Frame", {BackgroundColor3 = color, BackgroundTransparency = alpha,
+        BorderSizePixel = 0, Size = UDim2.new(1,0,1,0)}, previewBg)
+    
+    -- 2. SV Square
     local sv = new("Frame", {BackgroundColor3 = Color3.fromHSV(h,1,1), BorderSizePixel = 0,
-        Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,110), ClipsDescendants = true,
-        ZIndex = (parent.ZIndex or 1) + 10}, root)
-    addCorner(sv, UDim.new(0,6))
+        Position = UDim2.new(0,0,0,40), Size = UDim2.new(1,0,0,120), ClipsDescendants = true}, root)
+    addCorner(sv, UDim.new(0,6)); addStroke(sv, Theme.Outline, 1)
     new("ImageLabel", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-        Image = "rbxassetid://4155801252", ZIndex = (parent.ZIndex or 1) + 11}, sv)
+        Image = "rbxassetid://4155801252"}, sv)
     local satO = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255),
-        BackgroundTransparency = 1-s, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0),
-        ZIndex = (parent.ZIndex or 1) + 12}, sv)
+        BackgroundTransparency = 1-s, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0)}, sv)
     local valO = new("Frame", {BackgroundColor3 = Color3.fromRGB(0,0,0),
-        BackgroundTransparency = 1-v, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0),
-        ZIndex = (parent.ZIndex or 1) + 13}, sv)
+        BackgroundTransparency = 1-v, BorderSizePixel = 0, Size = UDim2.new(1,0,1,0)}, sv)
     
-    local hue = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
-        Position = UDim2.new(0,0,0,118), Size = UDim2.new(1,0,0,12),
-        ZIndex = (parent.ZIndex or 1) + 10}, root)
-    addCorner(hue, UDim.new(1,0))
+    -- SV Knob
+    local svKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0.5,
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(s,0,1-v,0), Size = UDim2.new(0,12,0,12)}, sv)
+    addCorner(svKnob, UDim.new(1,0)); addStroke(svKnob, Theme.Outline, 2)
+    
+    -- 3. Hue Slider
+    local hueBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,168), Size = UDim2.new(1,0,0,14), ClipsDescendants = true}, root)
+    addCorner(hueBg, UDim.new(1,0)); addStroke(hueBg, Theme.Outline, 1)
     new("UIGradient", {Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(255,0,0)),
         ColorSequenceKeypoint.new(1/6, Color3.fromRGB(255,255,0)),
@@ -1189,101 +1207,143 @@ local function buildColorpickerUI(parent, opts)
         ColorSequenceKeypoint.new(3/6, Color3.fromRGB(0,255,255)),
         ColorSequenceKeypoint.new(4/6, Color3.fromRGB(0,0,255)),
         ColorSequenceKeypoint.new(5/6, Color3.fromRGB(255,0,255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255,0,0))}}, hue)
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255,0,0))}}, hueBg)
+    local hueKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0.5,
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(h,0,0.5,0), Size = UDim2.new(0,12,0,12)}, hueBg)
+    addCorner(hueKnob, UDim.new(1,0)); addStroke(hueKnob, Theme.Outline, 2)
     
+    -- 4. Alpha Slider
     local alphaBg = new("Frame", {BackgroundColor3 = Color3.fromRGB(230,232,238), BorderSizePixel = 0,
-        Position = UDim2.new(0,0,0,138), Size = UDim2.new(1,0,0,12),
-        ClipsDescendants = true, ZIndex = (parent.ZIndex or 1) + 10}, root)
-    addCorner(alphaBg, UDim.new(1,0))
-    for i = 0, 10 do
-        new("Frame", {BackgroundColor3 = Color3.fromRGB(180,184,192), BorderSizePixel = 0,
-            Position = UDim2.new(i/10,0,0,0), Size = UDim2.new(0.05,0,0.5,0),
-            ZIndex = (parent.ZIndex or 1) + 11}, alphaBg)
-        new("Frame", {BackgroundColor3 = Color3.fromRGB(180,184,192), BorderSizePixel = 0,
-            Position = UDim2.new((i+0.5)/10,0,0.5,0), Size = UDim2.new(0.05,0,0.5,0),
-            ZIndex = (parent.ZIndex or 1) + 11}, alphaBg)
+        Position = UDim2.new(0,0,0,190), Size = UDim2.new(1,0,0,14), ClipsDescendants = true}, root)
+    addCorner(alphaBg, UDim.new(1,0)); addStroke(alphaBg, Theme.Outline, 1)
+    for i = 0, 4 do
+        for j = 0, 1 do
+            new("Frame", {BackgroundColor3 = Color3.fromRGB(200,204,210), BorderSizePixel = 0,
+                Position = UDim2.new(i/5,0,j/2,0), Size = UDim2.new(1/10,0,1/2,0)}, alphaBg)
+            new("Frame", {BackgroundColor3 = Color3.fromRGB(200,204,210), BorderSizePixel = 0,
+                Position = UDim2.new((i+0.5)/5,0,1/2,0), Size = UDim2.new(1/10,0,1/2,0)}, alphaBg)
+        end
     end
     local alphaFill = new("Frame", {BackgroundColor3 = color, BorderSizePixel = 0,
-        Size = UDim2.new(1,0,1,0), ZIndex = (parent.ZIndex or 1) + 12}, alphaBg)
+        Size = UDim2.new(1,0,1,0)}, alphaBg)
     local alphaGrad = new("UIGradient", {Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)}),
-        Rotation = 0}, alphaFill)
-    local alphaKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(1-alpha,0,0.5,0),
-        Size = UDim2.new(0,14,0,14), ZIndex = (parent.ZIndex or 1) + 13}, alphaBg)
-    addCorner(alphaKnob, UDim.new(1,0)); addStroke(alphaKnob, Theme.Accent, 2)
+        NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)}), Rotation = 0}, alphaFill)
+    local alphaKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0.5,
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(1-alpha,0,0.5,0), Size = UDim2.new(0,12,0,12)}, alphaBg)
+    addCorner(alphaKnob, UDim.new(1,0)); addStroke(alphaKnob, Theme.Outline, 2)
     
-    local hex = new("TextBox", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,160),
-        Size = UDim2.new(1,0,0,24), Font = Config.CurrentFontFamily, Text = "", TextSize = 11,
-        ClearTextOnFocus = false, ZIndex = (parent.ZIndex or 1) + 10}, root)
-    themeBg(hex, "ElementHover"); themeText(hex, "Text")
-    addCorner(hex, UDim.new(0,6)); addPadding(hex, 8)
+    -- 5. Inputs (Hex + RGB)
+    local inputHolder = new("Frame", {BackgroundTransparency = 1, Position = UDim2.new(0,0,0,212),
+        Size = UDim2.new(1,0,0,50)}, root)
+        
+    -- Hex Input
+    local hexBg = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,0),
+        Size = UDim2.new(1,0,0,22)}, inputHolder)
+    themeBg(hexBg, "ElementHover"); addCorner(hexBg, UDim.new(0,4))
+    local hexLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,8,0,0),
+        Size = UDim2.new(0,25,1,0), Font = Config.CurrentFontFamily, Text = "Hex",
+        TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left}, hexBg)
+    themeText(hexLbl, "SubText")
+    local hexInp = new("TextBox", {BackgroundTransparency = 1, Position = UDim2.new(0,35,0,0),
+        Size = UDim2.new(1,-40,1,0), Font = Config.CurrentFontFamily, Text = "", TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false}, hexBg)
+    themeText(hexInp, "Text")
     
-    -- Rainbow Toggle Row
-    local rbRow = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,192),
-        Size = UDim2.new(1,0,0,28), ZIndex = (parent.ZIndex or 1) + 10}, root)
+    -- RGB Inputs
+    local function makeRGBInput(xOff, w, name)
+        local bg = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,xOff,0,26),
+            Size = UDim2.new(0,w,0,22)}, inputHolder)
+        themeBg(bg, "ElementHover"); addCorner(bg, UDim.new(0,4))
+        local lbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,6,0,0),
+            Size = UDim2.new(0,12,1,0), Font = Config.CurrentFontFamily, Text = name,
+            TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left}, bg)
+        themeText(lbl, "SubText")
+        local inp = new("TextBox", {BackgroundTransparency = 1, Position = UDim2.new(0,18,0,0),
+            Size = UDim2.new(1,-22,1,0), Font = Config.CurrentFontFamily, Text = "0", TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false}, bg)
+        themeText(inp, "Text")
+        return inp
+    end
+    local rInp = makeRGBInput(0, (W-10)/3, "R")
+    local gInp = makeRGBInput((W-10)/3 + 5, (W-10)/3, "G")
+    local bInp = makeRGBInput((W-10)/3*2 + 10, (W-10)/3, "B")
+    
+    -- 6. Rainbow Toggle
+    local rbRow = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,272),
+        Size = UDim2.new(1,0,0,28)}, root)
     themeBg(rbRow, "ElementHover"); addCorner(rbRow, UDim.new(0,6))
     local rbLabel = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,10,0,0),
-        Size = UDim2.new(0.7,-10,1,0), Font = Config.CurrentFontFamily, Text = "Rainbow",
-        TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = (parent.ZIndex or 1) + 11}, rbRow)
+        Size = UDim2.new(0.7,-10,1,0), Font = Config.CurrentFontFamily, Text = "Rainbow Mode",
+        TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left}, rbRow)
     themeText(rbLabel, "Text")
     local rbSw = new("Frame", {BackgroundColor3 = rainbowEnabled and Theme.Accent or Color3.fromRGB(214, 218, 226),
-        BorderSizePixel = 0, Position = UDim2.new(1,-38,0.5,-8), Size = UDim2.new(0,30,0,16),
-        ZIndex = (parent.ZIndex or 1) + 11}, rbRow)
+        BorderSizePixel = 0, Position = UDim2.new(1,-38,0.5,-8), Size = UDim2.new(0,30,0,16)}, rbRow)
     addCorner(rbSw, UDim.new(1,0))
     local rbKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
         Position = rainbowEnabled and UDim2.new(1,-14,0,2) or UDim2.new(0,2,0,2),
-        Size = UDim2.new(0,12,0,12), ZIndex = (parent.ZIndex or 1) + 12}, rbSw)
+        Size = UDim2.new(0,12,0,12)}, rbSw)
     addCorner(rbKnob, UDim.new(1,0))
-    local rbToggle = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
-        Text = "", ZIndex = (parent.ZIndex or 1) + 13}, rbRow)
-        
-    -- Rainbow Speed Slider
-    local rbSpeedFrame = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,226),
-        Size = UDim2.new(1,0,0,34), ZIndex = (parent.ZIndex or 1) + 10}, root)
+    local rbToggle = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, rbRow)
+    
+    -- 7. Rainbow Speed Slider
+    local rbSpeedFrame = new("Frame", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,306),
+        Size = UDim2.new(1,0,0,34)}, root)
     themeBg(rbSpeedFrame, "ElementHover"); addCorner(rbSpeedFrame, UDim.new(0,6))
     local rbSpeedLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,10,0,4),
         Size = UDim2.new(0.6,-10,0,14), Font = Config.CurrentFontFamily, Text = "Rainbow Speed",
-        TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = (parent.ZIndex or 1) + 11}, rbSpeedFrame)
+        TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left}, rbSpeedFrame)
     themeText(rbSpeedLbl, "SubText")
     local rbSpeedVal = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(1,-40,0,4),
-        Size = UDim2.new(0,30,0,14), Font = Config.CurrentFontFamily, Text = tostring(rainbowSpeed),
-        TextSize = 10, TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right,
-        ZIndex = (parent.ZIndex or 1) + 11}, rbSpeedFrame)
+        Size = UDim2.new(0,30,0,14), Font = Config.CurrentFontFamily, Text = string.format("%.1f", rainbowSpeed),
+        TextSize = 10, TextColor3 = Theme.Accent, TextXAlignment = Enum.TextXAlignment.Right}, rbSpeedFrame)
     local rbSpeedTrack = new("Frame", {BorderSizePixel = 0,
         Position = UDim2.new(0,10,1,-12), Size = UDim2.new(1,-20,0,4)}, rbSpeedFrame)
     themeBg(rbSpeedTrack, "Panel"); addCorner(rbSpeedTrack, UDim.new(1,0))
     local rbSpeedFill = new("Frame", {BorderSizePixel = 0,
-        Size = UDim2.new((rainbowSpeed - 0.1) / 4.9,0,1,0)}, rbSpeedTrack)
+        Size = UDim2.new(math.clamp((rainbowSpeed - 0.1) / 4.9, 0, 1),0,1,0)}, rbSpeedTrack)
     themeBg(rbSpeedFill, "Accent"); addCorner(rbSpeedFill, UDim.new(1,0))
     local rbSpeedKnob = new("Frame", {BackgroundColor3 = Color3.fromRGB(255,255,255), BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new((rainbowSpeed - 0.1) / 4.9,0,0.5,0),
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.new(math.clamp((rainbowSpeed - 0.1) / 4.9, 0, 1),0,0.5,0),
         Size = UDim2.new(0,10,0,10)}, rbSpeedTrack)
     addCorner(rbSpeedKnob, UDim.new(1,0)); addStroke(rbSpeedKnob, Theme.Accent, 2)
     
+    -- 8. Close Button
+    local closeBtn = new("TextButton", {BorderSizePixel = 0, Position = UDim2.new(0,0,0,350),
+        Size = UDim2.new(1,0,0,28), Font = Config.CurrentFontFamily, Text = "Done", TextSize = 11,
+        AutoButtonColor = false}, root)
+    themeBg(closeBtn, "Accent"); closeBtn.TextColor3 = Theme.OnAccent
+    addCorner(closeBtn, UDim.new(0,6))
+    
+    -- ────────────────────────────────────────────────────────────
+    -- Logic
+    -- ────────────────────────────────────────────────────────────
     local function updateSpeedVis(val)
         local rel = math.clamp((val - 0.1) / 4.9, 0, 1)
         rbSpeedFill.Size = UDim2.new(rel,0,1,0)
         rbSpeedKnob.Position = UDim2.new(rel,0,0.5,0)
         rbSpeedVal.Text = string.format("%.1f", val)
     end
-
+    
     local rainbowCtrl = {
         active = rainbowEnabled, speed = rainbowSpeed, root = root,
-        keepAlive = opts.KeepAlive or false,
+        keepAlive = true, -- Keep alive even if popup is destroyed
         setFromRainbow = function(hv)
             h = hv; s = 1; v = 1
             color = Color3.fromHSV(h, s, v)
             if sv and sv.Parent then sv.BackgroundColor3 = Color3.fromHSV(h,1,1) end
             if satO and satO.Parent then satO.BackgroundTransparency = 0 end
             if valO and valO.Parent then valO.BackgroundTransparency = 0 end
+            if svKnob and svKnob.Parent then svKnob.Position = UDim2.new(1,0,0,0) end
             if alphaFill and alphaFill.Parent then alphaFill.BackgroundColor3 = color end
-            if hex and hex.Parent then
-                hex.Text = string.format("#%02X%02X%02X",
-                    math.floor(color.R*255+0.5), math.floor(color.G*255+0.5), math.floor(color.B*255+0.5))
-            end
+            if previewColor and previewColor.Parent then previewColor.BackgroundColor3 = color end
+            
+            local hexStr = string.format("#%02X%02X%02X",
+                math.floor(color.R*255+0.5), math.floor(color.G*255+0.5), math.floor(color.B*255+0.5))
+            if hexInp and hexInp.Parent then hexInp.Text = hexStr end
+            if rInp and rInp.Parent then rInp.Text = tostring(math.floor(color.R*255+0.5)) end
+            if gInp and gInp.Parent then gInp.Text = tostring(math.floor(color.G*255+0.5)) end
+            if bInp and bInp.Parent then bInp.Text = tostring(math.floor(color.B*255+0.5)) end
+            
             pcall(onChange, color, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed})
         end,
     }
@@ -1291,16 +1351,155 @@ local function buildColorpickerUI(parent, opts)
     
     local function hexStr(c) return string.format("#%02X%02X%02X",
         math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5)) end
+        
     local function applyMain()
         color = Color3.fromHSV(h, s, v)
         if sv and sv.Parent then sv.BackgroundColor3 = Color3.fromHSV(h,1,1) end
         if satO and satO.Parent then satO.BackgroundTransparency = 1-s end
         if valO and valO.Parent then valO.BackgroundTransparency = 1-v end
+        if svKnob and svKnob.Parent then svKnob.Position = UDim2.new(s,0,1-v,0) end
+        
         if alphaFill and alphaFill.Parent then alphaFill.BackgroundColor3 = color end
-        if hex and hex.Parent then hex.Text = hexStr(color) end
+        if previewColor and previewColor.Parent then previewColor.BackgroundColor3 = color end
+        if previewColor and previewColor.Parent then previewColor.BackgroundTransparency = alpha end
+        
+        if hexInp and hexInp.Parent then hexInp.Text = hexStr(color) end
+        if rInp and rInp.Parent then rInp.Text = tostring(math.floor(color.R*255+0.5)) end
+        if gInp and gInp.Parent then gInp.Text = tostring(math.floor(color.G*255+0.5)) end
+        if bInp and bInp.Parent then bInp.Text = tostring(math.floor(color.B*255+0.5)) end
     end
     applyMain()
     
+    local function disableRainbow()
+        if rainbowEnabled then
+            rainbowEnabled = false; rainbowCtrl.active = false
+            tween(rbSw, {BackgroundColor3 = Color3.fromRGB(214, 218, 226)})
+            tween(rbKnob, {Position = UDim2.new(0,2,0,2)})
+            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+        end
+    end
+    
+    -- Drag variables
+    local svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
+    
+    -- SV Drag
+    sv.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            svDrag = true; disableRainbow()
+            local rx = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
+            local ry = math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
+            s, v = rx, 1 - ry; applyMain()
+            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+        end
+    end)
+    -- Hue Drag
+    hueBg.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            hueDrag = true; disableRainbow()
+            h = math.clamp((i.Position.X - hueBg.AbsolutePosition.X) / hueBg.AbsoluteSize.X, 0, 1)
+            applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+        end
+    end)
+    -- Alpha Drag
+    alphaBg.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            alphaDrag = true
+            local rel = math.clamp((i.Position.X - alphaBg.AbsolutePosition.X) / alphaBg.AbsoluteSize.X, 0, 1)
+            alpha = 1 - rel
+            alphaKnob.Position = UDim2.new(rel, 0, 0.5, 0)
+            if alphaGrad then
+                alphaGrad.Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)})
+            end
+            if previewColor then previewColor.BackgroundTransparency = alpha end
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
+    end)
+    -- Speed Drag
+    rbSpeedTrack.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            speedDrag = true
+            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
+            rainbowSpeed = 0.1 + 4.9 * rel
+            updateSpeedVis(rainbowSpeed)
+            rainbowCtrl.speed = rainbowSpeed
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
+    end)
+    
+    -- Global Input Changed
+    _T(UserInputService.InputChanged:Connect(function(i)
+        if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
+        if svDrag then
+            local rx = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
+            local ry = math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
+            s, v = rx, 1 - ry; applyMain()
+            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+        end
+        if hueDrag then
+            h = math.clamp((i.Position.X - hueBg.AbsolutePosition.X) / hueBg.AbsoluteSize.X, 0, 1)
+            applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+        end
+        if alphaDrag then
+            local rel = math.clamp((i.Position.X - alphaBg.AbsolutePosition.X) / alphaBg.AbsoluteSize.X, 0, 1)
+            alpha = 1 - rel
+            alphaKnob.Position = UDim2.new(rel, 0, 0.5, 0)
+            if alphaGrad then
+                alphaGrad.Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)})
+            end
+            if previewColor then previewColor.BackgroundTransparency = alpha end
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
+        if speedDrag then
+            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
+            rainbowSpeed = 0.1 + 4.9 * rel
+            updateSpeedVis(rainbowSpeed)
+            rainbowCtrl.speed = rainbowSpeed
+            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
+        end
+    end))
+    _T(UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
+        end
+    end))
+    
+    -- Hex Input Logic
+    hexInp.FocusLost:Connect(function()
+        local txt = hexInp.Text:gsub("#","")
+        if #txt == 6 then
+            local r = tonumber(txt:sub(1,2),16)
+            local g = tonumber(txt:sub(3,4),16)
+            local b = tonumber(txt:sub(5,6),16)
+            if r and g and b then
+                disableRainbow()
+                color = Color3.fromRGB(r,g,b); h, s, v = Color3.toHSV(color)
+                applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+                return
+            end
+        end
+        hexInp.Text = hexStr(color) -- Revert
+    end)
+    
+    -- RGB Input Logic
+    local function applyRGB()
+        local r = tonumber(rInp.Text) or math.floor(color.R*255+0.5)
+        local g = tonumber(gInp.Text) or math.floor(color.G*255+0.5)
+        local b = tonumber(bInp.Text) or math.floor(color.B*255+0.5)
+        r = math.clamp(math.floor(r), 0, 255)
+        g = math.clamp(math.floor(g), 0, 255)
+        b = math.clamp(math.floor(b), 0, 255)
+        disableRainbow()
+        color = Color3.fromRGB(r,g,b); h, s, v = Color3.toHSV(color)
+        applyMain()
+        pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
+    end
+    rInp.FocusLost:Connect(applyRGB)
+    gInp.FocusLost:Connect(applyRGB)
+    bInp.FocusLost:Connect(applyRGB)
+    
+    -- Rainbow Toggle Logic
     rbToggle.MouseButton1Click:Connect(function()
         rainbowEnabled = not rainbowEnabled
         tween(rbSw, {BackgroundColor3 = rainbowEnabled and Theme.Accent or Color3.fromRGB(214, 218, 226)})
@@ -1314,101 +1513,11 @@ local function buildColorpickerUI(parent, opts)
         end
     end)
     
-    local svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
-    local function disableRainbow()
-        if rainbowEnabled then
-            rainbowEnabled = false; rainbowCtrl.active = false
-            tween(rbSw, {BackgroundColor3 = Color3.fromRGB(214, 218, 226)})
-            tween(rbKnob, {Position = UDim2.new(0,2,0,2)})
-            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        end
-    end
-    
-    rbSpeedTrack.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            speedDrag = true
-            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
-            rainbowSpeed = 0.1 + 4.9 * rel
-            updateSpeedVis(rainbowSpeed)
-            rainbowCtrl.speed = rainbowSpeed
-            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
-        end
-    end)
-    
-    sv.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            svDrag = true; disableRainbow()
-            local rx = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
-            local ry = math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
-            s, v = rx, 1 - ry; applyMain()
-            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        end
-    end)
-    hue.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            hueDrag = true; disableRainbow()
-            h = math.clamp((i.Position.X - hue.AbsolutePosition.X) / hue.AbsoluteSize.X, 0, 1)
-            applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        end
-    end)
-    alphaBg.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            alphaDrag = true
-            local rel = math.clamp((i.Position.X - alphaBg.AbsolutePosition.X) / alphaBg.AbsoluteSize.X, 0, 1)
-            alpha = 1 - rel
-            alphaKnob.Position = UDim2.new(rel, 0, 0.5, 0)
-            if alphaGrad then
-                alphaGrad.Transparency = NumberSequence.new({
-                    NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)})
-            end
-            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
-        end
-    end)
-    _T(UserInputService.InputChanged:Connect(function(i)
-        if i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-        if svDrag then
-            local rx = math.clamp((i.Position.X - sv.AbsolutePosition.X) / sv.AbsoluteSize.X, 0, 1)
-            local ry = math.clamp((i.Position.Y - sv.AbsolutePosition.Y) / sv.AbsoluteSize.Y, 0, 1)
-            s, v = rx, 1 - ry; applyMain()
-            pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        end
-        if hueDrag then
-            h = math.clamp((i.Position.X - hue.AbsolutePosition.X) / hue.AbsoluteSize.X, 0, 1)
-            applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        end
-        if alphaDrag then
-            local rel = math.clamp((i.Position.X - alphaBg.AbsolutePosition.X) / alphaBg.AbsoluteSize.X, 0, 1)
-            alpha = 1 - rel
-            alphaKnob.Position = UDim2.new(rel, 0, 0.5, 0)
-            if alphaGrad then
-                alphaGrad.Transparency = NumberSequence.new({
-                    NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(1, 0)})
-            end
-            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
-        end
-        if speedDrag then
-            local rel = math.clamp((i.Position.X - rbSpeedTrack.AbsolutePosition.X) / rbSpeedTrack.AbsoluteSize.X, 0, 1)
-            rainbowSpeed = 0.1 + 4.9 * rel
-            updateSpeedVis(rainbowSpeed)
-            rainbowCtrl.speed = rainbowSpeed
-            pcall(onChange, color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed})
-        end
-    end))
-    _T(UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            svDrag, hueDrag, alphaDrag, speedDrag = false, false, false, false
-        end
-    end))
-    hex.FocusLost:Connect(function()
-        local txt = hex.Text:gsub("#","")
-        local r = tonumber(txt:sub(1,2),16)
-        local g = tonumber(txt:sub(3,4),16)
-        local b = tonumber(txt:sub(5,6),16)
-        if r and g and b then
-            disableRainbow()
-            color = Color3.fromRGB(r,g,b); h, s, v = Color3.toHSV(color)
-            applyMain(); pcall(onChange, color, alpha, {rainbowEnabled = false, rainbowSpeed = rainbowSpeed})
-        else hex.Text = hexStr(color) end
+    -- Close Button
+    closeBtn.MouseButton1Click:Connect(function()
+        rainbowCtrl.keepAlive = false
+        rainbowCtrl.active = false
+        if opts.OnClose then opts.OnClose() end
     end)
     
     return root, {
@@ -2021,9 +2130,42 @@ local function createColorpicker(section, opts)
         Position = UDim2.new(1,-48,0.5,-11), Size = UDim2.new(0,36,0,22)}, row)
     addCorner(swatch, UDim.new(0,6)); addStroke(swatch, Theme.Outline, 1, 0.2)
     local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
+    
+    local activeCpApi = nil
+    local cpElement = {
+        Set = function(c, a, rbData) 
+            color = c; if a then alpha = a end; swatch.BackgroundColor3 = c 
+            if rbData then
+                rainbowEnabled = rbData.rainbowEnabled
+                rainbowSpeed = rbData.rainbowSpeed
+            end
+            if activeCpApi then activeCpApi.Set(c, a, rbData) end
+        end, 
+        Get = function() return color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed} end, 
+        _meta = {Name = T(opts.Name or ""), Type = "Colorpicker", Element = row,
+            Options = opts.Options, State = getSectionState(section),
+            Set = function(c, a, rbData) cpElement.Set(c, a, rbData) end
+        },
+        _rawName = opts.Name, _type = "Colorpicker"
+    }
+    
+    -- Main persistent rainbow controller for the swatch
+    local swatchRainbowCtrl = {
+        active = rainbowEnabled, speed = rainbowSpeed, root = swatch,
+        keepAlive = true,
+        setFromRainbow = function(hv)
+            local c = Color3.fromHSV(hv, 1, 1)
+            color = c
+            swatch.BackgroundColor3 = c
+            if activeCpApi then activeCpApi.Set(c, alpha, {rainbowEnabled = true, rainbowSpeed = rainbowSpeed}) end
+            if opts.Callback then pcall(opts.Callback, c, alpha) end
+        end,
+    }
+    table.insert(RainbowControllers, swatchRainbowCtrl)
+    
     click.MouseButton1Click:Connect(function()
         local sub = new("Frame", {BackgroundColor3 = Theme.Panel, BorderSizePixel = 0,
-            Size = UDim2.new(0,280,0,320), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
+            Size = UDim2.new(0,300,0,400), Visible = true, ZIndex = Config.PopupZ + 20}, nil)
         addCorner(sub, UDim.new(0,10)); addStroke(sub, Theme.Outline, 1, 0.1)
         local subTitle = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,16,0,10),
             Size = UDim2.new(1,-28,0,16), Font = Config.CurrentFontFamily, Text = T(opts.Name or ""),
@@ -2031,61 +2173,51 @@ local function createColorpicker(section, opts)
             ZIndex = Config.PopupZ + 21}, sub)
         themeText(subTitle, "Text")
         local cpHolder = new("Frame", {BackgroundTransparency = 1,
-            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,260),
+            Position = UDim2.new(0,20,0,32), Size = UDim2.new(1,-40,0,360),
             ZIndex = Config.PopupZ + 21}, sub)
-        local cpApi = buildColorpickerUI(cpHolder, {
-            Color = color, Alpha = alpha, Width = 240,
+            
+        activeCpApi = buildColorpickerUI(cpHolder, {
+            Color = color, Alpha = alpha, Width = 260,
             Rainbow = rainbowEnabled, RainbowSpeed = rainbowSpeed,
             OnChange = function(c, a, rbData)
                 color = c; if a then alpha = a end
+                swatch.BackgroundColor3 = c
                 if rbData then
                     rainbowEnabled = rbData.rainbowEnabled
                     rainbowSpeed = rbData.rainbowSpeed
+                    swatchRainbowCtrl.active = rainbowEnabled
+                    swatchRainbowCtrl.speed = rainbowSpeed
                 end
-                swatch.BackgroundColor3 = c
                 if opts.Callback then pcall(opts.Callback, c, a) end
             end,
+            OnClose = function()
+                if activeCpApi then activeCpApi.Destroy() end
+                activeCpApi = nil
+                closeTopPopup()
+            end
         })
-        local closeSub = new("TextButton", {BorderSizePixel = 0,
-            Position = UDim2.new(0,16,1,-38), Size = UDim2.new(1,-32,0,28),
-            Font = Config.CurrentFontFamily, Text = "Close", TextSize = 11, AutoButtonColor = false,
-            ZIndex = Config.PopupZ + 21}, sub)
-        themeBg(closeSub, "Accent"); closeSub.TextColor3 = Theme.OnAccent
-        addCorner(closeSub, UDim.new(0,6))
-        closeSub.MouseButton1Click:Connect(function()
-            if cpApi and cpApi.Destroy then cpApi.Destroy() end
-            closeTopPopup()
-        end)
+        
         pushPopup(sub, function()
             if row and row.Parent and sub.Parent then
                 local ap, as = row.AbsolutePosition, row.AbsoluteSize
                 local vp = workspace.CurrentCamera.ViewportSize
                 local x, y = ap.X + as.X + 8, ap.Y
-                if x + 280 > vp.X then x = ap.X - 288 end
-                if y + 320 > vp.Y then y = vp.Y - 320 - 8 end
+                if x + 300 > vp.X then x = ap.X - 308 end
+                if y + 400 > vp.Y then y = vp.Y - 400 - 8 end
                 if y < 4 then y = 4 end
                 sub.Position = UDim2.fromOffset(x, y)
             end
-        end, function() end)
+        end, function() 
+            -- When popup is closed externally (click outside, escape)
+            if activeCpApi then activeCpApi.Destroy() end
+            activeCpApi = nil
+        end)
     end)
-    local meta = {Name = T(opts.Name or ""), Type = "Colorpicker", Element = row,
-        Options = opts.Options, State = getSectionState(section),
-        Set = function(c, a, rbData) 
-            color = c; if a then alpha = a end; swatch.BackgroundColor3 = c 
-            if rbData then
-                rainbowEnabled = rbData.rainbowEnabled
-                rainbowSpeed = rbData.rainbowSpeed
-            end
-        end}
-    attachRowBinds(row, nil, meta)
+    
+    attachRowBinds(row, nil, cpElement._meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
-    return {
-        Set = meta.Set, 
-        Get = function() return color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed} end, 
-        _meta = meta,
-        _rawName = opts.Name, _type = "Colorpicker"
-    }
+    return cpElement
 end
 
 local function createKeybind(section, opts)
