@@ -1,7 +1,16 @@
 --// AirHub — 03_antiaim.lua (airhubUI build, RU localization + tooltips)
---// Logic: Body Anti-Aim + Desync + Animation Breaker (unchanged).
+--// Logic: Body Anti-Aim + Desync + Animation Breaker.
 --// UI:    airhubUI (AddToggle/Slider/Dropdown/Input/Button/Colorpicker).
---// Added: full RU/EN localization for every element + tooltips for all controls.
+--//
+--// FIX (Yaw "shifted"):
+--//   1. GetBaseYaw: atan2(x, z) → atan2(-x, -z) для всех reference.
+--//      Раньше для камеры вперёд возвращалось π (180°), т.е. Yaw=0 сразу
+--//      означал "развёрнут на 180°" — ощущение "сдвинутого" Yaw.
+--//   2. Static: убран лишний "+ amount". Слайдер Yaw теперь = точный
+--//      угол от reference-направления.
+--//   3. Player reference: использует Humanoid.MoveDirection (не зависит
+--//      от поворота самого тела, иначе AA крутит сам себя).
+--//   4. Yaw slider: Decimals = 0, шаг 1°.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -70,11 +79,11 @@ H.AntiAim = {
     AnimationBreaker = {
         Settings = {
             Enabled        = false,
-            Mode           = "Speed",       -- Speed | RandomFrames
-            Preset         = "None",        -- "None" | preset name | "Custom"
-            CustomId       = "",            -- rbxassetid://...
-            Speed          = 1,             -- Speed mode
-            RandomInterval = 0.1,           -- RandomFrames mode
+            Mode           = "Speed",
+            Preset         = "None",
+            CustomId       = "",
+            Speed          = 1,
+            RandomInterval = 0.1,
             ApplyToServer  = true,
         },
         Internal = {
@@ -103,29 +112,57 @@ local AntiAim = H.AntiAim
 local AB = AntiAim.AnimationBreaker
 
 --// ===========================================================================
---// Generic helpers
+--// FIXED: base yaw
+--//   CFrame.Angles(0, yaw, 0).LookVector = (-sin(yaw), 0, -cos(yaw))
+--//   Чтобы LookVector(camera) совпал с LookVector(character) при Yaw=0:
+--//       -sin(yaw) = look.X   →  yaw = atan2(-look.X, -look.Z)
+--//       -cos(yaw) = look.Z
+--//   Раньше было atan2(look.X, look.Z) → для (0,0,-1) возвращало π (180°).
 --// ===========================================================================
 local function GetBaseYaw(reference, char)
     if reference == "Camera" then
-        local look = workspace.CurrentCamera.CFrame.LookVector
+        local cam = workspace.CurrentCamera
+        if not cam then return 0 end
+        local look = cam.CFrame.LookVector
         local flat = Vector3.new(look.X, 0, look.Z)
-        if flat.Magnitude > 0.001 then return math.atan2(flat.X, flat.Z) else return 0 end
+        if flat.Magnitude > 0.001 then
+            return math.atan2(-flat.X, -flat.Z)
+        end
+        return 0
     elseif reference == "Movement" then
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if hrp then
             local vel = hrp.Velocity
             local horizontal = Vector3.new(vel.X, 0, vel.Z)
-            if horizontal.Magnitude > 0.5 then return math.atan2(horizontal.X, horizontal.Z) end
+            if horizontal.Magnitude > 0.5 then
+                return math.atan2(-horizontal.X, -horizontal.Z)
+            end
         end
-        local look = workspace.CurrentCamera.CFrame.LookVector
-        local flat = Vector3.new(look.X, 0, look.Z)
-        if flat.Magnitude > 0.001 then return math.atan2(flat.X, flat.Z) else return 0 end
-    elseif reference == "Player" then
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local look = hrp.CFrame.LookVector
+        local cam = workspace.CurrentCamera
+        if cam then
+            local look = cam.CFrame.LookVector
             local flat = Vector3.new(look.X, 0, look.Z)
-            if flat.Magnitude > 0.001 then return math.atan2(flat.X, flat.Z) else return 0 end
+            if flat.Magnitude > 0.001 then
+                return math.atan2(-flat.X, -flat.Z)
+            end
+        end
+        return 0
+    elseif reference == "Player" then
+        -- ИСПОЛЬЗУЕМ MoveDirection (не зависит от rotation AA), фолбэк — камера
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local md = hum.MoveDirection
+            if md and md.Magnitude > 0.1 then
+                return math.atan2(-md.X, -md.Z)
+            end
+        end
+        local cam = workspace.CurrentCamera
+        if cam then
+            local look = cam.CFrame.LookVector
+            local flat = Vector3.new(look.X, 0, look.Z)
+            if flat.Magnitude > 0.001 then
+                return math.atan2(-flat.X, -flat.Z)
+            end
         end
         return 0
     end
@@ -391,7 +428,7 @@ local function StopDesync()
 end
 
 --// ===========================================================================
---// Animation Breaker — presets
+--// Animation Breaker
 --// ===========================================================================
 AB.AnimationPresets = {
     ["None"]              = nil,
@@ -422,7 +459,6 @@ AB.AnimationPresets = {
     ["Custom"]            = nil,
 }
 
---// Animation Breaker helpers
 local function GetAnimator(char)
     if not char then return nil end
     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -553,7 +589,6 @@ local function ApplyRandomFramesToOurTrack(tr, dt)
     end
 end
 
---// Main Animation Breaker entry
 local function ApplyAnimationBreaker(dt)
     if H.ShuttingDown then return end
     if not AB.Settings.Enabled then return end
@@ -665,8 +700,6 @@ AB.Functions.ListPresets = function()
     table.sort(out)
     return out
 end
--- Fixed: the original returned false for "None" because nil == nil is true
--- and "None" ~= "Custom" was true, causing the guard to short-circuit.
 AB.Functions.ApplyPreset = function(name)
     if name ~= "None" and name ~= "Custom" and AB.AnimationPresets[name] == nil then
         return false
@@ -745,7 +778,9 @@ local function ApplyAntiAim()
         local yaw = 0
 
         if mode == "Static" then
-            yaw = baseYaw + math.rad(bodySet.Yaw + amount)
+            -- FIX: было baseYaw + math.rad(bodySet.Yaw + amount) → сдвиг на Amount (15°)
+            -- Теперь Yaw = точный угол от base.
+            yaw = baseYaw + math.rad(bodySet.Yaw)
         elseif mode == "Spin" then
             yaw = baseYaw + math.rad((now * speed) % 360 + bodySet.Yaw)
         elseif mode == "Jitter" then
@@ -857,7 +892,7 @@ RunService:BindToRenderStep(AA_BIND_NAME, 201, function()
 end)
 
 --// ===========================================================================
---// Public functions / exports
+--// Public functions
 --// ===========================================================================
 AntiAim.Functions = {
     ResetSettings = function()
@@ -956,18 +991,14 @@ if not Window then
     return
 end
 
---// ---------------------------------------------------------------------------
---// Localization injection (RU + EN) — compatible with airhubUI.L
---// ---------------------------------------------------------------------------
+--// Локализация (инъекция в airhubUI.L)
 do
     local UI = getgenv().airhubUI
     if UI and UI.L and UI.L.en and UI.L.ru then
         local en = {
-            -- sections
             aa_body = "Body (Server)",
             aa_anim = "Animation Breaker",
             aa_desync = "Desync (Client)",
-            -- body
             aa_enabled = "Enabled",
             aa_mode = "Mode",
             aa_method = "Method",
@@ -977,7 +1008,6 @@ do
             aa_speed = "Speed (any number)",
             aa_ignore_moving = "Ignore when moving",
             aa_move_threshold = "Move speed threshold",
-            -- animation breaker
             aa_anim_enabled = "Enabled",
             aa_anim_preset = "Animation",
             aa_anim_custom_id = "Custom ID (rbxassetid://...)",
@@ -987,7 +1017,6 @@ do
             aa_anim_apply_server = "Apply to Server (SetNetworkOwner)",
             aa_anim_reload = "Reload",
             aa_anim_stop = "Stop",
-            -- desync
             aa_desync_enabled = "Enabled",
             aa_desync_mode = "Mode",
             aa_desync_method = "Method",
@@ -1004,13 +1033,12 @@ do
             aa_desync_refresh_shot = "Refresh position on shot",
             aa_desync_save = "Save Current Position",
 
-            -- tooltips
             tt_aa_enabled = "Master switch for body anti-aim",
             tt_aa_mode = "Static = fixed angle | Spin = continuous rotation | Jitter = random angle | Sway = sinusoidal oscillation",
             tt_aa_method = "CFrame = direct write | BodyGyro = physics body | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = spin force",
-            tt_aa_reference = "Camera = relative to look | Movement = relative to velocity | Player = relative to HRP look",
-            tt_aa_yaw = "Base yaw offset in degrees (-180 to 180)",
-            tt_aa_amount = "Amplitude for Jitter/Sway/Static (in degrees)",
+            tt_aa_reference = "Camera = relative to look | Movement = relative to velocity | Player = relative to move input (fallback camera)",
+            tt_aa_yaw = "Base yaw offset in degrees (-180 to 180). 0 = face same direction as reference.",
+            tt_aa_amount = "Amplitude for Jitter/Sway (in degrees). Not used in Static or Spin mode.",
             tt_aa_speed = "Spin speed / Jitter frequency / Sway frequency",
             tt_aa_ignore_moving = "Skip anti-aim while your character is moving",
             tt_aa_move_threshold = "Velocity magnitude above which movement counts as 'moving'",
@@ -1040,11 +1068,9 @@ do
             tt_aa_desync_save = "Manually save current position for OldPosition mode",
         }
         local ru = {
-            -- sections
             aa_body = "Тело (сервер)",
             aa_anim = "Ломатель анимаций",
             aa_desync = "Десинк (клиент)",
-            -- body
             aa_enabled = "Включено",
             aa_mode = "Режим",
             aa_method = "Метод",
@@ -1054,7 +1080,6 @@ do
             aa_speed = "Скорость (любое число)",
             aa_ignore_moving = "Игнорировать при движении",
             aa_move_threshold = "Порог скорости движения",
-            -- animation breaker
             aa_anim_enabled = "Включено",
             aa_anim_preset = "Анимация",
             aa_anim_custom_id = "Свой ID (rbxassetid://...)",
@@ -1064,7 +1089,6 @@ do
             aa_anim_apply_server = "Применять на сервере (SetNetworkOwner)",
             aa_anim_reload = "Перезагрузить",
             aa_anim_stop = "Остановить",
-            -- desync
             aa_desync_enabled = "Включено",
             aa_desync_mode = "Режим",
             aa_desync_method = "Метод",
@@ -1081,13 +1105,12 @@ do
             aa_desync_refresh_shot = "Обновлять позицию при выстреле",
             aa_desync_save = "Сохранить текущую позицию",
 
-            -- tooltips
             tt_aa_enabled = "Главный выключатель анти-аима тела",
             tt_aa_mode = "Static = фикс. угол | Spin = непрерывное вращение | Jitter = случайный угол | Sway = синусоида",
             tt_aa_method = "CFrame = прямая запись | BodyGyro = физическое тело | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = сила вращения",
-            tt_aa_reference = "Camera = относительно взгляда | Movement = относительно скорости | Player = относительно HRP",
-            tt_aa_yaw = "Базовое смещение рыскания в градусах (-180 до 180)",
-            tt_aa_amount = "Амплитуда для Jitter/Sway/Static (в градусах)",
+            tt_aa_reference = "Camera = относительно взгляда | Movement = относительно скорости | Player = относительно ввода движения (фолбэк — камера)",
+            tt_aa_yaw = "Базовое смещение рыскания в градусах (-180 до 180). 0 = смотреть туда же, куда референс.",
+            tt_aa_amount = "Амплитуда для Jitter/Sway (в градусах). Не используется в Static и Spin.",
             tt_aa_speed = "Скорость вращения / частота Jitter / частота Sway",
             tt_aa_ignore_moving = "Пропускать анти-аим пока персонаж движется",
             tt_aa_move_threshold = "Порог скорости, выше которого движение считается 'движением'",
@@ -1130,7 +1153,6 @@ local relAnimPreset  = AntiAim.ReloadAnimationPreset
 local stopAnimBreaker = AntiAim.StopAnimationBreaker
 local applyAnimPreset = AntiAim.ApplyAnimationPreset
 
--- setters
 local function setBody(k, v) AntiAim.Settings.Body[k] = v end
 local function setDesync(k, v) AntiAim.Desync.Settings[k] = v end
 local function setAB(k, v) AB.Settings[k] = v end
@@ -1142,32 +1164,12 @@ local desyncModes  = { "Default", "OldPosition", "Void", "InPlayer" }
 local desyncMethods = { "CFrame", "Position", "Velocity", "Motor6D", "HipHeight", "Network" }
 local animModeList = { "Speed", "RandomFrames" }
 local animPresetList = {
-    "None",
-    "Custom",
-    "Tornado",
-    "AntiAim",
-    "Moving AntiAim",
-    "Default R15 Idle",
-    "Default R15 Walk",
-    "Default R15 Run",
-    "Default R15 Jump",
-    "Default R15 Fall",
-    "Default R6 Idle",
-    "Default R6 Walk",
-    "Default R6 Run",
-    "Default R6 Jump",
-    "Default R6 Fall",
-    "Zombie Idle",
-    "Zombie Walk",
-    "Zombie Run",
-    "Zombie Jump",
-    "Ninja Idle",
-    "Ninja Run",
-    "Pirate Idle",
-    "Pirate Run",
-    "Robot Idle",
-    "Toy Idle",
-    "Levitation Idle",
+    "None", "Custom", "Tornado", "AntiAim", "Moving AntiAim",
+    "Default R15 Idle", "Default R15 Walk", "Default R15 Run", "Default R15 Jump", "Default R15 Fall",
+    "Default R6 Idle", "Default R6 Walk", "Default R6 Run", "Default R6 Jump", "Default R6 Fall",
+    "Zombie Idle", "Zombie Walk", "Zombie Run", "Zombie Jump",
+    "Ninja Idle", "Ninja Run", "Pirate Idle", "Pirate Run",
+    "Robot Idle", "Toy Idle", "Levitation Idle",
 }
 
 --// -------- LEFT: Body (Server) --------
@@ -1184,8 +1186,9 @@ aaMain:AddDropdown({ Name = "aa_method", Value = AntiAim.Settings.Method, List =
 aaMain:AddDropdown({ Name = "aa_reference", Value = AntiAim.Settings.Body.Reference, List = refModes,
     Callback = function(v) setBody("Reference", v) end,
     Tooltip = "tt_aa_reference" })
+-- FIX: явный Decimals = 0 (шаг 1°)
 aaMain:AddSlider({ Name = "aa_yaw", Value = AntiAim.Settings.Body.Yaw,
-    Min = -180, Max = 180,
+    Min = -180, Max = 180, Decimals = 0,
     Callback = function(v) setBody("Yaw", v) end,
     Tooltip = "tt_aa_yaw" })
 aaMain:AddInput({ Name = "aa_amount",
@@ -1365,4 +1368,4 @@ desyncSec:AddButton({ Name = "aa_desync_save",
     end,
     Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips)")
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw)")
