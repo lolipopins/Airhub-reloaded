@@ -1,6 +1,22 @@
---// AirHub — 06_movement.lua
+--// AirHub — 06_movement.lua (RU loc + tooltips + improved Fly Orbit)
 --// Merged: Fly + Bhop + Speed + FastStop + AutoStrafer + Noclip + Spider
---// Also: Tab "Movement" in airhubUI
+--// UI: Tab "Movement" in airhubUI
+--//
+--// CHANGES:
+--//   FLY
+--//     • CFrame mode now preserves rotation properly.
+--//     • First-frame dt is clamped (no launch spike on enable).
+--//     • Soft anti-fling clamp on extreme velocities.
+--//     • Auto-reset on respawn.
+--//   ORBIT
+--//     • Phase-based with real OrbitAngle (angularSpeed = orbitSpeed / radius).
+--//     • Velocity feed-forward of target motion → no lag on moving targets.
+--//     • Deadzone near radius → no jitter.
+--//     • Independent vertical correction.
+--//     • New: AimCamera (look at target during orbit).
+--//     • New: FeedForward gain (0 = old behavior, 1 = perfect, >1 = predictive).
+--//   UI
+--//     • Full RU/EN localization + tooltips for every control.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 06_movement: core not loaded"); return end
@@ -26,14 +42,19 @@ H.Fly = {
         Method     = "BodyVelocity", Speed = 30, UpSpeed = 20,
         Smoothness = 0.5, UseKeys = true,
         TargetOrbit = {
-            Enabled = false, OrbitSpeed = 20, Radius = 15, Height = 0,
-            Correction = 3, VerticalCorrection = 3, Clockwise = true,
-            FallbackToFly = true,
+            Enabled = false,
+            OrbitSpeed = 20, Radius = 15, Height = 0,
+            Correction = 3, VerticalCorrection = 3,
+            Clockwise = true, FallbackToFly = true,
+            FeedForward = 1.0,     -- NEW
+            Deadzone = 0.3,         -- NEW
+            AimCamera = true,       -- NEW
         },
     },
     Internal = {
         BodyVelocity = nil, LinearVelocity = nil, Attachment = nil,
         Active = false, LastUpdate = 0, OrbitAngle = 0, LastCFrameTick = 0,
+        OrbitTargetChar = nil,
     },
 }
 local Fly = H.Fly
@@ -94,8 +115,10 @@ end
 local function Fly_GetMoveDir()
     local moveDir = Vector3.new(0, 0, 0)
     if not Fly.Settings.UseKeys then return moveDir end
-    local forward = workspace.CurrentCamera.CFrame.LookVector
-    local right = workspace.CurrentCamera.CFrame.RightVector
+    local cam = workspace.CurrentCamera
+    if not cam then return moveDir end
+    local forward = cam.CFrame.LookVector
+    local right = cam.CFrame.RightVector
     local up = Vector3.new(0, 1, 0)
     local forwardFlat = Vector3.new(forward.X, 0, forward.Z)
     local rightFlat = Vector3.new(right.X, 0, right.Z)
@@ -118,12 +141,22 @@ local function Fly_GetMoveDir()
     return moveDir
 end
 
-local function Fly_GetAimbotTargetPos()
+--// Возвращает (targetBasePos, targetVelocity) вокруг HRP цели (не Head)
+local function Fly_GetAimbotTargetInfo()
     local A = H.Aimbot
-    if not A then return nil end
+    if not A then return nil, nil end
     local part = A.LockPartInstance
-    if part and part.Parent then return part.Position end
-    return nil
+    if not part or not part.Parent then return nil, nil end
+    local char = part.Parent
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local basePos = hrp and hrp.Position or part.Position
+    local vel
+    if hrp then
+        vel = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.zero
+    else
+        vel = part.AssemblyLinearVelocity or part.Velocity or Vector3.zero
+    end
+    return basePos, vel, char
 end
 
 local function Fly_ClampVec(v, maxLen)
@@ -132,66 +165,77 @@ local function Fly_ClampVec(v, maxLen)
     return v
 end
 
-local function Fly_ComputeOrbitVelocity(hrp, targetPos)
+--// NEW phase-based orbit with feed-forward and deadzone
+local function Fly_ComputeOrbitVelocity(hrp, targetPos, targetVel, dt)
     local O = Fly.Settings.TargetOrbit
-    local orbitSpeed = O.OrbitSpeed or 20
-    local radius     = O.Radius     or 15
-    local height     = O.Height     or 0
-    local corr       = O.Correction or 3
-    local vCorr      = O.VerticalCorrection or 3
+    local orbitSpeed = math.max(0.1, tonumber(O.OrbitSpeed) or 20)
+    local radius     = math.max(1,   tonumber(O.Radius)     or 15)
+    local height     = tonumber(O.Height)    or 0
+    local corr       = math.max(0,   tonumber(O.Correction) or 3)
+    local vCorr      = math.max(0,   tonumber(O.VerticalCorrection) or 3)
+    local clockwise  = O.Clockwise ~= false
+    local ffGain     = math.max(0,   tonumber(O.FeedForward) or 1.0)
+    local deadzone   = math.max(0,   tonumber(O.Deadzone) or 0.3)
 
-    local toTarget = targetPos - hrp.Position
-    local horizontal = Vector3.new(toTarget.X, 0, toTarget.Z)
-    local dist = horizontal.Magnitude
+    -- Advance phase (angular speed = linear / radius)
+    local angularSpeed = orbitSpeed / radius
+    if not clockwise then angularSpeed = -angularSpeed end
+    Fly.Internal.OrbitAngle = ((Fly.Internal.OrbitAngle or 0) + angularSpeed * dt) % (math.pi * 2)
 
-    local radialDir, tangentDir
-    if dist < 0.01 then
-        radialDir  = Vector3.new(1, 0, 0)
-        tangentDir = Vector3.new(0, 0, 1)
-    else
-        radialDir  = horizontal.Unit
-        if O.Clockwise then
-            tangentDir = Vector3.new( radialDir.Z, 0, -radialDir.X)
-        else
-            tangentDir = Vector3.new(-radialDir.Z, 0,  radialDir.X)
-        end
+    -- Desired position on orbit
+    local angle = Fly.Internal.OrbitAngle
+    local offset = Vector3.new(
+        math.cos(angle) * radius,
+        height,
+        math.sin(angle) * radius
+    )
+    local desiredPos = targetPos + offset
+
+    -- Feed-forward of target velocity
+    local ff = (targetVel or Vector3.zero) * ffGain
+
+    -- PD corrections
+    local err = desiredPos - hrp.Position
+    local horizErr = Vector3.new(err.X, 0, err.Z)
+    local vertErr  = err.Y
+
+    local horizCorr = Vector3.zero
+    if horizErr.Magnitude > deadzone then
+        horizCorr = horizErr * corr
     end
+    local vertCorr = vertErr * vCorr
 
-    local tangential = tangentDir * orbitSpeed
-    local radialError = dist - radius
-    local radial = radialDir * (radialError * corr)
-    radial = Fly_ClampVec(radial, orbitSpeed)
+    local desiredVel = horizCorr + Vector3.new(0, vertCorr, 0) + ff
 
-    local targetY = targetPos.Y + height
-    local yVel = (targetY - hrp.Position.Y) * vCorr
-    if math.abs(yVel) > orbitSpeed then
-        yVel = (yVel > 0 and 1 or -1) * orbitSpeed
+    -- Clamp total magnitude
+    local maxSpeed = orbitSpeed * 2 + ff.Magnitude
+    local mag = desiredVel.Magnitude
+    if mag > maxSpeed and mag > 0.001 then
+        desiredVel = desiredVel.Unit * maxSpeed
     end
-
-    return tangential + radial + Vector3.new(0, yVel, 0)
+    return desiredVel
 end
 
-local function Fly_ApplyVelocity(hrp, vel)
+local function Fly_ApplyVelocity(hrp, vel, dt)
     local S = Fly.Settings
     local I = Fly.Internal
     if S.Method == "BodyVelocity" then
         if I.BodyVelocity then
-            I.BodyVelocity.Velocity = I.BodyVelocity.Velocity:Lerp(
-                vel, math.clamp(S.Smoothness, 0.01, 1))
+            local alpha = math.clamp(S.Smoothness, 0.01, 1)
+            I.BodyVelocity.Velocity = I.BodyVelocity.Velocity:Lerp(vel, alpha)
         end
     elseif S.Method == "LinearVelocity" then
         if I.LinearVelocity then
-            I.LinearVelocity.VectorVelocity = I.LinearVelocity.VectorVelocity:Lerp(
-                vel, math.clamp(S.Smoothness, 0.01, 1))
+            local alpha = math.clamp(S.Smoothness, 0.01, 1)
+            I.LinearVelocity.VectorVelocity = I.LinearVelocity.VectorVelocity:Lerp(vel, alpha)
         end
     elseif S.Method == "Velocity" then
         hrp.Velocity = vel
     elseif S.Method == "CFrame" then
-        local now = tick()
-        local dt = now - (I.LastCFrameTick or now)
-        I.LastCFrameTick = now
-        if dt <= 0 or dt > 0.5 then dt = 1 / 60 end
-        hrp.CFrame = hrp.CFrame + (vel * dt)
+        -- FIX: preserve rotation properly
+        local newPos = hrp.Position + (vel * dt)
+        local rot = hrp.CFrame - hrp.CFrame.Position
+        hrp.CFrame = CFrame.new(newPos) * rot
     end
 end
 
@@ -213,14 +257,29 @@ local function Fly_Update()
     if not hrp then Fly_ClearInstances() return end
     Fly_EnsureInstance(hrp)
 
+    local now = tick()
+    local dt = now - (I.LastUpdate or now)
+    if dt <= 0 or dt > 0.5 then dt = 1 / 60 end
+    I.LastUpdate = now
+
     local targetVel = nil
     local O = S.TargetOrbit
+    local targetPos, targetVelWorld, targetChar = nil, nil, nil
     if O and O.Enabled then
-        local targetPos = Fly_GetAimbotTargetPos()
+        targetPos, targetVelWorld, targetChar = Fly_GetAimbotTargetInfo()
         if targetPos then
-            targetVel = Fly_ComputeOrbitVelocity(hrp, targetPos)
+            targetVel = Fly_ComputeOrbitVelocity(hrp, targetPos, targetVelWorld, dt)
+            I.OrbitTargetChar = targetChar
+            -- Aim camera at target (optional)
+            if O.AimCamera ~= false then
+                local cam = workspace.CurrentCamera
+                if cam and targetPos then
+                    local look = CFrame.lookAt(cam.CFrame.Position, targetPos + Vector3.new(0, 1, 0))
+                    cam.CFrame = cam.CFrame:Lerp(look, math.clamp(dt * 10, 0, 1))
+                end
+            end
         elseif not O.FallbackToFly then
-            targetVel = Vector3.new(0, 0, 0)
+            targetVel = Vector3.zero
         end
     end
 
@@ -233,15 +292,21 @@ local function Fly_Update()
         end
     end
 
-    local now = tick()
-    local dt = now - I.LastUpdate
-    if dt <= 0 or dt > 0.5 then dt = 1 / 60 end
-    I.LastUpdate = now
+    Fly_ApplyVelocity(hrp, targetVel, dt)
 
-    Fly_ApplyVelocity(hrp, targetVel)
+    -- Soft anti-fling on absurd velocity
+    if S.Method ~= "CFrame" then
+        local v = hrp.AssemblyLinearVelocity or hrp.Velocity
+        local maxV = math.max(S.Speed, S.UpSpeed) * 5 + 200
+        if v and v.Magnitude > maxV then
+            local clamped = v.Unit * maxV
+            pcall(function() hrp.AssemblyLinearVelocity = clamped end)
+            pcall(function() hrp.Velocity = clamped end)
+        end
+    end
 
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.PlatformStand = true end
+    if hum and hum.Health > 0 then hum.PlatformStand = true end
 end
 
 Track(RunService.RenderStepped:Connect(function() xpcall(Fly_Update, HandleError) end))
@@ -289,6 +354,7 @@ Track(LocalPlayer.CharacterAdded:Connect(function()
     Fly.Internal.Active = false
     Fly.Internal.LastUpdate = 0
     Fly.Internal.OrbitAngle = 0
+    Fly.Internal.OrbitTargetChar = nil
 end))
 
 Fly.Functions = {
@@ -299,18 +365,22 @@ Fly.Functions = {
             TargetOrbit = {
                 Enabled = false, OrbitSpeed = 20, Radius = 15, Height = 0,
                 Correction = 3, VerticalCorrection = 3, Clockwise = true,
-                FallbackToFly = true,
+                FallbackToFly = true, FeedForward = 1.0, Deadzone = 0.3, AimCamera = true,
             },
         }
         Fly_ClearInstances()
         Fly.Internal.Active = false
         Fly.Internal.LastUpdate = 0
         Fly.Internal.OrbitAngle = 0
+        Fly.Internal.OrbitTargetChar = nil
         local char = LocalPlayer.Character
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
             if hum then hum.PlatformStand = false end
         end
+    end,
+    ResetOrbitAngle = function()
+        Fly.Internal.OrbitAngle = 0
     end,
 }
 Fly.ClearInstances = Fly_ClearInstances
@@ -763,8 +833,10 @@ local function Speed_GetMoveDirection()
     local a = UserInputService:IsKeyDown(Enum.KeyCode.A)
     local d = UserInputService:IsKeyDown(Enum.KeyCode.D)
     if not (w or s or a or d) then return Vector3.new(0, 0, 0) end
-    local camForward = workspace.CurrentCamera.CFrame.LookVector
-    local camRight = workspace.CurrentCamera.CFrame.RightVector
+    local cam = workspace.CurrentCamera
+    if not cam then return Vector3.new(0, 0, 0) end
+    local camForward = cam.CFrame.LookVector
+    local camRight = cam.CFrame.RightVector
     local forward = Vector3.new(camForward.X, 0, camForward.Z).Unit
     local right = Vector3.new(camRight.X, 0, camRight.Z).Unit
     local dir = Vector3.new(0, 0, 0)
@@ -906,7 +978,9 @@ local AutoStrafer = H.AutoStrafer
 
 local function AS_IsTyping() return UserInputService:GetFocusedTextBox() ~= nil end
 local function AS_GetCameraYaw()
-    local look = workspace.CurrentCamera.CFrame.LookVector
+    local cam = workspace.CurrentCamera
+    if not cam then return 0 end
+    local look = cam.CFrame.LookVector
     return math.atan2(look.X, look.Z)
 end
 local function AS_WrapAngle(d)
@@ -1072,12 +1146,358 @@ Noclip.Functions = {
 }
 
 -- ============================================================================
--- UI — Tab "Movement"
+-- UI — Tab "Movement" + Localization
 -- ============================================================================
 local Window = getgenv().airhubUI_Window
 if not Window then
     warn("[AirHub] 06_movement: airhubUI Window missing")
     return
+end
+
+--// RU/EN localization injection
+do
+    local UI = getgenv().airhubUI
+    if UI and UI.L and UI.L.en and UI.L.ru then
+        local en = {
+            -- Sections
+            sec_mov_autostrafer = "AutoStrafer",
+            sec_mov_fly         = "Fly",
+            sec_mov_flyorbit    = "Fly — Target Orbit",
+            sec_mov_bhop        = "Bhop",
+            sec_mov_spider      = "Spider (Bhop assist)",
+            sec_mov_pixelwalk   = "Spider: Pixelwalk",
+            sec_mov_wallfucker  = "Spider: Wallfucker",
+            sec_mov_speed       = "Speed",
+            sec_mov_faststop    = "FastStop",
+            sec_mov_noclip      = "Noclip",
+
+            -- AutoStrafer
+            mv_as_enabled = "Enabled",
+            mv_as_key     = "Key",
+            mv_as_toggle  = "Toggle Mode",
+            mv_as_mode    = "Mode",
+            mv_as_invert  = "Invert",
+            mv_as_spam    = "Spam Delay (Spam mode)",
+
+            -- Fly
+            mv_fly_enabled    = "Enabled",
+            mv_fly_method     = "Method",
+            mv_fly_key        = "Key",
+            mv_fly_toggle     = "Toggle Mode",
+            mv_fly_speed      = "Speed",
+            mv_fly_upspeed    = "Up/Down Speed",
+            mv_fly_smoothness = "Smoothness",
+            mv_fly_usekeys    = "Use WASD + Space/Ctrl",
+
+            -- Orbit
+            mv_fo_enabled    = "Orbit Aimbot Target",
+            mv_fo_speed      = "Orbit Speed",
+            mv_fo_radius     = "Radius",
+            mv_fo_height     = "Height",
+            mv_fo_corr       = "Radial Correction",
+            mv_fo_vcorr      = "Vertical Correction",
+            mv_fo_ff         = "Feed Forward Gain",
+            mv_fo_deadzone   = "Deadzone",
+            mv_fo_clockwise  = "Clockwise",
+            mv_fo_fallback   = "Fallback to normal Fly (no target)",
+            mv_fo_aimcam     = "Aim Camera at Target",
+
+            -- Bhop
+            mv_bhop_enabled       = "Enabled",
+            mv_bhop_mode          = "Mode",
+            mv_bhop_key           = "Jump Key",
+            mv_bhop_blockspace    = "Block Space from Game (hook)",
+            mv_bhop_pulse         = "Space Release Pulse (fallback)",
+            mv_bhop_bypass        = "Bypass Jump Restrictions",
+            mv_bhop_cooldown      = "Jump Cooldown (Old only)",
+            mv_bhop_airboost      = "Air Boost (New only)",
+            mv_bhop_airboostdiv   = "Air Boost Divisor (New)",
+
+            -- Spider
+            mv_spider_enabled = "Enabled",
+            mv_spider_mode    = "Mode",
+            mv_spider_range   = "Wall Range (Default)",
+            mv_spider_rays    = "Ray Count (Default)",
+
+            -- Pixelwalk
+            mv_pxw_downrange   = "Down Range",
+            mv_pxw_maxwidth    = "Max Part Width (thin)",
+            mv_pxw_snapdistance= "Snap Distance",
+            mv_pxw_stickpower  = "Stick Power (0..1)",
+            mv_pxw_coyotetime  = "Coyote Time (s)",
+            mv_pxw_maxfall     = "Max Fall Speed",
+            mv_pxw_predicttime = "Predict Time (s)",
+            mv_pxw_heightoffset= "Height Offset",
+            mv_pxw_forcerunning= "Force Running State",
+            mv_pxw_requireflat = "Require Flat Surface",
+
+            -- Wallfucker
+            mv_wfk_chance = "Chance per Frame (0..1)",
+            mv_wfk_range  = "Wall Range",
+            mv_wfk_rays   = "Ray Count",
+            mv_wfk_holdY  = "Hold Y (prevent fall)",
+            mv_wfk_push   = "Push Up Strength",
+
+            -- Speed
+            mv_speed_enabled = "Enabled",
+            mv_speed_method  = "Method",
+            mv_speed_ground  = "Ground Speed",
+            mv_speed_useair  = "Use Different Air Speed",
+            mv_speed_air     = "Air Speed",
+            mv_speed_inair   = "In Air Only",
+
+            -- FastStop
+            mv_fs_enabled = "Enabled",
+            mv_fs_stopy   = "Also stop Y velocity (falling)",
+
+            -- Noclip
+            mv_noclip_enabled = "Enabled",
+
+            -- Tooltips
+            tt_mv_as_enabled = "Master switch for AutoStrafer",
+            tt_mv_as_key     = "Key that activates AutoStrafer",
+            tt_mv_as_toggle  = "If ON, key toggles AutoStrafer instead of holds",
+            tt_mv_as_mode    = "Legit = counter-steer based on camera yaw | Spam = alternate A/D taps",
+            tt_mv_as_invert  = "Invert strafe direction",
+            tt_mv_as_spam    = "Interval between A/D taps in Spam mode",
+
+            tt_mv_fly_enabled    = "Master switch for Fly",
+            tt_mv_fly_method     = "BodyVelocity = legacy force | LinearVelocity = modern constraint | Velocity = raw write | CFrame = direct teleport per frame",
+            tt_mv_fly_key        = "Key that holds/toggles Fly",
+            tt_mv_fly_toggle     = "If ON, key toggles Fly instead of holds",
+            tt_mv_fly_speed      = "Horizontal fly speed (studs/s)",
+            tt_mv_fly_upspeed    = "Vertical fly speed (studs/s)",
+            tt_mv_fly_smoothness = "Velocity Lerp factor (1 = instant, 0.05 = very smooth)",
+            tt_mv_fly_usekeys    = "Read WASD + Space/Ctrl for movement input",
+
+            tt_mv_fo_enabled  = "Orbit around current Aimbot target",
+            tt_mv_fo_speed    = "Tangential speed along the orbit (studs/s)",
+            tt_mv_fo_radius   = "Orbit radius from target (studs)",
+            tt_mv_fo_height   = "Vertical offset above/below target HRP",
+            tt_mv_fo_corr     = "How aggressively to correct radius error (higher = snappier)",
+            tt_mv_fo_vcorr    = "How aggressively to correct vertical error",
+            tt_mv_fo_ff       = "Feed-forward of target velocity. 0 = lag behind, 1 = perfect tracking, >1 = predictive",
+            tt_mv_fo_deadzone = "Radius tolerance where radial correction is disabled (avoids jitter)",
+            tt_mv_fo_clockwise= "Orbit clockwise (ON) or counter-clockwise (OFF)",
+            tt_mv_fo_fallback = "If no aimbot target — behave like normal Fly",
+            tt_mv_fo_aimcam   = "Continuously aim camera at the orbit target",
+
+            tt_mv_bhop_enabled     = "Master switch for Bunnyhop",
+            tt_mv_bhop_mode        = "New = auto-bounce via Jump property | Old = ChangeState with cooldown",
+            tt_mv_bhop_key         = "Key you hold to auto-jump",
+            tt_mv_bhop_blockspace  = "Prevent the game from reading your Space presses (hook IsKeyDown)",
+            tt_mv_bhop_pulse       = "Fallback for executors without hookmetamethod — sends Space release events. Keep OFF if Block Space works",
+            tt_mv_bhop_bypass      = "Jump even when game reports not-on-ground",
+            tt_mv_bhop_cooldown    = "Min interval between jumps in Old mode",
+            tt_mv_bhop_airboost    = "Add extra horizontal push while airborne",
+            tt_mv_bhop_airboostdiv = "Higher = weaker air boost (1 = massive, 30 = tiny)",
+
+            tt_mv_spider_enabled = "Enable Spider (wall climb / stick) as part of Bhop",
+            tt_mv_spider_mode    = "Default = horizontal wall-detect | Pixelwalk = stick to thin surfaces | Wallfucker = probabilistic stick",
+            tt_mv_spider_range   = "How far to check for walls (studs)",
+            tt_mv_spider_rays    = "Number of rays around the player",
+
+            tt_mv_pxw_downrange   = "How far down to raycast for surfaces",
+            tt_mv_pxw_maxwidth    = "Only surfaces thinner than this stick",
+            tt_mv_pxw_snapdistance= "Snap to ground if within this distance",
+            tt_mv_pxw_stickpower  = "How strongly to reduce falling speed on thin surfaces (1 = full stop)",
+            tt_mv_pxw_coyotetime  = "Grace period after leaving a thin surface",
+            tt_mv_pxw_maxfall     = "Clamp fall speed when stuck",
+            tt_mv_pxw_predicttime = "Lookahead time for predictive raycast",
+            tt_mv_pxw_heightoffset= "Extra raycast origins below the player",
+            tt_mv_pxw_forcerunning= "Force humanoid into Running state while stuck",
+            tt_mv_pxw_requireflat = "Only stick to horizontal (flat) surfaces",
+
+            tt_mv_wfk_chance = "Probability per frame to try sticking (0 = never, 1 = always)",
+            tt_mv_wfk_range  = "How far to check for walls",
+            tt_mv_wfk_rays   = "Rays around player",
+            tt_mv_wfk_holdY  = "Zero out falling velocity when against wall",
+            tt_mv_wfk_push   = "Extra upward velocity while sticking (studs/s)",
+
+            tt_mv_speed_enabled = "Master switch for Speed",
+            tt_mv_speed_method  = "WalkSpeed = set Humanoid.WalkSpeed | CFrame = direct teleport | Velocity = write HRP velocity",
+            tt_mv_speed_ground  = "Ground speed (studs/s)",
+            tt_mv_speed_useair  = "Use a different speed while airborne",
+            tt_mv_speed_air     = "Air speed (studs/s)",
+            tt_mv_speed_inair   = "Only speed up when airborne (skip on ground)",
+
+            tt_mv_fs_enabled = "Instantly stop horizontal movement when keys released",
+            tt_mv_fs_stopy   = "Also zero vertical velocity (prevents fall-out-of-world)",
+
+            tt_mv_noclip_enabled = "Disable collision on all character parts",
+        }
+        local ru = {
+            -- Sections
+            sec_mov_autostrafer = "Автострафер",
+            sec_mov_fly         = "Полёт",
+            sec_mov_flyorbit    = "Полёт — Орбита вокруг цели",
+            sec_mov_bhop        = "Bhop",
+            sec_mov_spider      = "Спайдер (для Bhop)",
+            sec_mov_pixelwalk   = "Спайдер: Pixelwalk",
+            sec_mov_wallfucker  = "Спайдер: Wallfucker",
+            sec_mov_speed       = "Скорость",
+            sec_mov_faststop    = "FastStop",
+            sec_mov_noclip      = "Noclip",
+
+            -- AutoStrafer
+            mv_as_enabled = "Включён",
+            mv_as_key     = "Клавиша",
+            mv_as_toggle  = "Режим переключения",
+            mv_as_mode    = "Режим",
+            mv_as_invert  = "Инвертировать",
+            mv_as_spam    = "Задержка спама (режим Spam)",
+
+            -- Fly
+            mv_fly_enabled    = "Включён",
+            mv_fly_method     = "Метод",
+            mv_fly_key        = "Клавиша",
+            mv_fly_toggle     = "Режим переключения",
+            mv_fly_speed      = "Скорость",
+            mv_fly_upspeed    = "Вверх/вниз скорость",
+            mv_fly_smoothness = "Сглаживание",
+            mv_fly_usekeys    = "Использовать WASD + Space/Ctrl",
+
+            -- Orbit
+            mv_fo_enabled    = "Орбита вокруг цели аимбота",
+            mv_fo_speed      = "Скорость орбиты",
+            mv_fo_radius     = "Радиус",
+            mv_fo_height     = "Высота",
+            mv_fo_corr       = "Радиальная коррекция",
+            mv_fo_vcorr      = "Вертикальная коррекция",
+            mv_fo_ff         = "Feed-forward скорости",
+            mv_fo_deadzone   = "Мёртвая зона",
+            mv_fo_clockwise  = "По часовой",
+            mv_fo_fallback   = "Откат на обычный Полёт (нет цели)",
+            mv_fo_aimcam     = "Направлять камеру на цель",
+
+            -- Bhop
+            mv_bhop_enabled       = "Включён",
+            mv_bhop_mode          = "Режим",
+            mv_bhop_key           = "Клавиша прыжка",
+            mv_bhop_blockspace    = "Блокировать Space от игры (хук)",
+            mv_bhop_pulse         = "Pulse release Space (фолбэк)",
+            mv_bhop_bypass        = "Обходить ограничения прыжка",
+            mv_bhop_cooldown      = "Кулдаун прыжка (только Old)",
+            mv_bhop_airboost      = "Air Boost (только New)",
+            mv_bhop_airboostdiv   = "Делитель Air Boost (New)",
+
+            -- Spider
+            mv_spider_enabled = "Включён",
+            mv_spider_mode    = "Режим",
+            mv_spider_range   = "Дальность стены (Default)",
+            mv_spider_rays    = "Кол-во лучей (Default)",
+
+            -- Pixelwalk
+            mv_pxw_downrange   = "Дальность вниз",
+            mv_pxw_maxwidth    = "Макс. толщина (тонкие)",
+            mv_pxw_snapdistance= "Дистанция прилипания",
+            mv_pxw_stickpower  = "Сила прилипания (0..1)",
+            mv_pxw_coyotetime  = "Coyote Time (с)",
+            mv_pxw_maxfall     = "Макс. скорость падения",
+            mv_pxw_predicttime = "Время предсказания (с)",
+            mv_pxw_heightoffset= "Смещение по высоте",
+            mv_pxw_forcerunning= "Форсировать Running",
+            mv_pxw_requireflat = "Только плоские поверхности",
+
+            -- Wallfucker
+            mv_wfk_chance = "Шанс за кадр (0..1)",
+            mv_wfk_range  = "Дальность стены",
+            mv_wfk_rays   = "Кол-во лучей",
+            mv_wfk_holdY  = "Держать Y (не падать)",
+            mv_wfk_push   = "Сила подъёма",
+
+            -- Speed
+            mv_speed_enabled = "Включён",
+            mv_speed_method  = "Метод",
+            mv_speed_ground  = "Скорость по земле",
+            mv_speed_useair  = "Другая скорость в воздухе",
+            mv_speed_air     = "Скорость в воздухе",
+            mv_speed_inair   = "Только в воздухе",
+
+            -- FastStop
+            mv_fs_enabled = "Включён",
+            mv_fs_stopy   = "Также стоп по Y (падение)",
+
+            -- Noclip
+            mv_noclip_enabled = "Включён",
+
+            -- Tooltips
+            tt_mv_as_enabled = "Главный выключатель автострафера",
+            tt_mv_as_key     = "Клавиша активации автострафера",
+            tt_mv_as_toggle  = "Если ВКЛ, клавиша переключает, а не удерживает",
+            tt_mv_as_mode    = "Legit = контр-стрейф по углу камеры | Spam = чередование A/D",
+            tt_mv_as_invert  = "Инвертировать направление стрейфа",
+            tt_mv_as_spam    = "Интервал между нажатиями A/D в режиме Spam",
+
+            tt_mv_fly_enabled    = "Главный выключатель полёта",
+            tt_mv_fly_method     = "BodyVelocity = классика | LinearVelocity = современный constraint | Velocity = прямая запись | CFrame = телепорт каждый кадр",
+            tt_mv_fly_key        = "Клавиша удержания/переключения полёта",
+            tt_mv_fly_toggle     = "Если ВКЛ, клавиша переключает полёт",
+            tt_mv_fly_speed      = "Горизонтальная скорость (studs/s)",
+            tt_mv_fly_upspeed    = "Вертикальная скорость (studs/s)",
+            tt_mv_fly_smoothness = "Коэффициент сглаживания (1 = мгновенно, 0.05 = очень плавно)",
+            tt_mv_fly_usekeys    = "Читать WASD + Space/Ctrl как ввод движения",
+
+            tt_mv_fo_enabled  = "Вращаться вокруг текущей цели аимбота",
+            tt_mv_fo_speed    = "Тангенциальная скорость по орбите (studs/s)",
+            tt_mv_fo_radius   = "Радиус орбиты от цели (studs)",
+            tt_mv_fo_height   = "Вертикальное смещение над/под HRP цели",
+            tt_mv_fo_corr     = "Сила радиальной коррекции (выше = резче)",
+            tt_mv_fo_vcorr    = "Сила вертикальной коррекции",
+            tt_mv_fo_ff       = "Feed-forward скорости цели. 0 = отставать, 1 = точное следование, >1 = предиктивно",
+            tt_mv_fo_deadzone = "Радиус-толеранс без коррекции (устраняет джиттер)",
+            tt_mv_fo_clockwise= "Орбита по часовой (ВКЛ) или против (ВЫКЛ)",
+            tt_mv_fo_fallback = "Если цели нет — вести себя как обычный Полёт",
+            tt_mv_fo_aimcam   = "Постоянно направлять камеру на цель орбиты",
+
+            tt_mv_bhop_enabled     = "Главный выключатель Bunnyhop",
+            tt_mv_bhop_mode        = "New = авто-прыжок через Jump | Old = ChangeState с кулдауном",
+            tt_mv_bhop_key         = "Клавиша удержания для авто-прыжка",
+            tt_mv_bhop_blockspace  = "Скрыть нажатия Space от игры (хук IsKeyDown)",
+            tt_mv_bhop_pulse       = "Фолбэк для экзекуторов без hookmetamethod — шлёт release-события Space. Держи ВЫКЛ если Block Space работает",
+            tt_mv_bhop_bypass      = "Прыгать даже когда игра считает что вы не на земле",
+            tt_mv_bhop_cooldown    = "Мин. интервал между прыжками в Old режиме",
+            tt_mv_bhop_airboost    = "Доп. горизонтальный толчок в воздухе",
+            tt_mv_bhop_airboostdiv = "Больше = слабее буст (1 = огромный, 30 = крошечный)",
+
+            tt_mv_spider_enabled = "Спайдер (липкость к стенам) как часть Bhop",
+            tt_mv_spider_mode    = "Default = лучи по горизонтали | Pixelwalk = липкость к тонким | Wallfucker = вероятностная липкость",
+            tt_mv_spider_range   = "Как далеко проверять стены (studs)",
+            tt_mv_spider_rays    = "Кол-во лучей вокруг игрока",
+
+            tt_mv_pxw_downrange   = "Как далеко смотреть вниз",
+            tt_mv_pxw_maxwidth    = "Только поверхности тоньше этого",
+            tt_mv_pxw_snapdistance= "Прилипнуть к земле в пределах этой дистанции",
+            tt_mv_pxw_stickpower  = "Сила уменьшения падения на тонких (1 = полный стоп)",
+            tt_mv_pxw_coyotetime  = "Грейс-период после ухода с тонкой поверхности",
+            tt_mv_pxw_maxfall     = "Ограничение скорости падения",
+            tt_mv_pxw_predicttime = "Время упреждения для предиктивного рейкаста",
+            tt_mv_pxw_heightoffset= "Доп. источники лучей ниже игрока",
+            tt_mv_pxw_forcerunning= "Форсировать Running пока прилип",
+            tt_mv_pxw_requireflat = "Только горизонтальные (плоские) поверхности",
+
+            tt_mv_wfk_chance = "Шанс за кадр попытаться прилипнуть (0 = никогда, 1 = всегда)",
+            tt_mv_wfk_range  = "Дальность проверки стен",
+            tt_mv_wfk_rays   = "Лучей вокруг игрока",
+            tt_mv_wfk_holdY  = "Обнулять скорость падения у стены",
+            tt_mv_wfk_push   = "Доп. вертикальная скорость при прилипании (studs/s)",
+
+            tt_mv_speed_enabled = "Главный выключатель скорости",
+            tt_mv_speed_method  = "WalkSpeed = Humanoid.WalkSpeed | CFrame = телепорт | Velocity = скорость HRP",
+            tt_mv_speed_ground  = "Скорость по земле (studs/s)",
+            tt_mv_speed_useair  = "Использовать отдельную скорость в воздухе",
+            tt_mv_speed_air     = "Скорость в воздухе (studs/s)",
+            tt_mv_speed_inair   = "Ускорять только в воздухе (пропускать на земле)",
+
+            tt_mv_fs_enabled = "Мгновенная остановка горизонтального движения при отпускании клавиш",
+            tt_mv_fs_stopy   = "Также обнулять вертикальную скорость (не падать)",
+
+            tt_mv_noclip_enabled = "Отключить коллизию у всех частей персонажа",
+        }
+        for k, v in pairs(en) do UI.L.en[k] = v end
+        for k, v in pairs(ru) do UI.L.ru[k] = v end
+        if UI.RefreshTheme then pcall(UI.RefreshTheme) end
+    end
 end
 
 H._UI = H._UI or {}
@@ -1094,27 +1514,27 @@ local speedMethods = { "WalkSpeed", "CFrame", "Velocity" }
 local spiderModes  = { "Default", "Pixelwalk", "Wallfucker" }
 
 -- ---------- AutoStrafer (Left) ----------
-local asSec = tab:CreateSection({ Name = "AutoStrafer" })
-asSec:AddToggle({ Name = "Enabled", Value = AutoStrafer.Settings.Enabled,
+local asSec = tab:CreateSection({ Name = "sec_mov_autostrafer" })
+asSec:AddToggle({ Name = "mv_as_enabled", Value = AutoStrafer.Settings.Enabled,
     Callback = function(v)
         AutoStrafer.Settings.Enabled = v
         if not v and AutoStrafer.Functions.Stop then AutoStrafer.Functions.Stop() end
-    end })
-asSec:AddDropdown({ Name = "Key", Value = AutoStrafer.Settings.Key or "Space", List = strafeKeys,
-    Callback = function(v) AutoStrafer.Settings.Key = v end })
-asSec:AddToggle({ Name = "Toggle Mode", Value = AutoStrafer.Settings.Toggle or false,
-    Callback = function(v) AutoStrafer.Settings.Toggle = v end })
-asSec:AddDropdown({ Name = "Mode", Value = AutoStrafer.Settings.Mode or "Legit", List = strafeModes,
-    Callback = function(v) AutoStrafer.Settings.Mode = v end })
-asSec:AddToggle({ Name = "Invert", Value = AutoStrafer.Settings.Invert or false,
-    Callback = function(v) AutoStrafer.Settings.Invert = v end })
-asSec:AddSlider({ Name = "Spam Delay (Spam mode)", Value = AutoStrafer.Settings.SpamDelay or 0.05,
+    end, Tooltip = "tt_mv_as_enabled" })
+asSec:AddDropdown({ Name = "mv_as_key", Value = AutoStrafer.Settings.Key or "Space", List = strafeKeys,
+    Callback = function(v) AutoStrafer.Settings.Key = v end, Tooltip = "tt_mv_as_key" })
+asSec:AddToggle({ Name = "mv_as_toggle", Value = AutoStrafer.Settings.Toggle or false,
+    Callback = function(v) AutoStrafer.Settings.Toggle = v end, Tooltip = "tt_mv_as_toggle" })
+asSec:AddDropdown({ Name = "mv_as_mode", Value = AutoStrafer.Settings.Mode or "Legit", List = strafeModes,
+    Callback = function(v) AutoStrafer.Settings.Mode = v end, Tooltip = "tt_mv_as_mode" })
+asSec:AddToggle({ Name = "mv_as_invert", Value = AutoStrafer.Settings.Invert or false,
+    Callback = function(v) AutoStrafer.Settings.Invert = v end, Tooltip = "tt_mv_as_invert" })
+asSec:AddSlider({ Name = "mv_as_spam", Value = AutoStrafer.Settings.SpamDelay or 0.05,
     Min = 0.01, Max = 0.3, Decimals = 2,
-    Callback = function(v) AutoStrafer.Settings.SpamDelay = v end })
+    Callback = function(v) AutoStrafer.Settings.SpamDelay = v end, Tooltip = "tt_mv_as_spam" })
 
 -- ---------- Fly (Left) ----------
-local flySec = tab:CreateSection({ Name = "Fly" })
-flySec:AddToggle({ Name = "Enabled", Value = Fly.Settings.Enabled,
+local flySec = tab:CreateSection({ Name = "sec_mov_fly" })
+flySec:AddToggle({ Name = "mv_fly_enabled", Value = Fly.Settings.Enabled,
     Callback = function(v)
         Fly.Settings.Enabled = v
         if not v then
@@ -1126,50 +1546,58 @@ flySec:AddToggle({ Name = "Enabled", Value = Fly.Settings.Enabled,
                 if hum then hum.PlatformStand = false end
             end
         end
-    end })
-flySec:AddDropdown({ Name = "Method", Value = Fly.Settings.Method or "BodyVelocity", List = flyMethods,
-    Callback = function(v) Fly.Settings.Method = v; Fly_ClearInstances() end })
-flySec:AddDropdown({ Name = "Key", Value = Fly.Settings.ToggleKey or "F", List = flyKeys,
-    Callback = function(v) Fly.Settings.ToggleKey = v end })
-flySec:AddToggle({ Name = "Toggle Mode", Value = Fly.Settings.Toggle or false,
-    Callback = function(v) Fly.Settings.Toggle = v end })
-flySec:AddSlider({ Name = "Speed", Value = Fly.Settings.Speed or 30, Min = 1, Max = 200,
-    Callback = function(v) Fly.Settings.Speed = v end })
-flySec:AddSlider({ Name = "Up/Down Speed", Value = Fly.Settings.UpSpeed or 20, Min = 1, Max = 200,
-    Callback = function(v) Fly.Settings.UpSpeed = v end })
-flySec:AddSlider({ Name = "Smoothness", Value = Fly.Settings.Smoothness or 0.5,
+    end, Tooltip = "tt_mv_fly_enabled" })
+flySec:AddDropdown({ Name = "mv_fly_method", Value = Fly.Settings.Method or "BodyVelocity", List = flyMethods,
+    Callback = function(v) Fly.Settings.Method = v; Fly_ClearInstances() end, Tooltip = "tt_mv_fly_method" })
+flySec:AddDropdown({ Name = "mv_fly_key", Value = Fly.Settings.ToggleKey or "F", List = flyKeys,
+    Callback = function(v) Fly.Settings.ToggleKey = v end, Tooltip = "tt_mv_fly_key" })
+flySec:AddToggle({ Name = "mv_fly_toggle", Value = Fly.Settings.Toggle or false,
+    Callback = function(v) Fly.Settings.Toggle = v end, Tooltip = "tt_mv_fly_toggle" })
+flySec:AddSlider({ Name = "mv_fly_speed", Value = Fly.Settings.Speed or 30, Min = 1, Max = 200,
+    Callback = function(v) Fly.Settings.Speed = v end, Tooltip = "tt_mv_fly_speed" })
+flySec:AddSlider({ Name = "mv_fly_upspeed", Value = Fly.Settings.UpSpeed or 20, Min = 1, Max = 200,
+    Callback = function(v) Fly.Settings.UpSpeed = v end, Tooltip = "tt_mv_fly_upspeed" })
+flySec:AddSlider({ Name = "mv_fly_smoothness", Value = Fly.Settings.Smoothness or 0.5,
     Min = 0.05, Max = 1, Decimals = 2,
-    Callback = function(v) Fly.Settings.Smoothness = v end })
-flySec:AddToggle({ Name = "Use WASD + Space/Ctrl", Value = Fly.Settings.UseKeys ~= false,
-    Callback = function(v) Fly.Settings.UseKeys = v end })
+    Callback = function(v) Fly.Settings.Smoothness = v end, Tooltip = "tt_mv_fly_smoothness" })
+flySec:AddToggle({ Name = "mv_fly_usekeys", Value = Fly.Settings.UseKeys ~= false,
+    Callback = function(v) Fly.Settings.UseKeys = v end, Tooltip = "tt_mv_fly_usekeys" })
 
 -- ---------- Fly — Target Orbit (Left) ----------
-local flyOrbSec = tab:CreateSection({ Name = "Fly — Target Orbit" })
-flyOrbSec:AddToggle({ Name = "Orbit Aimbot Target", Value = Fly.Settings.TargetOrbit.Enabled,
-    Callback = function(v) Fly.Settings.TargetOrbit.Enabled = v end })
-flyOrbSec:AddSlider({ Name = "Orbit Speed", Value = Fly.Settings.TargetOrbit.OrbitSpeed,
+local flyOrbSec = tab:CreateSection({ Name = "sec_mov_flyorbit" })
+flyOrbSec:AddToggle({ Name = "mv_fo_enabled", Value = Fly.Settings.TargetOrbit.Enabled,
+    Callback = function(v) Fly.Settings.TargetOrbit.Enabled = v end, Tooltip = "tt_mv_fo_enabled" })
+flyOrbSec:AddSlider({ Name = "mv_fo_speed", Value = Fly.Settings.TargetOrbit.OrbitSpeed or 20,
     Min = 1, Max = 100, Decimals = 1,
-    Callback = function(v) Fly.Settings.TargetOrbit.OrbitSpeed = v end })
-flyOrbSec:AddSlider({ Name = "Radius", Value = Fly.Settings.TargetOrbit.Radius,
+    Callback = function(v) Fly.Settings.TargetOrbit.OrbitSpeed = v end, Tooltip = "tt_mv_fo_speed" })
+flyOrbSec:AddSlider({ Name = "mv_fo_radius", Value = Fly.Settings.TargetOrbit.Radius or 15,
     Min = 1, Max = 60, Decimals = 1,
-    Callback = function(v) Fly.Settings.TargetOrbit.Radius = v end })
-flyOrbSec:AddSlider({ Name = "Height", Value = Fly.Settings.TargetOrbit.Height,
+    Callback = function(v) Fly.Settings.TargetOrbit.Radius = v end, Tooltip = "tt_mv_fo_radius" })
+flyOrbSec:AddSlider({ Name = "mv_fo_height", Value = Fly.Settings.TargetOrbit.Height or 0,
     Min = -30, Max = 30, Decimals = 1,
-    Callback = function(v) Fly.Settings.TargetOrbit.Height = v end })
-flyOrbSec:AddSlider({ Name = "Radial Correction", Value = Fly.Settings.TargetOrbit.Correction,
+    Callback = function(v) Fly.Settings.TargetOrbit.Height = v end, Tooltip = "tt_mv_fo_height" })
+flyOrbSec:AddSlider({ Name = "mv_fo_corr", Value = Fly.Settings.TargetOrbit.Correction or 3,
     Min = 0, Max = 10, Decimals = 1,
-    Callback = function(v) Fly.Settings.TargetOrbit.Correction = v end })
-flyOrbSec:AddSlider({ Name = "Vertical Correction", Value = Fly.Settings.TargetOrbit.VerticalCorrection,
+    Callback = function(v) Fly.Settings.TargetOrbit.Correction = v end, Tooltip = "tt_mv_fo_corr" })
+flyOrbSec:AddSlider({ Name = "mv_fo_vcorr", Value = Fly.Settings.TargetOrbit.VerticalCorrection or 3,
     Min = 0, Max = 10, Decimals = 1,
-    Callback = function(v) Fly.Settings.TargetOrbit.VerticalCorrection = v end })
-flyOrbSec:AddToggle({ Name = "Clockwise", Value = Fly.Settings.TargetOrbit.Clockwise ~= false,
-    Callback = function(v) Fly.Settings.TargetOrbit.Clockwise = v end })
-flyOrbSec:AddToggle({ Name = "Fallback to normal Fly (no target)", Value = Fly.Settings.TargetOrbit.FallbackToFly ~= false,
-    Callback = function(v) Fly.Settings.TargetOrbit.FallbackToFly = v end })
+    Callback = function(v) Fly.Settings.TargetOrbit.VerticalCorrection = v end, Tooltip = "tt_mv_fo_vcorr" })
+flyOrbSec:AddSlider({ Name = "mv_fo_ff", Value = Fly.Settings.TargetOrbit.FeedForward or 1.0,
+    Min = 0, Max = 3, Decimals = 2,
+    Callback = function(v) Fly.Settings.TargetOrbit.FeedForward = v end, Tooltip = "tt_mv_fo_ff" })
+flyOrbSec:AddSlider({ Name = "mv_fo_deadzone", Value = Fly.Settings.TargetOrbit.Deadzone or 0.3,
+    Min = 0, Max = 3, Decimals = 2,
+    Callback = function(v) Fly.Settings.TargetOrbit.Deadzone = v end, Tooltip = "tt_mv_fo_deadzone" })
+flyOrbSec:AddToggle({ Name = "mv_fo_clockwise", Value = Fly.Settings.TargetOrbit.Clockwise ~= false,
+    Callback = function(v) Fly.Settings.TargetOrbit.Clockwise = v end, Tooltip = "tt_mv_fo_clockwise" })
+flyOrbSec:AddToggle({ Name = "mv_fo_fallback", Value = Fly.Settings.TargetOrbit.FallbackToFly ~= false,
+    Callback = function(v) Fly.Settings.TargetOrbit.FallbackToFly = v end, Tooltip = "tt_mv_fo_fallback" })
+flyOrbSec:AddToggle({ Name = "mv_fo_aimcam", Value = Fly.Settings.TargetOrbit.AimCamera ~= false,
+    Callback = function(v) Fly.Settings.TargetOrbit.AimCamera = v end, Tooltip = "tt_mv_fo_aimcam" })
 
 -- ---------- Bhop (Right) ----------
-local bhopSec = tab:CreateSection({ Name = "Bhop", Side = "Right" })
-bhopSec:AddToggle({ Name = "Enabled", Value = Bhop.Settings.Enabled,
+local bhopSec = tab:CreateSection({ Name = "sec_mov_bhop", Side = "Right" })
+bhopSec:AddToggle({ Name = "mv_bhop_enabled", Value = Bhop.Settings.Enabled,
     Callback = function(v)
         Bhop.Settings.Enabled = v
         if not v then
@@ -1178,112 +1606,112 @@ bhopSec:AddToggle({ Name = "Enabled", Value = Bhop.Settings.Enabled,
             Bhop.Internal.SpiderTouching = false
             Bhop.Internal.PendingPulses = 0
         end
-    end })
-bhopSec:AddDropdown({ Name = "Mode", Value = Bhop.Settings.Mode or "New", List = bhopModes,
-    Callback = function(v) Bhop.Settings.Mode = v end })
-bhopSec:AddDropdown({ Name = "Jump Key", Value = Bhop.Settings.AutoJumpKey or "Space", List = bhopKeys,
-    Callback = function(v) Bhop.Settings.AutoJumpKey = v end })
-bhopSec:AddToggle({ Name = "Block Space from Game (hook)", Value = Bhop.Settings.BlockSpaceFromGame ~= false,
-    Callback = function(v) Bhop.Settings.BlockSpaceFromGame = v end })
-bhopSec:AddToggle({ Name = "Space Release Pulse (fallback, leave OFF)", Value = Bhop.Settings.SpaceReleasePulse == true,
-    Callback = function(v) Bhop.Settings.SpaceReleasePulse = v end })
-bhopSec:AddToggle({ Name = "Bypass Jump Restrictions", Value = Bhop.Settings.BypassJump ~= false,
-    Callback = function(v) Bhop.Settings.BypassJump = v end })
-bhopSec:AddSlider({ Name = "Jump Cooldown (Old only)", Value = Bhop.Settings.JumpCooldown or 0.05,
+    end, Tooltip = "tt_mv_bhop_enabled" })
+bhopSec:AddDropdown({ Name = "mv_bhop_mode", Value = Bhop.Settings.Mode or "New", List = bhopModes,
+    Callback = function(v) Bhop.Settings.Mode = v end, Tooltip = "tt_mv_bhop_mode" })
+bhopSec:AddDropdown({ Name = "mv_bhop_key", Value = Bhop.Settings.AutoJumpKey or "Space", List = bhopKeys,
+    Callback = function(v) Bhop.Settings.AutoJumpKey = v end, Tooltip = "tt_mv_bhop_key" })
+bhopSec:AddToggle({ Name = "mv_bhop_blockspace", Value = Bhop.Settings.BlockSpaceFromGame ~= false,
+    Callback = function(v) Bhop.Settings.BlockSpaceFromGame = v end, Tooltip = "tt_mv_bhop_blockspace" })
+bhopSec:AddToggle({ Name = "mv_bhop_pulse", Value = Bhop.Settings.SpaceReleasePulse == true,
+    Callback = function(v) Bhop.Settings.SpaceReleasePulse = v end, Tooltip = "tt_mv_bhop_pulse" })
+bhopSec:AddToggle({ Name = "mv_bhop_bypass", Value = Bhop.Settings.BypassJump ~= false,
+    Callback = function(v) Bhop.Settings.BypassJump = v end, Tooltip = "tt_mv_bhop_bypass" })
+bhopSec:AddSlider({ Name = "mv_bhop_cooldown", Value = Bhop.Settings.JumpCooldown or 0.05,
     Min = 0.01, Max = 0.5, Decimals = 2,
-    Callback = function(v) Bhop.Settings.JumpCooldown = v end })
-bhopSec:AddToggle({ Name = "Air Boost (New only)", Value = Bhop.Settings.AirBoost ~= false,
-    Callback = function(v) Bhop.Settings.AirBoost = v end })
-bhopSec:AddSlider({ Name = "Air Boost Divisor (New)", Value = Bhop.Settings.AirBoostDivisor or 5.9,
+    Callback = function(v) Bhop.Settings.JumpCooldown = v end, Tooltip = "tt_mv_bhop_cooldown" })
+bhopSec:AddToggle({ Name = "mv_bhop_airboost", Value = Bhop.Settings.AirBoost ~= false,
+    Callback = function(v) Bhop.Settings.AirBoost = v end, Tooltip = "tt_mv_bhop_airboost" })
+bhopSec:AddSlider({ Name = "mv_bhop_airboostdiv", Value = Bhop.Settings.AirBoostDivisor or 5.9,
     Min = 1, Max = 30, Decimals = 1,
-    Callback = function(v) Bhop.Settings.AirBoostDivisor = v end })
+    Callback = function(v) Bhop.Settings.AirBoostDivisor = v end, Tooltip = "tt_mv_bhop_airboostdiv" })
 
 -- ---------- Spider (Right) ----------
-local spiderSec = tab:CreateSection({ Name = "Spider (Bhop assist)", Side = "Right" })
-spiderSec:AddToggle({ Name = "Enabled", Value = Bhop.Settings.Spider.Enabled,
-    Callback = function(v) Bhop.Settings.Spider.Enabled = v end })
-spiderSec:AddDropdown({ Name = "Mode",
+local spiderSec = tab:CreateSection({ Name = "sec_mov_spider", Side = "Right" })
+spiderSec:AddToggle({ Name = "mv_spider_enabled", Value = Bhop.Settings.Spider.Enabled,
+    Callback = function(v) Bhop.Settings.Spider.Enabled = v end, Tooltip = "tt_mv_spider_enabled" })
+spiderSec:AddDropdown({ Name = "mv_spider_mode",
     Value = Bhop.Settings.Spider.Mode or "Default",
     List = spiderModes,
-    Callback = function(v) Bhop.Settings.Spider.Mode = v end })
-spiderSec:AddSlider({ Name = "Wall Range (Default)", Value = Bhop.Settings.Spider.Range,
+    Callback = function(v) Bhop.Settings.Spider.Mode = v end, Tooltip = "tt_mv_spider_mode" })
+spiderSec:AddSlider({ Name = "mv_spider_range", Value = Bhop.Settings.Spider.Range or 2.5,
     Min = 1, Max = 10, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Range = v end })
-spiderSec:AddSlider({ Name = "Ray Count (Default)", Value = Bhop.Settings.Spider.RayCount,
+    Callback = function(v) Bhop.Settings.Spider.Range = v end, Tooltip = "tt_mv_spider_range" })
+spiderSec:AddSlider({ Name = "mv_spider_rays", Value = Bhop.Settings.Spider.RayCount or 8,
     Min = 4, Max = 24,
-    Callback = function(v) Bhop.Settings.Spider.RayCount = v end })
+    Callback = function(v) Bhop.Settings.Spider.RayCount = math.floor(v) end, Tooltip = "tt_mv_spider_rays" })
 
-local pxwSec = tab:CreateSection({ Name = "Spider: Pixelwalk", Side = "Right" })
-pxwSec:AddSlider({ Name = "Down Range", Value = Bhop.Settings.Spider.Pixelwalk.DownRange,
+local pxwSec = tab:CreateSection({ Name = "sec_mov_pixelwalk", Side = "Right" })
+pxwSec:AddSlider({ Name = "mv_pxw_downrange", Value = Bhop.Settings.Spider.Pixelwalk.DownRange or 5.0,
     Min = 1, Max = 12, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.DownRange = v end })
-pxwSec:AddSlider({ Name = "Max Part Width (thin)", Value = Bhop.Settings.Spider.Pixelwalk.MaxWidth,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.DownRange = v end, Tooltip = "tt_mv_pxw_downrange" })
+pxwSec:AddSlider({ Name = "mv_pxw_maxwidth", Value = Bhop.Settings.Spider.Pixelwalk.MaxWidth or 0.6,
     Min = 0.05, Max = 5, Decimals = 2,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.MaxWidth = v end })
-pxwSec:AddSlider({ Name = "Snap Distance", Value = Bhop.Settings.Spider.Pixelwalk.SnapDistance,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.MaxWidth = v end, Tooltip = "tt_mv_pxw_maxwidth" })
+pxwSec:AddSlider({ Name = "mv_pxw_snapdistance", Value = Bhop.Settings.Spider.Pixelwalk.SnapDistance or 4.0,
     Min = 0.1, Max = 8, Decimals = 2,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.SnapDistance = v end })
-pxwSec:AddSlider({ Name = "Stick Power (0..1)", Value = Bhop.Settings.Spider.Pixelwalk.StickPower,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.SnapDistance = v end, Tooltip = "tt_mv_pxw_snapdistance" })
+pxwSec:AddSlider({ Name = "mv_pxw_stickpower", Value = Bhop.Settings.Spider.Pixelwalk.StickPower or 1.0,
     Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.StickPower = v end })
-pxwSec:AddSlider({ Name = "Coyote Time (s)", Value = Bhop.Settings.Spider.Pixelwalk.CoyoteTime,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.StickPower = v end, Tooltip = "tt_mv_pxw_stickpower" })
+pxwSec:AddSlider({ Name = "mv_pxw_coyotetime", Value = Bhop.Settings.Spider.Pixelwalk.CoyoteTime or 0.15,
     Min = 0, Max = 0.5, Decimals = 2,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.CoyoteTime = v end })
-pxwSec:AddSlider({ Name = "Max Fall Speed", Value = Bhop.Settings.Spider.Pixelwalk.MaxFallSpeed,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.CoyoteTime = v end, Tooltip = "tt_mv_pxw_coyotetime" })
+pxwSec:AddSlider({ Name = "mv_pxw_maxfall", Value = Bhop.Settings.Spider.Pixelwalk.MaxFallSpeed or 5.0,
     Min = 0, Max = 30, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.MaxFallSpeed = v end })
-pxwSec:AddSlider({ Name = "Predict Time (s)", Value = Bhop.Settings.Spider.Pixelwalk.PredictTime,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.MaxFallSpeed = v end, Tooltip = "tt_mv_pxw_maxfall" })
+pxwSec:AddSlider({ Name = "mv_pxw_predicttime", Value = Bhop.Settings.Spider.Pixelwalk.PredictTime or 0.04,
     Min = 0, Max = 0.15, Decimals = 3,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.PredictTime = v end })
-pxwSec:AddSlider({ Name = "Height Offset", Value = Bhop.Settings.Spider.Pixelwalk.HeightOffset,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.PredictTime = v end, Tooltip = "tt_mv_pxw_predicttime" })
+pxwSec:AddSlider({ Name = "mv_pxw_heightoffset", Value = Bhop.Settings.Spider.Pixelwalk.HeightOffset or 2.0,
     Min = 0, Max = 5, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.HeightOffset = v end })
-pxwSec:AddToggle({ Name = "Force Running State", Value = Bhop.Settings.Spider.Pixelwalk.ForceRunning ~= false,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.ForceRunning = v end })
-pxwSec:AddToggle({ Name = "Require Flat Surface", Value = Bhop.Settings.Spider.Pixelwalk.RequireFlat ~= false,
-    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.RequireFlat = v end })
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.HeightOffset = v end, Tooltip = "tt_mv_pxw_heightoffset" })
+pxwSec:AddToggle({ Name = "mv_pxw_forcerunning", Value = Bhop.Settings.Spider.Pixelwalk.ForceRunning ~= false,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.ForceRunning = v end, Tooltip = "tt_mv_pxw_forcerunning" })
+pxwSec:AddToggle({ Name = "mv_pxw_requireflat", Value = Bhop.Settings.Spider.Pixelwalk.RequireFlat ~= false,
+    Callback = function(v) Bhop.Settings.Spider.Pixelwalk.RequireFlat = v end, Tooltip = "tt_mv_pxw_requireflat" })
 
-local wfkSec = tab:CreateSection({ Name = "Spider: Wallfucker", Side = "Right" })
-wfkSec:AddSlider({ Name = "Chance per Frame (0..1)", Value = Bhop.Settings.Spider.Wallfucker.Chance,
+local wfkSec = tab:CreateSection({ Name = "sec_mov_wallfucker", Side = "Right" })
+wfkSec:AddSlider({ Name = "mv_wfk_chance", Value = Bhop.Settings.Spider.Wallfucker.Chance or 0.5,
     Min = 0, Max = 1, Decimals = 2,
-    Callback = function(v) Bhop.Settings.Spider.Wallfucker.Chance = v end })
-wfkSec:AddSlider({ Name = "Wall Range", Value = Bhop.Settings.Spider.Wallfucker.WallRange,
+    Callback = function(v) Bhop.Settings.Spider.Wallfucker.Chance = v end, Tooltip = "tt_mv_wfk_chance" })
+wfkSec:AddSlider({ Name = "mv_wfk_range", Value = Bhop.Settings.Spider.Wallfucker.WallRange or 3.0,
     Min = 1, Max = 10, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Wallfucker.WallRange = v end })
-wfkSec:AddSlider({ Name = "Ray Count", Value = Bhop.Settings.Spider.Wallfucker.RayCount,
+    Callback = function(v) Bhop.Settings.Spider.Wallfucker.WallRange = v end, Tooltip = "tt_mv_wfk_range" })
+wfkSec:AddSlider({ Name = "mv_wfk_rays", Value = Bhop.Settings.Spider.Wallfucker.RayCount or 8,
     Min = 4, Max = 24,
-    Callback = function(v) Bhop.Settings.Spider.Wallfucker.RayCount = v end })
-wfkSec:AddToggle({ Name = "Hold Y (prevent fall)", Value = Bhop.Settings.Spider.Wallfucker.HoldY ~= false,
-    Callback = function(v) Bhop.Settings.Spider.Wallfucker.HoldY = v end })
-wfkSec:AddSlider({ Name = "Push Up Strength", Value = Bhop.Settings.Spider.Wallfucker.PushStrength,
+    Callback = function(v) Bhop.Settings.Spider.Wallfucker.RayCount = math.floor(v) end, Tooltip = "tt_mv_wfk_rays" })
+wfkSec:AddToggle({ Name = "mv_wfk_holdY", Value = Bhop.Settings.Spider.Wallfucker.HoldY ~= false,
+    Callback = function(v) Bhop.Settings.Spider.Wallfucker.HoldY = v end, Tooltip = "tt_mv_wfk_holdY" })
+wfkSec:AddSlider({ Name = "mv_wfk_push", Value = Bhop.Settings.Spider.Wallfucker.PushStrength or 0,
     Min = 0, Max = 50, Decimals = 1,
-    Callback = function(v) Bhop.Settings.Spider.Wallfucker.PushStrength = v end })
+    Callback = function(v) Bhop.Settings.Spider.Wallfucker.PushStrength = v end, Tooltip = "tt_mv_wfk_push" })
 
 -- ---------- Speed (Right) ----------
-local speedSec = tab:CreateSection({ Name = "Speed", Side = "Right" })
-speedSec:AddToggle({ Name = "Enabled", Value = Speed.Settings.Enabled,
-    Callback = function(v) Speed.Settings.Enabled = v end })
-speedSec:AddDropdown({ Name = "Method", Value = Speed.Settings.Method or "WalkSpeed", List = speedMethods,
-    Callback = function(v) Speed.Settings.Method = v end })
-speedSec:AddSlider({ Name = "Ground Speed", Value = Speed.Settings.GroundSpeed or 30, Min = 1, Max = 500,
-    Callback = function(v) Speed.Settings.GroundSpeed = v end })
-speedSec:AddToggle({ Name = "Use Different Air Speed", Value = Speed.Settings.UseAirSpeed or false,
-    Callback = function(v) Speed.Settings.UseAirSpeed = v end })
-speedSec:AddSlider({ Name = "Air Speed", Value = Speed.Settings.AirSpeed or 30, Min = 1, Max = 500,
-    Callback = function(v) Speed.Settings.AirSpeed = v end })
-speedSec:AddToggle({ Name = "In Air Only", Value = Speed.Settings.InAirOnly or false,
-    Callback = function(v) Speed.Settings.InAirOnly = v end })
+local speedSec = tab:CreateSection({ Name = "sec_mov_speed", Side = "Right" })
+speedSec:AddToggle({ Name = "mv_speed_enabled", Value = Speed.Settings.Enabled,
+    Callback = function(v) Speed.Settings.Enabled = v end, Tooltip = "tt_mv_speed_enabled" })
+speedSec:AddDropdown({ Name = "mv_speed_method", Value = Speed.Settings.Method or "WalkSpeed", List = speedMethods,
+    Callback = function(v) Speed.Settings.Method = v end, Tooltip = "tt_mv_speed_method" })
+speedSec:AddSlider({ Name = "mv_speed_ground", Value = Speed.Settings.GroundSpeed or 30, Min = 1, Max = 500,
+    Callback = function(v) Speed.Settings.GroundSpeed = v end, Tooltip = "tt_mv_speed_ground" })
+speedSec:AddToggle({ Name = "mv_speed_useair", Value = Speed.Settings.UseAirSpeed or false,
+    Callback = function(v) Speed.Settings.UseAirSpeed = v end, Tooltip = "tt_mv_speed_useair" })
+speedSec:AddSlider({ Name = "mv_speed_air", Value = Speed.Settings.AirSpeed or 30, Min = 1, Max = 500,
+    Callback = function(v) Speed.Settings.AirSpeed = v end, Tooltip = "tt_mv_speed_air" })
+speedSec:AddToggle({ Name = "mv_speed_inair", Value = Speed.Settings.InAirOnly or false,
+    Callback = function(v) Speed.Settings.InAirOnly = v end, Tooltip = "tt_mv_speed_inair" })
 
 -- ---------- FastStop (Left) ----------
-local fsSec = tab:CreateSection({ Name = "FastStop" })
-fsSec:AddToggle({ Name = "Enabled", Value = FastStop.Settings.Enabled,
-    Callback = function(v) FastStop.Settings.Enabled = v end })
-fsSec:AddToggle({ Name = "Also stop Y velocity (falling)", Value = FastStop.Settings.StopY or false,
-    Callback = function(v) FastStop.Settings.StopY = v end })
+local fsSec = tab:CreateSection({ Name = "sec_mov_faststop" })
+fsSec:AddToggle({ Name = "mv_fs_enabled", Value = FastStop.Settings.Enabled,
+    Callback = function(v) FastStop.Settings.Enabled = v end, Tooltip = "tt_mv_fs_enabled" })
+fsSec:AddToggle({ Name = "mv_fs_stopy", Value = FastStop.Settings.StopY or false,
+    Callback = function(v) FastStop.Settings.StopY = v end, Tooltip = "tt_mv_fs_stopy" })
 
 -- ---------- Noclip (Right) ----------
-local noclipSec = tab:CreateSection({ Name = "Noclip", Side = "Right" })
-noclipSec:AddToggle({ Name = "Enabled", Value = Noclip.Settings.Enabled,
-    Callback = function(v) Noclip.Settings.Enabled = v end })
+local noclipSec = tab:CreateSection({ Name = "sec_mov_noclip", Side = "Right" })
+noclipSec:AddToggle({ Name = "mv_noclip_enabled", Value = Noclip.Settings.Enabled,
+    Callback = function(v) Noclip.Settings.Enabled = v end, Tooltip = "tt_mv_noclip_enabled" })
 
-print("[AirHub] 06_movement: loaded OK")
+print("[AirHub] 06_movement: loaded OK (RU loc + tooltips + improved Fly Orbit)")
