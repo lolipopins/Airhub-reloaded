@@ -1,6 +1,15 @@
 --=============================================================
--- airhubUI v1.9.4 — Fixed: menu close position, RightShift from TextBox,
--- added Image component + window logo support
+-- airhubUI v1.9.4 — Full build
+-- Includes:
+--   • Fixed: menu keeps position on close (currentHomePos)
+--   • Fixed: RightShift works even from TextBox
+--   • Fixed: ESC closes menu (no popups)
+--   • Fixed: rapid-toggle debounce + force-recovery
+--   • NEW: AddImage component + window logo (SetLogo)
+--   • NEW: SanitizeAssetSource helper
+--   • NEW: SetExternalDataProvider (unified configs)
+--   • NEW: SetPostImportHook (sync toggles after load)
+--   • NEW: ConfigKey support in AddToggle
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -30,8 +39,7 @@ local Config = {
     NotificationDuration = 3, NotificationPosition = "top-right",
     TooltipDelay = 0.05,
     RainbowCallbackInterval = 4,
-    -- Logo config
-    LogoSource = nil,  -- rbxassetid://...
+    LogoSource = nil,
     LogoSize = 22,
 }
 
@@ -305,8 +313,6 @@ end
 -- ══════════════════════════════════════════════════════════════
 -- IMAGE / ASSET HELPERS
 -- ══════════════════════════════════════════════════════════════
--- Accepts: "rbxassetid://123", "123", "id=123", "https://...id=123"
--- Returns: "rbxassetid://123" or nil
 local function sanitizeAssetSource(str)
     if not str then return nil end
     if type(str) == "number" then
@@ -318,16 +324,12 @@ local function sanitizeAssetSource(str)
     str = tostring(str)
     str = str:gsub("%s+", "")
     if str == "" then return nil end
-    -- rbxasset:// (built-in)
     if str:match("^rbxasset://") then return str end
-    -- already formatted
     if str:match("^rbxassetid://%d+$") then return str end
-    -- pure digits
     local num = tonumber(str)
     if num and num > 0 and num == math.floor(num) then
         return "rbxassetid://" .. tostring(math.floor(num))
     end
-    -- extract from URL or other formats
     local id = str:match("rbxassetid://(%d+)")
         or str:match("[?&]id=(%d+)")
         or str:match("(%d+)")
@@ -2378,7 +2380,7 @@ local function createKeybind(section, opts)
 end
 
 -- ══════════════════════════════════════════════════════════════
--- IMAGE COMPONENT (NEW)
+-- IMAGE COMPONENT
 -- ══════════════════════════════════════════════════════════════
 local function createImage(section, opts)
     opts = opts or {}
@@ -2412,7 +2414,6 @@ local function createImage(section, opts)
     }, row)
     if roundCorners > 0 then addCorner(img, UDim.new(0, roundCorners)) end
 
-    -- Fallback display when no image
     local placeholder = new("TextLabel", {
         BackgroundTransparency = 1,
         Size = UDim2.new(1,0,1,0),
@@ -2429,7 +2430,6 @@ local function createImage(section, opts)
             source = clean
             img.Image = clean
             placeholder.Visible = false
-            -- Preload (non-blocking)
             pcall(function() task.spawn(function() ContentProvider:PreloadAsync({img}) end) end)
         else
             source = nil
@@ -2508,7 +2508,11 @@ local function createSection(tab, opts)
     end)
     table.insert(tab.Sections, section)
     local function track(i) table.insert(section.Elements, i); return i end
-    function section:AddToggle(o) return track(createToggle(self, o)) end
+    function section:AddToggle(o)
+        local t = createToggle(self, o)
+        if o and o.ConfigKey then t._configKey = o.ConfigKey end
+        return track(t)
+    end
     function section:AddSlider(o) return track(createSlider(self, o)) end
     function section:AddButton(o) return track(createButton(self, o)) end
     function section:AddLabel(o) return track(createLabel(self, o)) end
@@ -2661,7 +2665,6 @@ local function createWindow(opts)
         IgnoreGuiInset = true}, parent)
     ensureOverlay(gui)
 
-    -- Position preservation
     local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)
     local currentHomePos = BASE_POS
     local function getHiddenPos()
@@ -2692,7 +2695,6 @@ local function createWindow(opts)
     local titlebar = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,40), ZIndex = 2,
         BackgroundTransparency = 1}, main)
 
-    -- Logo (hidden by default)
     local logo = new("ImageLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 12, 0.5, -11),
@@ -2897,9 +2899,7 @@ local function createWindow(opts)
         _titleLbl = titleLbl, _versionLbl = versionLbl, _statusBar = statusBar,
         _logo = logo}
 
-    -- ────────────────────────────────────────────────────────────
-    -- Logo API (NEW)
-    -- ────────────────────────────────────────────────────────────
+    -- ─── Logo API ─────────────────────────────────────────────
     function window:SetLogo(source, size)
         size = tonumber(size) or Config.LogoSize or 22
         size = math.clamp(size, 12, 64)
@@ -2908,7 +2908,6 @@ local function createWindow(opts)
             logo.Visible = false
             logo.Image = ""
             Config.LogoSource = nil
-            -- Reset title label to default
             titleLbl.Position = UDim2.new(0, 18, 0, 0)
             titleLbl.Size = UDim2.new(1, -330, 1, 0)
             versionLbl.Position = UDim2.new(0, 18, 0, 22)
@@ -2919,7 +2918,6 @@ local function createWindow(opts)
         logo.Size = UDim2.new(0, size, 0, size)
         logo.Position = UDim2.new(0, 12, 0.5, -size/2)
         logo.Visible = true
-        -- Shift title labels right
         local offset = 12 + size + 8
         titleLbl.Position = UDim2.new(0, offset, 0, 0)
         titleLbl.Size = UDim2.new(1, -(330 + offset - 18), 1, 0)
@@ -2931,14 +2929,11 @@ local function createWindow(opts)
         return true
     end
 
-    -- Apply config logo on init
     if Config.LogoSource then
         window:SetLogo(Config.LogoSource, Config.LogoSize)
     end
 
-    -- ────────────────────────────────────────────────────────────
-    -- Show/Hide/Toggle with preserved position
-    -- ────────────────────────────────────────────────────────────
+    -- ─── Show/Hide/Toggle ─────────────────────────────────────
     local _lastToggleTime = 0
     local _toggleCooldown = 0.1
 
@@ -3059,6 +3054,10 @@ local function createWindow(opts)
         self._externalDeserializer = deserializer
     end
 
+    function window:SetPostImportHook(fn)
+        self._postImportHook = fn
+    end
+
     local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
 
     local function serializeElemKey(v)
@@ -3129,7 +3128,6 @@ local function createWindow(opts)
                                             local ok, v = pcall(el.Get)
                                             if ok then secData[elId] = serializeElemKey(v) end
                                         elseif elType == "Button" then
-                                            -- skip
                                         elseif elType == "Image" then
                                             local ok, v = pcall(el.Get)
                                             if ok and type(v) == "string" then secData[elId] = v end
@@ -3200,7 +3198,6 @@ local function createWindow(opts)
             if statusBar and Config.StatusBar ~= nil then statusBar.Visible = Config.StatusBar end
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
-            -- Reapply logo after config load
             if Config.LogoSource then
                 self:SetLogo(Config.LogoSource, Config.LogoSize)
             end
@@ -3234,7 +3231,6 @@ local function createWindow(opts)
                                                 elseif elType == "Keybind" then
                                                     pcall(el.Set, deserializeElemKey(savedVal))
                                                 elseif elType == "Button" then
-                                                    -- skip
                                                 elseif elType == "Image" then
                                                     pcall(el.Set, savedVal)
                                                 else
@@ -3267,6 +3263,9 @@ local function createWindow(opts)
             if not extOK then
                 warn("[airhubUI] External deserializer failed: " .. tostring(extErr))
             end
+        end
+        if type(self._postImportHook) == "function" then
+            pcall(self._postImportHook)
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         return true
@@ -3530,7 +3529,6 @@ secWindowSize:AddSlider({Name = "lbl_corner_radius", Value = 8, Min = 0, Max = 2
 secWindowSize:AddToggle({Name = "lbl_status_bar", Value = true,
     Callback = function(v) Window:Configure({StatusBar = v}) end, Tooltip = "tt_status_bar"})
 
--- ─── NEW: Window Logo section ─────────────────────────────────
 local secLogo = tabSettings:CreateSection({Name = "sec_logo"})
 
 local logoInputRef = secLogo:AddInput({
@@ -3574,7 +3572,6 @@ secLogo:AddButton({
     end,
 })
 
--- Preview image inside the section
 local previewImgRef = secLogo:AddImage({
     Source = Config.LogoSource or "",
     Height = 80,
@@ -3583,7 +3580,6 @@ local previewImgRef = secLogo:AddImage({
     Name = "lbl_logo_preview",
 })
 
--- Keep preview in sync when logo changes
 local _origSetLogo = Window.SetLogo
 Window.SetLogo = function(self, source, size)
     local r = _origSetLogo(self, source, size)
