@@ -1,10 +1,7 @@
---// AirHub - 01_core.lua (airhubUI build)
+--// AirHub - 01_core.lua (unified config build)
 --// Core state, services, error display, logging, sounds, config system,
---// ApplyAllEnabledStates(), and Window.OnUnload hook.
+--// ApplyAllEnabledStates(), Window.OnUnload hook, external data provider.
 
---// ---------------------------------------------------------------------------
---// Prevent double load
---// ---------------------------------------------------------------------------
 local H = getgenv().AirHub
 if H and H._CoreLoaded then
     warn("[AirHub] 01_core: already loaded")
@@ -52,19 +49,16 @@ local function SafeKeyCode(name)
     if ok and kc then return kc end
     return nil
 end
-
 local function SafeUserInputType(name)
     if type(name) ~= "string" then return nil end
     local ok, uit = pcall(function() return Enum.UserInputType[name] end)
     if ok and uit then return uit end
     return nil
 end
-
 local function SanitizeColor(c)
     if typeof(c) == "Color3" then return c end
     return Color3.fromRGB(255, 255, 255)
 end
-
 local function DeepCopy(t)
     if type(t) ~= "table" then return t end
     local out = {}
@@ -88,9 +82,7 @@ local function Track(c)
     return c
 end
 local function UntrackAll()
-    for _, c in ipairs(TrackedConnections) do
-        pcall(function() c:Disconnect() end)
-    end
+    for _, c in ipairs(TrackedConnections) do pcall(function() c:Disconnect() end) end
     TrackedConnections = {}
 end
 
@@ -200,6 +192,7 @@ H.Sound = H.Sound or {
 --// Config system
 --// ---------------------------------------------------------------------------
 local CONFIG_FOLDER = "AirHub/Configs"
+local LEGACY_FOLDER = CONFIG_FOLDER  -- legacy path for migration
 local IN_MEMORY_CONFIGS = {}
 
 local function Config_HasFS()
@@ -284,10 +277,18 @@ local function Config_ListFiles()
     return list
 end
 
-local function Config_Serialize()
+-- >>> CHANGED: added includeUI parameter (default true for backward compat)
+local function Config_Serialize(includeUI)
+    if includeUI == nil then includeUI = true end
     local Hg = getgenv().AirHub
     if not Hg then return {} end
-    local data = { Version = 4 }
+    local data = {
+        Version = 4,
+        __meta = {
+            date = os.date("%Y-%m-%d %H:%M:%S"),
+            timestamp = os.time(),
+        },
+    }
     if Hg.Aimbot then
         data.Aimbot = Config_Encode(Hg.Aimbot.Settings)
         data.FOVSettings = Config_Encode(Hg.Aimbot.FOVSettings)
@@ -310,19 +311,23 @@ local function Config_Serialize()
     if Hg.Noclip then data.Noclip = Config_Encode(Hg.Noclip.Settings) end
     data.Logging = Config_Encode(Hg.Logging)
     data.Sound = Config_Encode(Hg.Sound)
-    
-    -- Save UI state
-    local uiWin = getgenv().airhubUI_Window
-    if uiWin and uiWin.GetUIState then
-        local uiState = uiWin:GetUIState()
-        if uiState then
-            data.UI = uiState
+
+    -- Legacy: only include UI when called from Config_Save (not from external provider)
+    if includeUI then
+        local uiWin = getgenv().airhubUI_Window
+        if uiWin and uiWin.GetUIState then
+            local savedExt = uiWin._externalSerializer
+            uiWin._externalSerializer = nil  -- prevent nesting
+            local ok, uiState = pcall(function() return uiWin:GetUIState() end)
+            uiWin._externalSerializer = savedExt
+            if ok and uiState then data.UI = uiState end
         end
     end
 
     return data
 end
 
+-- >>> CHANGED: auto-applies enabled states at end + exposes Apply
 local function Config_Apply(data)
     if type(data) ~= "table" then return false end
     local Hg = getgenv().AirHub
@@ -341,15 +346,10 @@ local function Config_Apply(data)
         if d.WallCheckMode == nil then d.WallCheckMode = "Perfect" end
         if d.DelayShot == nil then
             local oldDelay = d.WallCheckDelay
-            if type(oldDelay) == "number" then
-                d.DelayShot = oldDelay > 0
-            else
-                d.DelayShot = true
-            end
+            if type(oldDelay) == "number" then d.DelayShot = oldDelay > 0
+            else d.DelayShot = true end
         end
-        if type(d.DelayShot) ~= "boolean" then
-            d.DelayShot = (tonumber(d.DelayShot) or 1) > 0
-        end
+        if type(d.DelayShot) ~= "boolean" then d.DelayShot = (tonumber(d.DelayShot) or 1) > 0 end
         d.WallCheckDelay = nil
         if d.AimSmoothingSpeed == nil then d.AimSmoothingSpeed = 6 end
         if d.TriggerKey == nil then d.TriggerKey = "MouseButton2" end
@@ -566,14 +566,21 @@ local function Config_Apply(data)
         local s = Config_Decode(data.Sound)
         if type(s) == "table" then Hg.Sound = s end
     end
-    
-    -- Load UI state
+
+    -- Legacy support: apply UI state if embedded
     if data.UI then
         local uiWin = getgenv().airhubUI_Window
         if uiWin and uiWin.SetUIState then
-            uiWin:SetUIState(data.UI)
+            pcall(function() uiWin:SetUIState(data.UI) end)
         end
     end
+
+    -- >>> ADDED: auto-activate enabled states after applying
+    task.defer(function()
+        if H and H.ApplyAllEnabledStates then
+            pcall(H.ApplyAllEnabledStates)
+        end
+    end)
 
     return true
 end
@@ -581,7 +588,7 @@ end
 local function Config_Save(name)
     name = Config_SanitizeName(name)
     if not name then return false, "invalid name" end
-    local data = Config_Serialize()
+    local data = Config_Serialize(true)
     if Config_HasFS() and type(HttpService.JSONEncode) == "function" then
         local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
         if ok and encoded then
@@ -639,11 +646,80 @@ local function Config_Delete(name)
     return deleted, deleted and "deleted" or "not found"
 end
 
+-- >>> ADDED: Migration from legacy AirHub/Configs to airhubUI_Configs
+local MIGRATION_MARKER = "airhubUI_Configs/_migration_v1.json"
+
+local function Config_MigrateLegacy()
+    if type(listfiles) ~= "function" or type(readfile) ~= "function"
+       or type(writefile) ~= "function" then
+        return 0, "no filesystem"
+    end
+    -- Already migrated?
+    local markerOK = pcall(readfile, MIGRATION_MARKER)
+    if markerOK then return 0, "already migrated" end
+
+    -- Ensure target folder exists
+    pcall(function()
+        if type(makefolder) == "function" then pcall(makefolder, "airhubUI_Configs") end
+    end)
+
+    local migrated = 0
+    local listOK, files = pcall(listfiles, LEGACY_FOLDER)
+    if not listOK or type(files) ~= "table" then
+        -- No legacy folder — mark as done anyway
+        pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({
+            done = true, migrated = 0, date = os.time(),
+        }))
+        return 0, "no legacy folder"
+    end
+
+    for _, path in ipairs(files) do
+        local name = path:match("([^/\\]+)%.json$")
+        if name then
+            local readOK, content = pcall(readfile, path)
+            if readOK and content and content ~= "" then
+                local decOK, legacyData = pcall(function() return HttpService:JSONDecode(content) end)
+                if decOK and type(legacyData) == "table" then
+                    -- Legacy format: UI at top level, cheats also at top level
+                    local uiState = legacyData.UI
+                    legacyData.UI = nil
+                    legacyData.__meta = nil  -- strip old meta if any
+
+                    local combined = {
+                        __meta = {
+                            version = "migrated-v1",
+                            migratedFrom = path,
+                            date = os.date("%Y-%m-%d %H:%M:%S"),
+                            timestamp = os.time(),
+                        },
+                        External = legacyData,
+                    }
+                    if uiState then
+                        combined.Theme    = uiState.Theme
+                        combined.Config   = uiState.Config
+                        combined.Elements = uiState.Elements
+                    end
+
+                    local newName = name .. "_migrated"
+                    local encoded = HttpService:JSONEncode(combined)
+                    local targetPath = "airhubUI_Configs/" .. newName .. ".json"
+                    local wOK = pcall(writefile, targetPath, encoded)
+                    if wOK then migrated = migrated + 1 end
+                end
+            end
+        end
+    end
+
+    pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({
+        done = true, migrated = migrated, date = os.time(),
+    }))
+    return migrated, "ok"
+end
+
 --// ---------------------------------------------------------------------------
 --// Expose shared utilities
 --// ---------------------------------------------------------------------------
 H.Util = {
-    -- services
     Players             = Players,
     RunService          = RunService,
     UserInputService    = UserInputService,
@@ -653,7 +729,6 @@ H.Util = {
     ReplicatedStorage   = ReplicatedStorage,
     LocalPlayer         = LocalPlayer,
 
-    -- helpers
     Track           = Track,
     UntrackAll      = UntrackAll,
     ShowError       = ShowError,
@@ -665,36 +740,37 @@ H.Util = {
     AddLog          = AddLog,
     RAY_FILTER      = RAY_FILTER,
 
-    -- sounds
     PlayHitsound = PlayHitsound,
     PlayKillsound = PlayKillsound,
 }
 
+-- >>> CHANGED: extra fields (Serialize / Apply / MigrateLegacy)
 H.Config = {
-    Save         = Config_Save,
-    Load         = Config_Load,
-    Delete       = Config_Delete,
-    ListFiles    = Config_ListFiles,
-    SanitizeName = Config_SanitizeName,
+    Save          = Config_Save,
+    Load          = Config_Load,
+    Delete        = Config_Delete,
+    ListFiles     = Config_ListFiles,
+    SanitizeName  = Config_SanitizeName,
+    Serialize     = Config_Serialize,   -- function(includeUI) -> table
+    Apply         = Config_Apply,       -- function(table) -> bool
+    MigrateLegacy = Config_MigrateLegacy,
 }
 
 H.PlayHitsound = PlayHitsound
 H.PlayKillsound = PlayKillsound
 
 --// ---------------------------------------------------------------------------
---// ApplyAllEnabledStates (called after config load by 09_settings)
+--// ApplyAllEnabledStates
 --// ---------------------------------------------------------------------------
 function H.ApplyAllEnabledStates()
     local Hg = H
     if not Hg then return end
 
-    -- WallHack glow
     if Hg.WallHack and Hg.WallHack.Settings and Hg.WallHack.Settings.Enabled
        and Hg.WallHack.ApplyGlowToAll then
         pcall(Hg.WallHack.ApplyGlowToAll)
     end
 
-    -- Desync
     if Hg.AntiAim and Hg.AntiAim.Desync and Hg.AntiAim.Desync.Settings then
         if Hg.AntiAim.Desync.Settings.Enabled then
             if Hg.AntiAim.StartDesync then
@@ -711,7 +787,6 @@ function H.ApplyAllEnabledStates()
         end
     end
 
-    -- ServerPosition
     if Hg.ServerPosition and Hg.ServerPosition.Settings then
         if Hg.ServerPosition.Settings.Enabled then
             if Hg.ServerPosition.Start then
@@ -727,7 +802,6 @@ function H.ApplyAllEnabledStates()
         end
     end
 
-    -- Fly
     if Hg.Fly then
         if Hg.Fly.ClearInstances then pcall(Hg.Fly.ClearInstances) end
         if Hg.Fly.Internal and Hg.Fly.Settings then
@@ -736,35 +810,19 @@ function H.ApplyAllEnabledStates()
         end
     end
 
-    -- Bhop
     if Hg.Bhop and Hg.Bhop.Internal then
         Hg.Bhop.Internal.KeyHeld = false
         Hg.Bhop.Internal.Active = false
         Hg.Bhop.Internal.SpiderTouching = false
     end
-
-    -- Speed
-    if Hg.Speed and Hg.Speed.Internal then
-        Hg.Speed.Internal.Active = false
-    end
-
-    -- Noclip
-    if Hg.Noclip and Hg.Noclip.Internal then
-        Hg.Noclip.Internal.Active = false
-    end
-
-    -- AutoStrafer
+    if Hg.Speed and Hg.Speed.Internal then Hg.Speed.Internal.Active = false end
+    if Hg.Noclip and Hg.Noclip.Internal then Hg.Noclip.Internal.Active = false end
     if Hg.AutoStrafer then
         if Hg.AutoStrafer.Internal then Hg.AutoStrafer.Internal.Active = false end
         if Hg.AutoStrafer.ReleaseAll then pcall(Hg.AutoStrafer.ReleaseAll) end
     end
+    if Hg.FastStop and Hg.FastStop.Internal then Hg.FastStop.Internal.LastActive = false end
 
-    -- FastStop
-    if Hg.FastStop and Hg.FastStop.Internal then
-        Hg.FastStop.Internal.LastActive = false
-    end
-
-    -- WallHack HUD / SelfESP
     if Hg.WallHack and Hg.WallHack.Functions then
         if Hg.WallHack.Visuals and Hg.WallHack.Visuals.HUDSettings then
             if Hg.WallHack.Visuals.HUDSettings.Enabled then
@@ -790,15 +848,30 @@ H._UI = H._UI or {}
 H._UI.ApplyAllEnabledStates = H.ApplyAllEnabledStates
 
 --// ---------------------------------------------------------------------------
---// Window.OnUnload — full unload when user clicks "Unload" in airhubUI
+--// Window.OnUnload hook
 --// ---------------------------------------------------------------------------
 local Window = getgenv().airhubUI_Window
 if Window then
+    -- >>> ADDED: wire external data provider so one UI config carries everything
+    if Window.SetExternalDataProvider then
+        Window:SetExternalDataProvider(
+            function()  -- serializer: called by ExportSettings
+                return Config_Serialize(false)  -- no UI (UI is saved by ExportSettings itself)
+            end,
+            function(tbl)  -- deserializer: called by ImportSettings
+                return Config_Apply(tbl)
+            end
+        )
+        print("[AirHub] 01_core: external config provider wired OK")
+    else
+        warn("[AirHub] 01_core: Window.SetExternalDataProvider missing — " ..
+             "apply library patch or fall back to legacy configs")
+    end
+
     local _origOnUnload = Window.OnUnload
     Window.OnUnload = function(win)
         H.ShuttingDown = true
 
-        -- Aimbot
         if H.Aimbot then
             if H.Aimbot.Settings then
                 H.Aimbot.Settings.Enabled = false
@@ -825,7 +898,6 @@ if Window then
             if H.Aimbot.FOVCircle then pcall(function() H.Aimbot.FOVCircle:Remove() end) end
         end
 
-        -- WallHack + HUD + SelfESP
         if H.WallHack then
             if H.WallHack.Settings then H.WallHack.Settings.Enabled = false end
             if H.WallHack.Visuals then
@@ -839,7 +911,6 @@ if Window then
             end
         end
 
-        -- AntiAim + Desync + Animation Breaker
         if H.AntiAim then
             if H.AntiAim.Settings then H.AntiAim.Settings.Enabled = false end
             if H.AntiAim.Desync and H.AntiAim.Desync.Settings then
@@ -854,13 +925,11 @@ if Window then
             end
         end
 
-        -- ServerPosition
         if H.ServerPosition then
             if H.ServerPosition.Settings then H.ServerPosition.Settings.Enabled = false end
             if H.ServerPosition.Stop then pcall(H.ServerPosition.Stop) end
         end
 
-        -- Movement
         if H.Fly then
             if H.Fly.Settings then H.Fly.Settings.Enabled = false end
             if H.Fly.Internal then H.Fly.Internal.Active = false end
@@ -892,22 +961,16 @@ if Window then
             if H.Noclip.Internal then H.Noclip.Internal.Active = false end
         end
 
-        -- World
         if H.World and H.World.Functions and H.World.Functions.Restore then
             pcall(H.World.Functions.Restore)
         end
-
-        -- Exploits
         if H.Exploits and H.Exploits.Functions and H.Exploits.Functions.StopAll then
             pcall(H.Exploits.Functions.StopAll)
         end
-
-        -- Quotas (arsenal)
         if H.Quotas and H.Quotas.Functions and H.Quotas.Functions.StopAll then
             pcall(H.Quotas.Functions.StopAll)
         end
 
-        -- Character reset
         pcall(function()
             local char = LocalPlayer and LocalPlayer.Character
             if char then
@@ -922,7 +985,6 @@ if Window then
             end
         end)
 
-        -- Cleanup Drawing: logs, ErrorText, sounds
         pcall(function()
             for _, log in ipairs(H.ActiveLogs or {}) do
                 if log.text then pcall(function() log.text:Remove() end) end
@@ -931,19 +993,14 @@ if Window then
         H.ActiveLogs = {}
 
         if H.ErrorText then pcall(function() H.ErrorText:Remove() end) end
-
         if H.Sounds then
             if H.Sounds.Hitsound then pcall(function() H.Sounds.Hitsound:Destroy() end) end
             if H.Sounds.Killsound then pcall(function() H.Sounds.Killsound:Destroy() end) end
         end
 
-        -- Disconnect all tracked connections
         pcall(UntrackAll)
-
-        -- Release the global
         getgenv().AirHub = nil
 
-        -- Farewell text
         pcall(function()
             local t = Drawing.new("Text")
             t.Text     = "AirHub unloaded"
@@ -960,8 +1017,18 @@ if Window then
         end
     end
 else
-    warn("[AirHub] 01_core: airhubUI Window missing — unload hook not installed. " ..
-         "Make sure 00_ui_lib.lua loads before 01_core.lua.")
+    warn("[AirHub] 01_core: airhubUI Window missing — unload hook not installed.")
 end
 
-print("[AirHub] 01_core: loaded OK")
+-- >>> ADDED: auto-migrate legacy configs on first run (deferred to let UI init)
+task.defer(function()
+    task.wait(2)
+    local ok, count, msg = pcall(Config_MigrateLegacy)
+    if ok and count and count > 0 then
+        print("[AirHub] 01_core: migrated " .. count .. " legacy configs → airhubUI_Configs/")
+    elseif ok then
+        print("[AirHub] 01_core: migration: " .. tostring(msg))
+    end
+end)
+
+print("[AirHub] 01_core: loaded OK (unified config build)")
