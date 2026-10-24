@@ -1,6 +1,7 @@
---// AirHub — 03_antiaim.lua (airhubUI build)
+--// AirHub — 03_antiaim.lua (airhubUI build, RU localization + tooltips)
 --// Logic: Body Anti-Aim + Desync + Animation Breaker (unchanged).
 --// UI:    airhubUI (AddToggle/Slider/Dropdown/Input/Button/Colorpicker).
+--// Added: full RU/EN localization for every element + tooltips for all controls.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -955,6 +956,172 @@ if not Window then
     return
 end
 
+--// ---------------------------------------------------------------------------
+--// Localization injection (RU + EN) — compatible with airhubUI.L
+--// ---------------------------------------------------------------------------
+do
+    local UI = getgenv().airhubUI
+    if UI and UI.L and UI.L.en and UI.L.ru then
+        local en = {
+            -- sections
+            aa_body = "Body (Server)",
+            aa_anim = "Animation Breaker",
+            aa_desync = "Desync (Client)",
+            -- body
+            aa_enabled = "Enabled",
+            aa_mode = "Mode",
+            aa_method = "Method",
+            aa_reference = "Reference",
+            aa_yaw = "Yaw",
+            aa_amount = "Amount (any number)",
+            aa_speed = "Speed (any number)",
+            aa_ignore_moving = "Ignore when moving",
+            aa_move_threshold = "Move speed threshold",
+            -- animation breaker
+            aa_anim_enabled = "Enabled",
+            aa_anim_preset = "Animation",
+            aa_anim_custom_id = "Custom ID (rbxassetid://...)",
+            aa_anim_mode = "Mode",
+            aa_anim_speed = "Speed (neg = reverse, 0 = freeze)",
+            aa_anim_interval = "Random Interval (s) [RandomFrames]",
+            aa_anim_apply_server = "Apply to Server (SetNetworkOwner)",
+            aa_anim_reload = "Reload",
+            aa_anim_stop = "Stop",
+            -- desync
+            aa_desync_enabled = "Enabled",
+            aa_desync_mode = "Mode",
+            aa_desync_method = "Method",
+            aa_desync_random_rotate = "Random Rotate (pitch/yaw/roll)",
+            aa_desync_x = "X",
+            aa_desync_y = "Y",
+            aa_desync_z = "Z",
+            aa_desync_random = "Random (X/Y/Z = max range)",
+            aa_desync_interval = "Update Interval",
+            aa_desync_oldpos_enabled = "OldPosition Delay Enabled",
+            aa_desync_oldpos_delay = "OldPosition Delay (s)",
+            aa_desync_void = "Void Depth (Y)",
+            aa_desync_inplayer = "InPlayer Offset (studs)",
+            aa_desync_refresh_shot = "Refresh position on shot",
+            aa_desync_save = "Save Current Position",
+
+            -- tooltips
+            tt_aa_enabled = "Master switch for body anti-aim",
+            tt_aa_mode = "Static = fixed angle | Spin = continuous rotation | Jitter = random angle | Sway = sinusoidal oscillation",
+            tt_aa_method = "CFrame = direct write | BodyGyro = physics body | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = spin force",
+            tt_aa_reference = "Camera = relative to look | Movement = relative to velocity | Player = relative to HRP look",
+            tt_aa_yaw = "Base yaw offset in degrees (-180 to 180)",
+            tt_aa_amount = "Amplitude for Jitter/Sway/Static (in degrees)",
+            tt_aa_speed = "Spin speed / Jitter frequency / Sway frequency",
+            tt_aa_ignore_moving = "Skip anti-aim while your character is moving",
+            tt_aa_move_threshold = "Velocity magnitude above which movement counts as 'moving'",
+            tt_aa_anim_enabled = "Master switch for Animation Breaker",
+            tt_aa_anim_preset = "Choose a preset animation or 'Custom'",
+            tt_aa_anim_custom_id = "Only used when preset = Custom. Paste rbxassetid://NUMBER",
+            tt_aa_anim_mode = "Speed = adjust playback speed | RandomFrames = freeze + jump to random frame",
+            tt_aa_anim_speed = "Speed multiplier (negative = reverse, 0 = freeze)",
+            tt_aa_anim_interval = "How often RandomFrames jumps (seconds)",
+            tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) on HRP so animation replicates",
+            tt_aa_anim_reload = "Re-load the selected animation",
+            tt_aa_anim_stop = "Stop and reset all animation speeds",
+            tt_aa_desync_enabled = "Master switch for desync",
+            tt_aa_desync_mode = "Default = positional offset | OldPosition = lag position | Void = under map | InPlayer = inside nearest player",
+            tt_aa_desync_method = "How the offset is applied (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
+            tt_aa_desync_random_rotate = "Also apply random pitch/yaw/roll rotations",
+            tt_aa_desync_x = "X offset magnitude",
+            tt_aa_desync_y = "Y offset magnitude",
+            tt_aa_desync_z = "Z offset magnitude",
+            tt_aa_desync_random = "Randomize offset within X/Y/Z each update",
+            tt_aa_desync_interval = "How often the offset changes (seconds)",
+            tt_aa_desync_oldpos_enabled = "Refresh the saved OldPosition every N seconds",
+            tt_aa_desync_oldpos_delay = "Delay between OldPosition snapshots",
+            tt_aa_desync_void = "Y coordinate for Void mode",
+            tt_aa_desync_inplayer = "Forward offset from nearest player when InPlayer mode",
+            tt_aa_desync_refresh_shot = "Refresh saved position right before shooting",
+            tt_aa_desync_save = "Manually save current position for OldPosition mode",
+        }
+        local ru = {
+            -- sections
+            aa_body = "Тело (сервер)",
+            aa_anim = "Ломатель анимаций",
+            aa_desync = "Десинк (клиент)",
+            -- body
+            aa_enabled = "Включено",
+            aa_mode = "Режим",
+            aa_method = "Метод",
+            aa_reference = "Ориентация",
+            aa_yaw = "Рыскание (Yaw)",
+            aa_amount = "Амплитуда (любое число)",
+            aa_speed = "Скорость (любое число)",
+            aa_ignore_moving = "Игнорировать при движении",
+            aa_move_threshold = "Порог скорости движения",
+            -- animation breaker
+            aa_anim_enabled = "Включено",
+            aa_anim_preset = "Анимация",
+            aa_anim_custom_id = "Свой ID (rbxassetid://...)",
+            aa_anim_mode = "Режим",
+            aa_anim_speed = "Скорость (отриц. = реверс, 0 = стоп)",
+            aa_anim_interval = "Случайный интервал (с) [RandomFrames]",
+            aa_anim_apply_server = "Применять на сервере (SetNetworkOwner)",
+            aa_anim_reload = "Перезагрузить",
+            aa_anim_stop = "Остановить",
+            -- desync
+            aa_desync_enabled = "Включено",
+            aa_desync_mode = "Режим",
+            aa_desync_method = "Метод",
+            aa_desync_random_rotate = "Случайный поворот (pitch/yaw/roll)",
+            aa_desync_x = "X",
+            aa_desync_y = "Y",
+            aa_desync_z = "Z",
+            aa_desync_random = "Случайно (X/Y/Z = макс. диапазон)",
+            aa_desync_interval = "Интервал обновления",
+            aa_desync_oldpos_enabled = "Задержка OldPosition включена",
+            aa_desync_oldpos_delay = "Задержка OldPosition (с)",
+            aa_desync_void = "Глубина пустоты (Y)",
+            aa_desync_inplayer = "Смещение InPlayer (studs)",
+            aa_desync_refresh_shot = "Обновлять позицию при выстреле",
+            aa_desync_save = "Сохранить текущую позицию",
+
+            -- tooltips
+            tt_aa_enabled = "Главный выключатель анти-аима тела",
+            tt_aa_mode = "Static = фикс. угол | Spin = непрерывное вращение | Jitter = случайный угол | Sway = синусоида",
+            tt_aa_method = "CFrame = прямая запись | BodyGyro = физическое тело | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = сила вращения",
+            tt_aa_reference = "Camera = относительно взгляда | Movement = относительно скорости | Player = относительно HRP",
+            tt_aa_yaw = "Базовое смещение рыскания в градусах (-180 до 180)",
+            tt_aa_amount = "Амплитуда для Jitter/Sway/Static (в градусах)",
+            tt_aa_speed = "Скорость вращения / частота Jitter / частота Sway",
+            tt_aa_ignore_moving = "Пропускать анти-аим пока персонаж движется",
+            tt_aa_move_threshold = "Порог скорости, выше которого движение считается 'движением'",
+            tt_aa_anim_enabled = "Главный выключатель ломателя анимаций",
+            tt_aa_anim_preset = "Выберите пресет анимации или 'Custom'",
+            tt_aa_anim_custom_id = "Используется только при preset = Custom. Вставь rbxassetid://NUMBER",
+            tt_aa_anim_mode = "Speed = менять скорость | RandomFrames = стоп + случайный кадр",
+            tt_aa_anim_speed = "Множитель скорости (отрицательный = реверс, 0 = стоп)",
+            tt_aa_anim_interval = "Как часто RandomFrames прыгает (секунды)",
+            tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) на HRP, чтобы анимация реплицировалась",
+            tt_aa_anim_reload = "Перезагрузить выбранную анимацию",
+            tt_aa_anim_stop = "Остановить и сбросить скорости всех анимаций",
+            tt_aa_desync_enabled = "Главный выключатель десинка",
+            tt_aa_desync_mode = "Default = смещение позиции | OldPosition = лаг позиции | Void = под картой | InPlayer = внутри ближайшего игрока",
+            tt_aa_desync_method = "Как применяется смещение (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
+            tt_aa_desync_random_rotate = "Также применять случайные повороты pitch/yaw/roll",
+            tt_aa_desync_x = "Амплитуда смещения по X",
+            tt_aa_desync_y = "Амплитуда смещения по Y",
+            tt_aa_desync_z = "Амплитуда смещения по Z",
+            tt_aa_desync_random = "Рандомизировать смещение в пределах X/Y/Z при каждом обновлении",
+            tt_aa_desync_interval = "Как часто меняется смещение (секунды)",
+            tt_aa_desync_oldpos_enabled = "Обновлять сохранённую OldPosition каждые N секунд",
+            tt_aa_desync_oldpos_delay = "Задержка между снимками OldPosition",
+            tt_aa_desync_void = "Координата Y для режима Void",
+            tt_aa_desync_inplayer = "Смещение вперёд от ближайшего игрока в режиме InPlayer",
+            tt_aa_desync_refresh_shot = "Обновлять сохранённую позицию прямо перед выстрелом",
+            tt_aa_desync_save = "Вручную сохранить текущую позицию для режима OldPosition",
+        }
+        for k, v in pairs(en) do UI.L.en[k] = v end
+        for k, v in pairs(ru) do UI.L.ru[k] = v end
+        if UI.RefreshTheme then pcall(UI.RefreshTheme) end
+    end
+end
+
 H._UI = H._UI or {}
 local AntiTab = Window:AddTab({ Name = "Anti-Aim", Icon = ">" })
 H._UI.AntiTab = AntiTab
@@ -1004,94 +1171,113 @@ local animPresetList = {
 }
 
 --// -------- LEFT: Body (Server) --------
-local aaMain = AntiTab:CreateSection({ Name = "Body (Server)" })
-aaMain:AddToggle({ Name = "Enabled", Value = AntiAim.Settings.Enabled,
-    Callback = function(v) AntiAim.Settings.Enabled = v end })
-aaMain:AddDropdown({ Name = "Mode", Value = AntiAim.Settings.Mode, List = aaModes,
-    Callback = function(v) AntiAim.Settings.Mode = v end })
-aaMain:AddDropdown({ Name = "Method", Value = AntiAim.Settings.Method, List = aaMethods,
-    Callback = function(v) AntiAim.Settings.Method = v end })
-aaMain:AddDropdown({ Name = "Reference", Value = AntiAim.Settings.Body.Reference, List = refModes,
-    Callback = function(v) setBody("Reference", v) end })
-aaMain:AddSlider({ Name = "Yaw", Value = AntiAim.Settings.Body.Yaw,
+local aaMain = AntiTab:CreateSection({ Name = "aa_body" })
+aaMain:AddToggle({ Name = "aa_enabled", Value = AntiAim.Settings.Enabled,
+    Callback = function(v) AntiAim.Settings.Enabled = v end,
+    Tooltip = "tt_aa_enabled" })
+aaMain:AddDropdown({ Name = "aa_mode", Value = AntiAim.Settings.Mode, List = aaModes,
+    Callback = function(v) AntiAim.Settings.Mode = v end,
+    Tooltip = "tt_aa_mode" })
+aaMain:AddDropdown({ Name = "aa_method", Value = AntiAim.Settings.Method, List = aaMethods,
+    Callback = function(v) AntiAim.Settings.Method = v end,
+    Tooltip = "tt_aa_method" })
+aaMain:AddDropdown({ Name = "aa_reference", Value = AntiAim.Settings.Body.Reference, List = refModes,
+    Callback = function(v) setBody("Reference", v) end,
+    Tooltip = "tt_aa_reference" })
+aaMain:AddSlider({ Name = "aa_yaw", Value = AntiAim.Settings.Body.Yaw,
     Min = -180, Max = 180,
-    Callback = function(v) setBody("Yaw", v) end })
-aaMain:AddInput({ Name = "Amount (any number)",
+    Callback = function(v) setBody("Yaw", v) end,
+    Tooltip = "tt_aa_yaw" })
+aaMain:AddInput({ Name = "aa_amount",
     Value = tostring(AntiAim.Settings.Body.Amount),
     Callback = function(v)
         local n = tonumber(v)
         if n then setBody("Amount", n) end
-    end })
-aaMain:AddInput({ Name = "Speed (any number)",
+    end,
+    Tooltip = "tt_aa_amount" })
+aaMain:AddInput({ Name = "aa_speed",
     Value = tostring(AntiAim.Settings.Body.Speed),
     Callback = function(v)
         local n = tonumber(v)
         if n then setBody("Speed", n) end
-    end })
-aaMain:AddToggle({ Name = "Ignore when moving",
+    end,
+    Tooltip = "tt_aa_speed" })
+aaMain:AddToggle({ Name = "aa_ignore_moving",
     Value = AntiAim.Settings.Body.IgnoreMoving,
-    Callback = function(v) setBody("IgnoreMoving", v) end })
-aaMain:AddSlider({ Name = "Move speed threshold",
+    Callback = function(v) setBody("IgnoreMoving", v) end,
+    Tooltip = "tt_aa_ignore_moving" })
+aaMain:AddSlider({ Name = "aa_move_threshold",
     Value = AntiAim.Settings.Body.MoveSpeedThreshold,
     Min = 0.1, Max = 5, Decimals = 2,
-    Callback = function(v) setBody("MoveSpeedThreshold", v) end })
+    Callback = function(v) setBody("MoveSpeedThreshold", v) end,
+    Tooltip = "tt_aa_move_threshold" })
 
 --// -------- LEFT: Animation Breaker --------
-local animSec = AntiTab:CreateSection({ Name = "Animation Breaker" })
-animSec:AddToggle({ Name = "Enabled", Value = AB.Settings.Enabled,
+local animSec = AntiTab:CreateSection({ Name = "aa_anim" })
+animSec:AddToggle({ Name = "aa_anim_enabled", Value = AB.Settings.Enabled,
     Callback = function(v)
         setAB("Enabled", v)
         if not v then pcall(stopAnimBreaker) end
-    end })
-animSec:AddDropdown({ Name = "Animation", Value = AB.Settings.Preset or "None",
+    end,
+    Tooltip = "tt_aa_anim_enabled" })
+animSec:AddDropdown({ Name = "aa_anim_preset", Value = AB.Settings.Preset or "None",
     List = animPresetList,
     Callback = function(v)
         setAB("Preset", v)
         pcall(applyAnimPreset, v)
-    end })
-animSec:AddInput({ Name = "Custom ID (rbxassetid://...)",
+    end,
+    Tooltip = "tt_aa_anim_preset" })
+animSec:AddInput({ Name = "aa_anim_custom_id",
     Value = AB.Settings.CustomId or "",
     Callback = function(v)
         setAB("CustomId", v)
         if AB.Settings.Preset == "Custom" then pcall(relAnimPreset) end
-    end })
-animSec:AddDropdown({ Name = "Mode", Value = AB.Settings.Mode or "Speed",
+    end,
+    Tooltip = "tt_aa_anim_custom_id" })
+animSec:AddDropdown({ Name = "aa_anim_mode", Value = AB.Settings.Mode or "Speed",
     List = animModeList,
-    Callback = function(v) setAB("Mode", v) end })
-animSec:AddInput({ Name = "Speed (neg = reverse, 0 = freeze)",
+    Callback = function(v) setAB("Mode", v) end,
+    Tooltip = "tt_aa_anim_mode" })
+animSec:AddInput({ Name = "aa_anim_speed",
     Value = tostring(AB.Settings.Speed or 1),
     Callback = function(v)
         local n = tonumber(v)
         if n then setAB("Speed", n) end
-    end })
-animSec:AddSlider({ Name = "Random Interval (s) [RandomFrames]",
+    end,
+    Tooltip = "tt_aa_anim_speed" })
+animSec:AddSlider({ Name = "aa_anim_interval",
     Value = AB.Settings.RandomInterval or 0.1,
     Min = 0.02, Max = 1, Decimals = 2,
-    Callback = function(v) setAB("RandomInterval", v) end })
-animSec:AddToggle({ Name = "Apply to Server (SetNetworkOwner)",
+    Callback = function(v) setAB("RandomInterval", v) end,
+    Tooltip = "tt_aa_anim_interval" })
+animSec:AddToggle({ Name = "aa_anim_apply_server",
     Value = AB.Settings.ApplyToServer ~= false,
-    Callback = function(v) setAB("ApplyToServer", v) end })
-animSec:AddButton({ Name = "Reload",
+    Callback = function(v) setAB("ApplyToServer", v) end,
+    Tooltip = "tt_aa_anim_apply_server" })
+animSec:AddButton({ Name = "aa_anim_reload",
     Callback = function()
         pcall(relAnimPreset)
         if H.Util and H.Util.ShowError then
             H.Util.ShowError("Animation reloaded")
         end
-    end })
-animSec:AddButton({ Name = "Stop",
+    end,
+    Tooltip = "tt_aa_anim_reload" })
+animSec:AddButton({ Name = "aa_anim_stop",
     Callback = function()
         pcall(stopAnimBreaker)
         AB.Settings.Enabled = false
-    end })
+    end,
+    Tooltip = "tt_aa_anim_stop" })
 
 --// -------- RIGHT: Desync (Client) --------
-local desyncSec = AntiTab:CreateSection({ Name = "Desync (Client)", Side = "Right" })
-desyncSec:AddToggle({ Name = "Enabled", Value = AntiAim.Desync.Settings.Enabled,
+local desyncSec = AntiTab:CreateSection({ Name = "aa_desync", Side = "Right" })
+desyncSec:AddToggle({ Name = "aa_desync_enabled", Value = AntiAim.Desync.Settings.Enabled,
     Callback = function(v)
         AntiAim.Desync.Settings.Enabled = v
         if v then StartDesync() else StopDesync() end
-    end })
-desyncSec:AddDropdown({ Name = "Mode",
+    end,
+    Tooltip = "tt_aa_desync_enabled" })
+desyncSec:AddDropdown({ Name = "aa_desync_mode",
     Value = AntiAim.Desync.Settings.Mode or "Default",
     List = desyncModes,
     Callback = function(v)
@@ -1099,8 +1285,9 @@ desyncSec:AddDropdown({ Name = "Mode",
         if AntiAim.Desync.Settings.Enabled then
             StopDesync(); task.wait(0.05); StartDesync()
         end
-    end })
-desyncSec:AddDropdown({ Name = "Method",
+    end,
+    Tooltip = "tt_aa_desync_mode" })
+desyncSec:AddDropdown({ Name = "aa_desync_method",
     Value = AntiAim.Desync.Settings.Method or "CFrame",
     List = desyncMethods,
     Callback = function(v)
@@ -1108,54 +1295,66 @@ desyncSec:AddDropdown({ Name = "Method",
         if AntiAim.Desync.Settings.Enabled then
             StopDesync(); task.wait(0.05); StartDesync()
         end
-    end })
-desyncSec:AddToggle({ Name = "Random Rotate (pitch/yaw/roll)",
+    end,
+    Tooltip = "tt_aa_desync_method" })
+desyncSec:AddToggle({ Name = "aa_desync_random_rotate",
     Value = AntiAim.Desync.Settings.RandomRotate or false,
-    Callback = function(v) setDesync("RandomRotate", v) end })
-desyncSec:AddInput({ Name = "X",
+    Callback = function(v) setDesync("RandomRotate", v) end,
+    Tooltip = "tt_aa_desync_random_rotate" })
+desyncSec:AddInput({ Name = "aa_desync_x",
     Value = tostring(AntiAim.Desync.Settings.X or 5),
     Callback = function(v)
         local n = tonumber(v)
         if n then setDesync("X", n) end
-    end })
-desyncSec:AddInput({ Name = "Y",
+    end,
+    Tooltip = "tt_aa_desync_x" })
+desyncSec:AddInput({ Name = "aa_desync_y",
     Value = tostring(AntiAim.Desync.Settings.Y or 5),
     Callback = function(v)
         local n = tonumber(v)
         if n then setDesync("Y", n) end
-    end })
-desyncSec:AddInput({ Name = "Z",
+    end,
+    Tooltip = "tt_aa_desync_y" })
+desyncSec:AddInput({ Name = "aa_desync_z",
     Value = tostring(AntiAim.Desync.Settings.Z or 5),
     Callback = function(v)
         local n = tonumber(v)
         if n then setDesync("Z", n) end
-    end })
-desyncSec:AddToggle({ Name = "Random (X/Y/Z = max range)",
+    end,
+    Tooltip = "tt_aa_desync_z" })
+desyncSec:AddToggle({ Name = "aa_desync_random",
     Value = AntiAim.Desync.Settings.Random or false,
-    Callback = function(v) setDesync("Random", v) end })
-desyncSec:AddSlider({ Name = "Update Interval",
+    Callback = function(v) setDesync("Random", v) end,
+    Tooltip = "tt_aa_desync_random" })
+desyncSec:AddSlider({ Name = "aa_desync_interval",
     Value = AntiAim.Desync.Settings.UpdateInterval or 0.05,
     Min = 0.01, Max = 1, Decimals = 2,
-    Callback = function(v) setDesync("UpdateInterval", v) end })
-desyncSec:AddToggle({ Name = "OldPosition Delay Enabled",
+    Callback = function(v) setDesync("UpdateInterval", v) end,
+    Tooltip = "tt_aa_desync_interval" })
+desyncSec:AddToggle({ Name = "aa_desync_oldpos_enabled",
     Value = AntiAim.Desync.Settings.OldPosDelayEnabled ~= false,
-    Callback = function(v) setDesync("OldPosDelayEnabled", v) end })
-desyncSec:AddSlider({ Name = "OldPosition Delay (s)",
+    Callback = function(v) setDesync("OldPosDelayEnabled", v) end,
+    Tooltip = "tt_aa_desync_oldpos_enabled" })
+desyncSec:AddSlider({ Name = "aa_desync_oldpos_delay",
     Value = AntiAim.Desync.Settings.OldPosDelay or 0.5,
     Min = 0.01, Max = 5, Decimals = 2,
-    Callback = function(v) setDesync("OldPosDelay", v) end })
-desyncSec:AddSlider({ Name = "Void Depth (Y)",
+    Callback = function(v) setDesync("OldPosDelay", v) end,
+    Tooltip = "tt_aa_desync_oldpos_delay" })
+desyncSec:AddSlider({ Name = "aa_desync_void",
     Value = AntiAim.Desync.Settings.VoidDepth or -1000,
     Min = -5000, Max = -100,
-    Callback = function(v) setDesync("VoidDepth", v) end })
-desyncSec:AddSlider({ Name = "InPlayer Offset (studs)",
+    Callback = function(v) setDesync("VoidDepth", v) end,
+    Tooltip = "tt_aa_desync_void" })
+desyncSec:AddSlider({ Name = "aa_desync_inplayer",
     Value = AntiAim.Desync.Settings.InPlayerOffset or 2,
     Min = 0, Max = 20, Decimals = 1,
-    Callback = function(v) setDesync("InPlayerOffset", v) end })
-desyncSec:AddToggle({ Name = "Refresh position on shot",
+    Callback = function(v) setDesync("InPlayerOffset", v) end,
+    Tooltip = "tt_aa_desync_inplayer" })
+desyncSec:AddToggle({ Name = "aa_desync_refresh_shot",
     Value = AntiAim.Desync.Settings.RefreshOnShot or false,
-    Callback = function(v) setDesync("RefreshOnShot", v) end })
-desyncSec:AddButton({ Name = "Save Current Position",
+    Callback = function(v) setDesync("RefreshOnShot", v) end,
+    Tooltip = "tt_aa_desync_refresh_shot" })
+desyncSec:AddButton({ Name = "aa_desync_save",
     Callback = function()
         if AntiAim.Functions and AntiAim.Functions.SaveOldPosition then
             local ok = AntiAim.Functions.SaveOldPosition()
@@ -1163,6 +1362,7 @@ desyncSec:AddButton({ Name = "Save Current Position",
                 H.Util.ShowError(ok and "Old position saved" or "No character")
             end
         end
-    end })
+    end,
+    Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab)")
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips)")
