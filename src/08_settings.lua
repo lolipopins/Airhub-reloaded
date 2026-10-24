@@ -1,7 +1,8 @@
 --// ============================================================================
---// AirHub — 08_settings.lua (airhubUI build)
---// Settings tab: Logs & Sounds, Configs, Main actions.
---// Logic ported from airhub-remake 07b_ui_tabs.lua (Settings section).
+--// AirHub — 08_settings.lua (unified configs build)
+--// Settings tab: Logs & Sounds + Main actions.
+--// Config section REMOVED — configs now live in airhubUI's "Configs" tab
+--// and save BOTH UI state AND AirHub settings in a single file.
 --// ============================================================================
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 08_settings: core not loaded"); return end
@@ -13,7 +14,6 @@ local ShowError       = Util.ShowError
 local TeleportService = Util.TeleportService
 local HttpService     = Util.HttpService
 local LocalPlayer     = Util.LocalPlayer
-local Track           = Util.Track
 
 local Window = getgenv().airhubUI_Window
 if not Window then
@@ -88,11 +88,9 @@ local function ResetEverything()
     if Hg.WallHack and Hg.WallHack.Functions and Hg.WallHack.Functions.ResetSettings then
         pcall(Hg.WallHack.Functions.ResetSettings)
     end
-
     if Hg.AntiAim and Hg.AntiAim.Functions and Hg.AntiAim.Functions.ResetSettings then
         pcall(Hg.AntiAim.Functions.ResetSettings)
     end
-
     if Hg.ServerPosition and Hg.ServerPosition.Settings then
         Hg.ServerPosition.Settings.Enabled = false
         if Hg.ServerPosition.Stop then pcall(Hg.ServerPosition.Stop) end
@@ -174,14 +172,6 @@ local function doServerHop()
 end
 
 --// ---------------------------------------------------------------------------
---// Config system bindings
---// ---------------------------------------------------------------------------
-local Config_Save      = (H.Config and H.Config.Save)      or function() return false, "no config" end
-local Config_Load      = (H.Config and H.Config.Load)      or function() return false, "no config" end
-local Config_Delete    = (H.Config and H.Config.Delete)    or function() return false, "no config" end
-local Config_ListFiles = (H.Config and H.Config.ListFiles) or function() return {} end
-
---// ---------------------------------------------------------------------------
 --// LEFT COLUMN — Shot Logs & Sounds
 --// ---------------------------------------------------------------------------
 local logSec = SettingsTab:CreateSection({ Name = "Shot Logs & Sounds" })
@@ -257,104 +247,6 @@ logSec:AddSlider({
 })
 
 --// ---------------------------------------------------------------------------
---// LEFT COLUMN — Configs
---// ---------------------------------------------------------------------------
-local cfgSec = SettingsTab:CreateSection({ Name = "Configs" })
-local currentConfigName = "default"
-
-local cfgNameRef = cfgSec:AddInput({
-    Name = "Config Name",
-    Value = currentConfigName,
-    Placeholder = "my_config",
-    Callback = function(v)
-        if v and v ~= "" then currentConfigName = v end
-    end,
-})
-
-local initialList = Config_ListFiles()
-local savedConfigsRef = cfgSec:AddDropdown({
-    Name = "Saved Configs",
-    Value = (#initialList > 0) and initialList[1] or "",
-    List = initialList,
-})
-
-local function refreshConfigDropdown()
-    local list = Config_ListFiles()
-    if savedConfigsRef and savedConfigsRef._setList then
-        savedConfigsRef._setList(list)
-    end
-    if savedConfigsRef and savedConfigsRef._setValue then
-        savedConfigsRef._setValue((#list > 0) and list[1] or "")
-    end
-    return list
-end
-
-cfgSec:AddDivider({ Text = "ACTIONS" })
-
-cfgSec:AddButton({
-    Name = "Save Config",
-    Callback = function()
-        local name = currentConfigName
-        if not name or name == "" then
-            ShowError("Enter config name")
-            return
-        end
-        local ok, where = Config_Save(name)
-        if ok then
-            ShowError("Saved: " .. name .. " (" .. tostring(where) .. ")")
-            refreshConfigDropdown()
-        else
-            ShowError("Save failed: " .. tostring(where))
-        end
-    end,
-})
-
-cfgSec:AddButton({
-    Name = "Load Config",
-    Callback = function()
-        local name = (savedConfigsRef and savedConfigsRef:Get()) or currentConfigName
-        if not name or name == "" then
-            ShowError("Select or enter a config")
-            return
-        end
-        local ok, where = Config_Load(name)
-        if ok then
-            ShowError("Loaded: " .. name)
-            local fn = (H._UI and H._UI.ApplyAllEnabledStates) or H.ApplyAllEnabledStates
-            if fn then task.defer(fn) end
-        else
-            ShowError("Load failed: " .. tostring(where))
-        end
-    end,
-})
-
-cfgSec:AddButton({
-    Name = "Delete Config",
-    Callback = function()
-        local name = (savedConfigsRef and savedConfigsRef:Get()) or currentConfigName
-        if not name or name == "" then
-            ShowError("Select or enter a config")
-            return
-        end
-        local ok, where = Config_Delete(name)
-        if ok then
-            ShowError("Deleted: " .. name)
-            refreshConfigDropdown()
-        else
-            ShowError("Delete failed: " .. tostring(where))
-        end
-    end,
-})
-
-cfgSec:AddButton({
-    Name = "Refresh List",
-    Callback = function()
-        local list = refreshConfigDropdown()
-        ShowError("Found: " .. tostring(#list) .. " config(s)")
-    end,
-})
-
---// ---------------------------------------------------------------------------
 --// RIGHT COLUMN — Main
 --// ---------------------------------------------------------------------------
 local mainSec = SettingsTab:CreateSection({ Name = "Main", Side = "Right" })
@@ -382,20 +274,24 @@ mainSec:AddDivider({ Text = "DANGER ZONE" })
 mainSec:AddButton({
     Name = "Exit (Unload AirHub)",
     Callback = function()
-        if Window and Window.Unload then
-            Window:Unload()
-        end
+        if Window and Window.Unload then Window:Unload() end
     end,
 })
 
 --// ---------------------------------------------------------------------------
---// RIGHT COLUMN — Info
+--// RIGHT COLUMN — Configs (unified hint) + Info
 --// ---------------------------------------------------------------------------
+local cfgHintSec = SettingsTab:CreateSection({ Name = "Configs (unified)", Side = "Right" })
+cfgHintSec:AddLabel({ Text = "Config save/load has moved to the 'Configs' tab." })
+cfgHintSec:AddLabel({ Text = "ONE config saves BOTH UI state AND AirHub settings.", Color = Theme and Theme.Accent or Color3.fromRGB(77,107,254) })
+cfgHintSec:AddLabel({ Text = "Load once → theme, toggles, cheat settings — everything restored." })
+cfgHintSec:AddLabel({ Text = "Legacy AirHub/Configs/*.json auto-migrated on first load.", Color = Theme and Theme.Muted or Color3.fromRGB(156,163,175) })
+
 local infoSec = SettingsTab:CreateSection({ Name = "Info", Side = "Right" })
-infoSec:AddLabel({ Text = "airhubUI v1.8.0 · airhub-remake port" })
+infoSec:AddLabel({ Text = "airhubUI v1.9.3 · unified configs" })
 infoSec:AddLabel({ Text = "RightShift — toggle menu" })
 infoSec:AddLabel({ Text = "MMB on any row — bind menu" })
 infoSec:AddLabel({ Text = "RMB on any row — options menu" })
-infoSec:AddLabel({ Text = "Configs saved to AirHub/Configs/" })
+infoSec:AddLabel({ Text = "Configs → airhubUI_Configs/" })
 
-print("[AirHub] 08_settings: loaded OK (airhubUI build)")
+print("[AirHub] 08_settings: loaded OK (unified configs build)")
