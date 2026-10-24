@@ -2511,8 +2511,15 @@ local function createWindow(opts)
         IgnoreGuiInset = true}, parent)
     ensureOverlay(gui)
 
-    local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)
-    local HIDDEN_POS = UDim2.new(0.5, 0, 0.5, 30)
+    -- ─── ИЗМЕНЕНИЕ 1: currentHomePos + getHiddenPos() ──────────────────
+    local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)  -- стартовая позиция (центр)
+    local currentHomePos = BASE_POS              -- текущая "домашняя" позиция (обновляется при drag)
+    local function getHiddenPos()
+        return UDim2.new(
+            currentHomePos.X.Scale, currentHomePos.X.Offset,
+            currentHomePos.Y.Scale, currentHomePos.Y.Offset + 30
+        )
+    end
 
     local shadowFrame = new("Frame", {Name = "Shadow", BorderSizePixel = 0,
         AnchorPoint = Vector2.new(0.5, 0.5), Position = BASE_POS,
@@ -2729,62 +2736,81 @@ local function createWindow(opts)
         _titleLbl = titleLbl, _statusBar = statusBar}
 
     -- ────────────────────────────────────────────────────────────
-    -- FIXED Show/Hide/Toggle with single _isOpen flag
+    -- FIXED Show/Hide/Toggle — сохраняет позицию перетаскивания
     -- ────────────────────────────────────────────────────────────
+    local _lastToggleTime = 0
+    local _toggleCooldown = 0.1
+
+    -- ─── ИЗМЕНЕНИЕ 2: _forceHidden больше не сбрасывает Position ────────
+    local function _forceHidden()
+        gui.Enabled = false
+        -- Позиция НЕ сбрасывается — окно остаётся там, где его закрыли.
+        -- currentHomePos уже хранит правильное значение для будущего Show.
+        main.BackgroundTransparency = Config.MenuTransparency
+        shadowFrame.BackgroundTransparency = 0.8
+        if animScale then animScale.Scale = 1 end
+    end
+
+    -- ─── ИЗМЕНЕНИЕ 3: Show анимирует из (currentHomePos + 30px) в currentHomePos
     function window:Show()
         if self._isOpen then return end
         self._isOpen = true
         self._hiding = false
         closeAllPopups()
         gui.Enabled = true
-        main.Position = HIDDEN_POS
+        local hiddenPos = getHiddenPos()
+        main.Position = hiddenPos
         main.BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)
-        shadowFrame.Position = HIDDEN_POS
+        shadowFrame.Position = hiddenPos
         shadowFrame.BackgroundTransparency = 1
         if animScale then animScale.Scale = 0.88 end
-        tween(main, {Position = BASE_POS, BackgroundTransparency = Config.MenuTransparency},
+        tween(main, {Position = currentHomePos, BackgroundTransparency = Config.MenuTransparency},
             Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-        tween(shadowFrame, {Position = BASE_POS, BackgroundTransparency = 0.8},
+        tween(shadowFrame, {Position = currentHomePos, BackgroundTransparency = 0.8},
             Config.MenuAnim, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
         if animScale then
             tween(animScale, {Scale = 1}, Config.MenuAnim, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         end
     end
+
+    -- ─── ИЗМЕНЕНИЕ 4: Hide анимирует в (currentHomePos + 30px) вниз
     function window:Hide()
-        if not self._isOpen then return end
+        if not self._isOpen then
+            if gui.Enabled then _forceHidden() end
+            return
+        end
         self._isOpen = false
         self._hiding = true
         pcall(closeAllPopups)
         local animTime = Config.MenuCloseAnim
-        tween(main, {Position = HIDDEN_POS,
+        local hiddenPos = getHiddenPos()
+        tween(main, {Position = hiddenPos,
             BackgroundTransparency = math.min(1, Config.MenuTransparency + 0.45)},
             animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        tween(shadowFrame, {Position = HIDDEN_POS, BackgroundTransparency = 1},
+        tween(shadowFrame, {Position = hiddenPos, BackgroundTransparency = 1},
             animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         if animScale then
             tween(animScale, {Scale = 0.88}, animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         end
         task.delay(animTime + 0.02, function()
             if not self._isOpen then
-                gui.Enabled = false
-                main.Position = BASE_POS
-                main.BackgroundTransparency = Config.MenuTransparency
-                shadowFrame.Position = BASE_POS
-                shadowFrame.BackgroundTransparency = 0.8
-                if animScale then animScale.Scale = 1 end
+                _forceHidden()
             end
             self._hiding = false
         end)
-        -- Safety fallback in case task.delay glitches
         task.spawn(function()
             task.wait(animTime + 0.5)
             if not self._isOpen and gui.Enabled then
-                gui.Enabled = false
+                _forceHidden()
                 self._hiding = false
             end
         end)
     end
+
     function window:Toggle()
+        local now = tick()
+        if now - _lastToggleTime < _toggleCooldown then return end
+        _lastToggleTime = now
         if self._isOpen then
             self:Hide()
         else
@@ -2792,9 +2818,8 @@ local function createWindow(opts)
         end
     end
 
-    -- X close button uses Hide (consistent state)
     btnClose.MouseButton1Click:Connect(function()
-        if window and window.Hide then window:Hide() else gui.Enabled = false end
+        window:Hide()
     end)
 
     function window:SetLanguage(lang)
@@ -2902,7 +2927,6 @@ local function createWindow(opts)
                                             local ok, v = pcall(el.Get)
                                             if ok then secData[elId] = serializeElemKey(v) end
                                         elseif elType == "Button" then
-                                            -- skip
                                         else
                                             local ok, v = pcall(el.Get)
                                             if ok then
@@ -2992,7 +3016,6 @@ local function createWindow(opts)
                                                 elseif elType == "Keybind" then
                                                     pcall(el.Set, deserializeElemKey(savedVal))
                                                 elseif elType == "Button" then
-                                                    -- skip
                                                 else
                                                     pcall(el.Set, savedVal)
                                                 end
@@ -3138,6 +3161,7 @@ local function createWindow(opts)
         if Config[key] ~= nil then Config[key] = v; applyTransparencyTo(cat) end
     end
 
+    -- ─── ИЗМЕНЕНИЕ 5: drag-обработчик обновляет currentHomePos ──────────
     local drag, dStart, sPos, shadowPos
     titlebar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -3149,6 +3173,8 @@ local function createWindow(opts)
             local d = i.Position - dStart
             main.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + d.X, sPos.Y.Scale, sPos.Y.Offset + d.Y)
             shadowFrame.Position = UDim2.new(shadowPos.X.Scale, shadowPos.X.Offset + d.X, shadowPos.Y.Scale, shadowPos.Y.Offset + d.Y)
+            -- Обновляем "домашнюю" позицию: при следующем Hide/Show будем использовать её
+            currentHomePos = main.Position
         end
     end))
     _T(UserInputService.InputEnded:Connect(function(i)
@@ -3173,9 +3199,14 @@ local function createWindow(opts)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then rz = false end end))
 
     _T(UserInputService.InputBegan:Connect(function(i, gpe)
-        if gpe then return end
         if bindListening then return end
-        if i.KeyCode == Enum.KeyCode.RightShift then window:Toggle() end
+        if i.KeyCode == Enum.KeyCode.RightShift then
+            window:Toggle()
+        elseif i.KeyCode == Enum.KeyCode.Escape then
+            if #PopupStack == 0 and window._isOpen then
+                window:Hide()
+            end
+        end
     end))
 
     function window:Unload()
