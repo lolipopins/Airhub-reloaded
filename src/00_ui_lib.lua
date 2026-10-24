@@ -1,5 +1,6 @@
 --=============================================================
--- airhubUI v1.9.3 — Fixed: RightShift toggle (removed _showing/_hiding deadlock)
+-- airhubUI v1.9.4 — Fixed: menu close position, RightShift from TextBox,
+-- added Image component + window logo support
 --=============================================================
 
 local TweenService     = game:GetService("TweenService")
@@ -8,6 +9,7 @@ local RunService       = game:GetService("RunService")
 local Players          = game:GetService("Players")
 local CoreGui          = game:GetService("CoreGui")
 local HttpService      = game:GetService("HttpService")
+local ContentProvider  = game:GetService("ContentProvider")
 local LocalPlayer      = Players.LocalPlayer
 
 -- ══════════════════════════════════════════════════════════════
@@ -15,7 +17,7 @@ local LocalPlayer      = Players.LocalPlayer
 -- ══════════════════════════════════════════════════════════════
 local Config = {
     Language = "en",
-    Version = "1.9.3",
+    Version = "1.9.4",
     WindowWidth = 720, WindowHeight = 500,
     MinWidth = 520, MinHeight = 380,
     ToggleKey = Enum.KeyCode.RightShift,
@@ -28,11 +30,14 @@ local Config = {
     NotificationDuration = 3, NotificationPosition = "top-right",
     TooltipDelay = 0.05,
     RainbowCallbackInterval = 4,
+    -- Logo config
+    LogoSource = nil,  -- rbxassetid://...
+    LogoSize = 22,
 }
 
 -- ══════════════════════════════════════════════════════════════
 -- LOCALIZATION
--- ══════════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════════
 local L = {
     en = {
         tab_settings = "Settings", tab_configs = "Configs", tab_binds = "Binds",
@@ -41,6 +46,7 @@ local L = {
         sec_accent = "Accent Colors", sec_transparency = "Transparency",
         sec_notifications = "Notifications", sec_tooltips = "Tooltips",
         sec_actions = "Actions", sec_general = "General",
+        sec_logo = "Window Logo",
         lbl_preset = "Preset", lbl_title = "Title", lbl_width = "Width", lbl_height = "Height",
         lbl_sidebar_width = "Sidebar Width", lbl_corner_radius = "Corner Radius",
         lbl_status_bar = "Status Bar", lbl_font_family = "Font Family", lbl_font_size = "Font Size",
@@ -55,9 +61,12 @@ local L = {
         lbl_delay = "Delay", lbl_language = "Language",
         lbl_transparency_menu = "Menu", lbl_transparency_tabs = "Tabs",
         lbl_transparency_sections = "Sections", lbl_transparency_elements = "Elements",
+        lbl_logo_source = "Logo Image (rbxassetid://...)",
+        lbl_logo_size = "Logo Size (px)",
+        lbl_logo_preview = "Preview",
         btn_test_notif = "Test Notification", btn_reset_light = "Reset to airhubUI Light",
         btn_reset_dark = "Reset to airhubUI Dark", btn_unload = "Unload Menu",
-        btn_reshow = "Re-show Window",
+        btn_reshow = "Re-show Window", btn_remove_logo = "Remove Logo",
         tt_preset = "Switch full color scheme + font + text size",
         tt_title = "Window title (header + status bar)",
         tt_width = "Window width (520-1200 px)", tt_height = "Window height (380-900 px)",
@@ -84,6 +93,8 @@ local L = {
         tt_transparency_tabs = "Tabs buttons transparency",
         tt_transparency_sections = "Sections background transparency",
         tt_transparency_elements = "Element transparency",
+        tt_logo_source = "Paste rbxassetid://12345678 (or just the number)",
+        tt_logo_size = "Logo dimensions in pixels (12-64)",
         tt_test_notif = "Show a test notification",
         tt_reset_light = "Reset to default light theme", tt_reset_dark = "Reset to dark theme",
         tt_unload = "Fully unload menu from memory", tt_reshow = "Force show window",
@@ -135,9 +146,12 @@ local L = {
         n_preset_not_found = "Not found: %s", n_binds_cleared = "All binds cleared",
         n_test_notif_title = "Test", n_test_notif_text = "This is a test notification",
         n_lang_changed = "Language: %s",
+        n_invalid_asset = "Invalid asset ID",
+        n_logo_applied = "Logo applied", n_logo_removed = "Logo removed",
         status_ready = "ready",
         ph_search = "Search...", ph_my_config = "my_config",
         ph_my_preset = "My Preset", ph_airhubui = "airhubUI",
+        ph_logo = "rbxassetid://12345678",
         lang_en = "English", lang_ru = "Русский",
     },
     ru = {
@@ -147,6 +161,7 @@ local L = {
         sec_text_colors = "Цвета текста", sec_accent = "Акцентные цвета",
         sec_transparency = "Прозрачность", sec_notifications = "Уведомления",
         sec_tooltips = "Подсказки", sec_actions = "Действия", sec_general = "Основное",
+        sec_logo = "Логотип окна",
         lbl_preset = "Пресет", lbl_title = "Заголовок", lbl_width = "Ширина",
         lbl_height = "Высота", lbl_sidebar_width = "Ширина сайдбара",
         lbl_corner_radius = "Скругление углов", lbl_status_bar = "Статус-бар",
@@ -162,9 +177,12 @@ local L = {
         lbl_position = "Позиция", lbl_delay = "Задержка", lbl_language = "Язык",
         lbl_transparency_menu = "Меню", lbl_transparency_tabs = "Табы",
         lbl_transparency_sections = "Секции", lbl_transparency_elements = "Элементы",
+        lbl_logo_source = "Логотип (rbxassetid://...)",
+        lbl_logo_size = "Размер лого (px)",
+        lbl_logo_preview = "Превью",
         btn_test_notif = "Тест уведомления", btn_reset_light = "Сброс на airhubUI Light",
         btn_reset_dark = "Сброс на airhubUI Dark", btn_unload = "Выгрузить меню",
-        btn_reshow = "Показать окно",
+        btn_reshow = "Показать окно", btn_remove_logo = "Убрать лого",
         tt_preset = "Переключить всю цветовую схему + шрифт + размер",
         tt_title = "Заголовок окна (шапка + статус-бар)",
         tt_width = "Ширина окна (520-1200 px)", tt_height = "Высота окна (380-900 px)",
@@ -193,6 +211,8 @@ local L = {
         tt_transparency_tabs = "Прозрачность кнопок табов",
         tt_transparency_sections = "Прозрачность фона секций",
         tt_transparency_elements = "Прозрачность элементов",
+        tt_logo_source = "Вставь rbxassetid://12345678 (или просто число)",
+        tt_logo_size = "Размеры логотипа в пикселях (12-64)",
         tt_test_notif = "Показать тестовое уведомление",
         tt_reset_light = "Сбросить к светлой теме",
         tt_reset_dark = "Сбросить к тёмной теме",
@@ -254,9 +274,12 @@ local L = {
         n_preset_not_found = "Не найдено: %s", n_binds_cleared = "Все бинды очищены",
         n_test_notif_title = "Тест", n_test_notif_text = "Это тестовое уведомление",
         n_lang_changed = "Язык: %s",
+        n_invalid_asset = "Неверный ID ассета",
+        n_logo_applied = "Логотип установлен", n_logo_removed = "Логотип убран",
         status_ready = "готово",
         ph_search = "Поиск...", ph_my_config = "мой_конфиг",
         ph_my_preset = "Мой пресет", ph_airhubui = "airhubUI",
+        ph_logo = "rbxassetid://12345678",
         lang_en = "English", lang_ru = "Русский",
     },
 }
@@ -277,6 +300,41 @@ local function tPlaceholder(inst, key)
     inst:SetAttribute("_tPlaceholder", key)
     inst.PlaceholderText = T(key)
     return inst
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- IMAGE / ASSET HELPERS
+-- ══════════════════════════════════════════════════════════════
+-- Accepts: "rbxassetid://123", "123", "id=123", "https://...id=123"
+-- Returns: "rbxassetid://123" or nil
+local function sanitizeAssetSource(str)
+    if not str then return nil end
+    if type(str) == "number" then
+        if str > 0 and str == math.floor(str) then
+            return "rbxassetid://" .. tostring(str)
+        end
+        return nil
+    end
+    str = tostring(str)
+    str = str:gsub("%s+", "")
+    if str == "" then return nil end
+    -- rbxasset:// (built-in)
+    if str:match("^rbxasset://") then return str end
+    -- already formatted
+    if str:match("^rbxassetid://%d+$") then return str end
+    -- pure digits
+    local num = tonumber(str)
+    if num and num > 0 and num == math.floor(num) then
+        return "rbxassetid://" .. tostring(math.floor(num))
+    end
+    -- extract from URL or other formats
+    local id = str:match("rbxassetid://(%d+)")
+        or str:match("[?&]id=(%d+)")
+        or str:match("(%d+)")
+    if id and tonumber(id) and tonumber(id) > 0 then
+        return "rbxassetid://" .. id
+    end
+    return nil
 end
 
 -- ══════════════════════════════════════════════════════════════
@@ -2320,6 +2378,97 @@ local function createKeybind(section, opts)
 end
 
 -- ══════════════════════════════════════════════════════════════
+-- IMAGE COMPONENT (NEW)
+-- ══════════════════════════════════════════════════════════════
+local function createImage(section, opts)
+    opts = opts or {}
+    local source = sanitizeAssetSource(opts.Source or opts.Image)
+    local height = math.clamp(tonumber(opts.Height) or 100, 20, 1000)
+    local roundCorners = tonumber(opts.RoundCorners) or 0
+    local showBg = opts.ShowBackground or false
+    local scaleType = opts.ScaleType or "Fit"
+    local scaleMap = {
+        Fit = Enum.ScaleType.Fit,
+        Stretch = Enum.ScaleType.Stretch,
+        Tile = Enum.ScaleType.Tile,
+        Crop = Enum.ScaleType.Crop,
+    }
+    local st = scaleMap[scaleType] or Enum.ScaleType.Fit
+
+    local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,height), ClipsDescendants = true}, section.Content)
+    if showBg then
+        themeBg(row, "Element"); regTransparency(row, "Element", 0)
+        addCorner(row, UDim.new(0,8)); addStroke(row, Theme.Outline, 1, 0.35)
+    else
+        row.BackgroundTransparency = 1
+    end
+
+    local img = new("ImageLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1,0,1,0),
+        Position = UDim2.new(0,0,0,0),
+        ScaleType = st,
+        Image = source or "",
+    }, row)
+    if roundCorners > 0 then addCorner(img, UDim.new(0, roundCorners)) end
+
+    -- Fallback display when no image
+    local placeholder = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1,0,1,0),
+        Font = Config.CurrentFontFamily,
+        Text = source and "" or "[no image]",
+        TextSize = 11,
+        TextColor3 = Theme.Muted,
+        Visible = (not source) or false,
+    }, row)
+
+    local function setSource(s)
+        local clean = sanitizeAssetSource(s)
+        if clean then
+            source = clean
+            img.Image = clean
+            placeholder.Visible = false
+            -- Preload (non-blocking)
+            pcall(function() task.spawn(function() ContentProvider:PreloadAsync({img}) end) end)
+        else
+            source = nil
+            img.Image = ""
+            placeholder.Visible = true
+        end
+    end
+    if source then setSource(source) end
+
+    markSearch(row, T(opts.Name or ""), nil)
+
+    if opts.Callback then
+        local btn = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0),
+            Text = "", ZIndex = img.ZIndex + 1}, row)
+        btn.MouseButton1Click:Connect(function() pcall(opts.Callback) end)
+    end
+
+    local meta = {
+        Name = T(opts.Name or ""),
+        Type = "Image",
+        Element = row,
+        Options = opts.Options,
+        State = getSectionState(section),
+        Set = setSource,
+        Get = function() return source end,
+    }
+    attachRowBinds(row, nil, meta)
+    if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
+    if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
+    return {
+        Set = setSource,
+        Get = function() return source end,
+        _meta = meta,
+        _rawName = opts.Name or ("img_" .. tostring(math.random(1,99999))),
+        _type = "Image",
+    }
+end
+
+-- ══════════════════════════════════════════════════════════════
 -- SECTION
 -- ══════════════════════════════════════════════════════════════
 local function createSection(tab, opts)
@@ -2368,6 +2517,7 @@ local function createSection(tab, opts)
     function section:AddKeybind(o) return track(createKeybind(self, o)) end
     function section:AddDivider(o) return track(createDivider(self, o)) end
     function section:AddInput(o) return track(createInput(self, o)) end
+    function section:AddImage(o) return track(createImage(self, o)) end
     return section
 end
 
@@ -2511,9 +2661,9 @@ local function createWindow(opts)
         IgnoreGuiInset = true}, parent)
     ensureOverlay(gui)
 
-    -- ─── ИЗМЕНЕНИЕ 1: currentHomePos + getHiddenPos() ──────────────────
-    local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)  -- стартовая позиция (центр)
-    local currentHomePos = BASE_POS              -- текущая "домашняя" позиция (обновляется при drag)
+    -- Position preservation
+    local BASE_POS = UDim2.new(0.5, 0, 0.5, 0)
+    local currentHomePos = BASE_POS
     local function getHiddenPos()
         return UDim2.new(
             currentHomePos.X.Scale, currentHomePos.X.Offset,
@@ -2541,6 +2691,17 @@ local function createWindow(opts)
 
     local titlebar = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,40), ZIndex = 2,
         BackgroundTransparency = 1}, main)
+
+    -- Logo (hidden by default)
+    local logo = new("ImageLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 12, 0.5, -11),
+        Size = UDim2.new(0, 22, 0, 22),
+        ScaleType = Enum.ScaleType.Fit,
+        Visible = false,
+        ZIndex = 3,
+    }, titlebar)
+
     local titleLbl = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.new(0,18,0,0),
         Size = UDim2.new(1,-330,1,0), Font = Config.CurrentFontFamily, Text = opts.Name or "airhubUI",
         TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 3}, titlebar)
@@ -2733,25 +2894,61 @@ local function createWindow(opts)
         Theme = Theme, Config = Config, _animScale = animScale,
         _isOpen = true,
         _hiding = false, _showing = false,
-        _titleLbl = titleLbl, _statusBar = statusBar}
+        _titleLbl = titleLbl, _versionLbl = versionLbl, _statusBar = statusBar,
+        _logo = logo}
 
     -- ────────────────────────────────────────────────────────────
-    -- FIXED Show/Hide/Toggle — сохраняет позицию перетаскивания
+    -- Logo API (NEW)
+    -- ────────────────────────────────────────────────────────────
+    function window:SetLogo(source, size)
+        size = tonumber(size) or Config.LogoSize or 22
+        size = math.clamp(size, 12, 64)
+        local clean = sanitizeAssetSource(source)
+        if not clean then
+            logo.Visible = false
+            logo.Image = ""
+            Config.LogoSource = nil
+            -- Reset title label to default
+            titleLbl.Position = UDim2.new(0, 18, 0, 0)
+            titleLbl.Size = UDim2.new(1, -330, 1, 0)
+            versionLbl.Position = UDim2.new(0, 18, 0, 22)
+            versionLbl.Size = UDim2.new(1, -330, 0, 14)
+            return false
+        end
+        logo.Image = clean
+        logo.Size = UDim2.new(0, size, 0, size)
+        logo.Position = UDim2.new(0, 12, 0.5, -size/2)
+        logo.Visible = true
+        -- Shift title labels right
+        local offset = 12 + size + 8
+        titleLbl.Position = UDim2.new(0, offset, 0, 0)
+        titleLbl.Size = UDim2.new(1, -(330 + offset - 18), 1, 0)
+        versionLbl.Position = UDim2.new(0, offset, 0, 22)
+        versionLbl.Size = UDim2.new(1, -(330 + offset - 18), 0, 14)
+        Config.LogoSource = clean
+        Config.LogoSize = size
+        pcall(function() task.spawn(function() ContentProvider:PreloadAsync({logo}) end) end)
+        return true
+    end
+
+    -- Apply config logo on init
+    if Config.LogoSource then
+        window:SetLogo(Config.LogoSource, Config.LogoSize)
+    end
+
+    -- ────────────────────────────────────────────────────────────
+    -- Show/Hide/Toggle with preserved position
     -- ────────────────────────────────────────────────────────────
     local _lastToggleTime = 0
     local _toggleCooldown = 0.1
 
-    -- ─── ИЗМЕНЕНИЕ 2: _forceHidden больше не сбрасывает Position ────────
     local function _forceHidden()
         gui.Enabled = false
-        -- Позиция НЕ сбрасывается — окно остаётся там, где его закрыли.
-        -- currentHomePos уже хранит правильное значение для будущего Show.
         main.BackgroundTransparency = Config.MenuTransparency
         shadowFrame.BackgroundTransparency = 0.8
         if animScale then animScale.Scale = 1 end
     end
 
-    -- ─── ИЗМЕНЕНИЕ 3: Show анимирует из (currentHomePos + 30px) в currentHomePos
     function window:Show()
         if self._isOpen then return end
         self._isOpen = true
@@ -2773,7 +2970,6 @@ local function createWindow(opts)
         end
     end
 
-    -- ─── ИЗМЕНЕНИЕ 4: Hide анимирует в (currentHomePos + 30px) вниз
     function window:Hide()
         if not self._isOpen then
             if gui.Enabled then _forceHidden() end
@@ -2793,9 +2989,7 @@ local function createWindow(opts)
             tween(animScale, {Scale = 0.88}, animTime, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         end
         task.delay(animTime + 0.02, function()
-            if not self._isOpen then
-                _forceHidden()
-            end
+            if not self._isOpen then _forceHidden() end
             self._hiding = false
         end)
         task.spawn(function()
@@ -2811,16 +3005,10 @@ local function createWindow(opts)
         local now = tick()
         if now - _lastToggleTime < _toggleCooldown then return end
         _lastToggleTime = now
-        if self._isOpen then
-            self:Hide()
-        else
-            self:Show()
-        end
+        if self._isOpen then self:Hide() else self:Show() end
     end
 
-    btnClose.MouseButton1Click:Connect(function()
-        window:Hide()
-    end)
+    btnClose.MouseButton1Click:Connect(function() window:Hide() end)
 
     function window:SetLanguage(lang)
         if not L[lang] then return false end
@@ -2866,6 +3054,11 @@ local function createWindow(opts)
         self.Name = text
     end
 
+    function window:SetExternalDataProvider(serializer, deserializer)
+        self._externalSerializer = serializer
+        self._externalDeserializer = deserializer
+    end
+
     local BUILTIN_TABS = { tab_settings = true, tab_configs = true, tab_binds = true }
 
     local function serializeElemKey(v)
@@ -2891,7 +3084,16 @@ local function createWindow(opts)
     end
 
     function window:ExportSettings()
-        local data = {Theme = {}, Config = {}}
+        local data = {
+            __meta = {
+                version = Config.Version,
+                timestamp = os.time(),
+                date = os.date("%Y-%m-%d %H:%M:%S"),
+                author = (LocalPlayer and LocalPlayer.Name) or "?",
+            },
+            Theme = {},
+            Config = {}
+        }
         for k, v in pairs(Theme) do
             if typeof(v) == "Color3" then data.Theme[k] = {v.R, v.G, v.B} end
         end
@@ -2927,6 +3129,10 @@ local function createWindow(opts)
                                             local ok, v = pcall(el.Get)
                                             if ok then secData[elId] = serializeElemKey(v) end
                                         elseif elType == "Button" then
+                                            -- skip
+                                        elseif elType == "Image" then
+                                            local ok, v = pcall(el.Get)
+                                            if ok and type(v) == "string" then secData[elId] = v end
                                         else
                                             local ok, v = pcall(el.Get)
                                             if ok then
@@ -2960,6 +3166,14 @@ local function createWindow(opts)
         elseif not elemsOk then
             warn("[airhubUI] Elements serialization failed: " .. tostring(elems))
         end
+        if self._externalSerializer then
+            local extOK, ext = pcall(self._externalSerializer)
+            if extOK and type(ext) == "table" then
+                data.External = ext
+            else
+                warn("[airhubUI] External serializer failed: " .. tostring(ext))
+            end
+        end
         local ok, str = pcall(function() return HttpService:JSONEncode(data) end)
         if not ok or type(str) ~= "string" then
             warn("[airhubUI] Export JSON encode failed: " .. tostring(str))
@@ -2986,6 +3200,10 @@ local function createWindow(opts)
             if statusBar and Config.StatusBar ~= nil then statusBar.Visible = Config.StatusBar end
             if L[Config.Language] then self:SetLanguage(Config.Language) end
             applyFontToAll()
+            -- Reapply logo after config load
+            if Config.LogoSource then
+                self:SetLogo(Config.LogoSource, Config.LogoSize)
+            end
         end
         if type(data.Elements) == "table" then
             local elemsOk, elemsErr = pcall(function()
@@ -3016,6 +3234,9 @@ local function createWindow(opts)
                                                 elseif elType == "Keybind" then
                                                     pcall(el.Set, deserializeElemKey(savedVal))
                                                 elseif elType == "Button" then
+                                                    -- skip
+                                                elseif elType == "Image" then
+                                                    pcall(el.Set, savedVal)
                                                 else
                                                     pcall(el.Set, savedVal)
                                                 end
@@ -3040,6 +3261,12 @@ local function createWindow(opts)
                 warn("[airhubUI] Elements import failed: " .. tostring(elemsErr))
             end
             pcall(reevaluateVisibility)
+        end
+        if type(data.External) == "table" and self._externalDeserializer then
+            local extOK, extErr = pcall(self._externalDeserializer, data.External)
+            if not extOK then
+                warn("[airhubUI] External deserializer failed: " .. tostring(extErr))
+            end
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
         return true
@@ -3141,6 +3368,10 @@ local function createWindow(opts)
                     main.Size = UDim2.new(0, main.Size.X.Offset, 0, Config.WindowHeight) 
                     shadowFrame.Size = UDim2.new(0, shadowFrame.Size.X.Offset, 0, Config.WindowHeight + 20)
                 end
+            elseif k == "LogoSize" and type(v) == "number" then
+                if logo.Visible then self:SetLogo(Config.LogoSource, v) end
+            elseif k == "LogoSource" then
+                if type(v) == "string" or v == nil then self:SetLogo(v, Config.LogoSize) end
             elseif k == "FontFamily" and type(v) == "string" then
                 if FontCatalog[v] then Config.CurrentFontFamily = FontCatalog[v]; Config.CurrentFontName = v; needFont = true end
             elseif k == "FontScale" and type(v) == "number" then
@@ -3161,7 +3392,7 @@ local function createWindow(opts)
         if Config[key] ~= nil then Config[key] = v; applyTransparencyTo(cat) end
     end
 
-    -- ─── ИЗМЕНЕНИЕ 5: drag-обработчик обновляет currentHomePos ──────────
+    -- Drag (updates currentHomePos)
     local drag, dStart, sPos, shadowPos
     titlebar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -3173,7 +3404,6 @@ local function createWindow(opts)
             local d = i.Position - dStart
             main.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + d.X, sPos.Y.Scale, sPos.Y.Offset + d.Y)
             shadowFrame.Position = UDim2.new(shadowPos.X.Scale, shadowPos.X.Offset + d.X, shadowPos.Y.Scale, shadowPos.Y.Offset + d.Y)
-            -- Обновляем "домашнюю" позицию: при следующем Hide/Show будем использовать её
             currentHomePos = main.Position
         end
     end))
@@ -3240,6 +3470,7 @@ local airhubUILib = {
     GetLanguage = function() return Config.Language end,
     ConfigFolder = CONFIG_FOLDER, ListDiskConfigs = listDiskConfigs,
     IsFilesystemAvailable = fsAvailable,
+    SanitizeAssetSource = sanitizeAssetSource,
 }
 
 -- ══════════════════════════════════════════════════════════════
@@ -3298,6 +3529,69 @@ secWindowSize:AddSlider({Name = "lbl_corner_radius", Value = 8, Min = 0, Max = 2
     Callback = function(v) Window:Configure({CornerRadius = v}) end, Tooltip = "tt_corner_radius"})
 secWindowSize:AddToggle({Name = "lbl_status_bar", Value = true,
     Callback = function(v) Window:Configure({StatusBar = v}) end, Tooltip = "tt_status_bar"})
+
+-- ─── NEW: Window Logo section ─────────────────────────────────
+local secLogo = tabSettings:CreateSection({Name = "sec_logo"})
+
+local logoInputRef = secLogo:AddInput({
+    Name = "lbl_logo_source",
+    Placeholder = "ph_logo",
+    Value = Config.LogoSource or "",
+    Tooltip = "tt_logo_source",
+    Callback = function(v)
+        if v == "" then
+            Window:SetLogo(nil)
+            Notify("airhubUI", T("n_logo_removed"), "warning")
+        else
+            local clean = sanitizeAssetSource(v)
+            if clean then
+                Window:SetLogo(clean, Config.LogoSize or 22)
+                Notify("airhubUI", T("n_logo_applied"), "success")
+            else
+                Notify("airhubUI", T("n_invalid_asset"), "error")
+            end
+        end
+    end,
+})
+
+secLogo:AddSlider({
+    Name = "lbl_logo_size",
+    Value = Config.LogoSize or 22,
+    Min = 12, Max = 64, Decimals = 0,
+    Tooltip = "tt_logo_size",
+    Callback = function(v)
+        Config.LogoSize = v
+        if Config.LogoSource then Window:SetLogo(Config.LogoSource, v) end
+    end,
+})
+
+secLogo:AddButton({
+    Name = "btn_remove_logo",
+    Callback = function()
+        Window:SetLogo(nil)
+        if logoInputRef and logoInputRef.Set then logoInputRef:Set("") end
+        Notify("airhubUI", T("n_logo_removed"), "warning")
+    end,
+})
+
+-- Preview image inside the section
+local previewImgRef = secLogo:AddImage({
+    Source = Config.LogoSource or "",
+    Height = 80,
+    ShowBackground = true,
+    RoundCorners = 8,
+    Name = "lbl_logo_preview",
+})
+
+-- Keep preview in sync when logo changes
+local _origSetLogo = Window.SetLogo
+Window.SetLogo = function(self, source, size)
+    local r = _origSetLogo(self, source, size)
+    if previewImgRef and previewImgRef.Set then
+        previewImgRef:Set(source)
+    end
+    return r
+end
 
 local secFont = tabSettings:CreateSection({Name = "sec_font", Side = "Right"})
 secFont:AddDropdown({Name = "lbl_font_family", Value = Config.CurrentFontName,
