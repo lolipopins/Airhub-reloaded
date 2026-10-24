@@ -1,6 +1,6 @@
---// AirHub - 01_core.lua (unified config build)
---// Core state, services, error display, logging, sounds, config system,
---// ApplyAllEnabledStates(), Window.OnUnload hook, external data provider.
+--// AirHub - 01_core.lua (unified config + UI sync build)
+--// Добавлено: SyncUI() — синхронизация визуальных тоглов с реальным состоянием
+--// после загрузки конфига (фикс "phantom enabled").
 
 local H = getgenv().AirHub
 if H and H._CoreLoaded then
@@ -103,7 +103,7 @@ if not LocalPlayer then
 end
 
 --// ---------------------------------------------------------------------------
---// Active logs (Drawing text stack)
+--// Active logs
 --// ---------------------------------------------------------------------------
 H.ActiveLogs = H.ActiveLogs or {}
 local MAX_LOGS = 8
@@ -192,7 +192,7 @@ H.Sound = H.Sound or {
 --// Config system
 --// ---------------------------------------------------------------------------
 local CONFIG_FOLDER = "AirHub/Configs"
-local LEGACY_FOLDER = CONFIG_FOLDER  -- legacy path for migration
+local LEGACY_FOLDER = CONFIG_FOLDER
 local IN_MEMORY_CONFIGS = {}
 
 local function Config_HasFS()
@@ -277,17 +277,13 @@ local function Config_ListFiles()
     return list
 end
 
--- >>> CHANGED: added includeUI parameter (default true for backward compat)
 local function Config_Serialize(includeUI)
     if includeUI == nil then includeUI = true end
     local Hg = getgenv().AirHub
     if not Hg then return {} end
     local data = {
         Version = 4,
-        __meta = {
-            date = os.date("%Y-%m-%d %H:%M:%S"),
-            timestamp = os.time(),
-        },
+        __meta = { date = os.date("%Y-%m-%d %H:%M:%S"), timestamp = os.time() },
     }
     if Hg.Aimbot then
         data.Aimbot = Config_Encode(Hg.Aimbot.Settings)
@@ -312,12 +308,11 @@ local function Config_Serialize(includeUI)
     data.Logging = Config_Encode(Hg.Logging)
     data.Sound = Config_Encode(Hg.Sound)
 
-    -- Legacy: only include UI when called from Config_Save (not from external provider)
     if includeUI then
         local uiWin = getgenv().airhubUI_Window
         if uiWin and uiWin.GetUIState then
             local savedExt = uiWin._externalSerializer
-            uiWin._externalSerializer = nil  -- prevent nesting
+            uiWin._externalSerializer = nil
             local ok, uiState = pcall(function() return uiWin:GetUIState() end)
             uiWin._externalSerializer = savedExt
             if ok and uiState then data.UI = uiState end
@@ -327,7 +322,129 @@ local function Config_Serialize(includeUI)
     return data
 end
 
--- >>> CHANGED: auto-applies enabled states at end + exposes Apply
+-- ============================================================================
+-- UI SYNC — Fixes "phantom enabled" (internal = true, toggle shows OFF)
+-- ============================================================================
+-- Reads a dot-path like "Aimbot.Settings.Enabled" and returns the value
+local function _getState(path)
+    local Hg = getgenv().AirHub
+    if not Hg then return nil end
+    if type(path) ~= "string" or path == "" then return nil end
+    local parts = {}
+    for part in string.gmatch(path, "[^%.]+") do
+        parts[#parts + 1] = part
+    end
+    if #parts == 0 then return nil end
+    local target = Hg
+    for i = 1, #parts - 1 do
+        if type(target) ~= "table" then return nil end
+        target = target[parts[i]]
+        if target == nil then return nil end
+    end
+    if type(target) ~= "table" then return nil end
+    return target[parts[#parts]]
+end
+
+-- Heuristic rules: order matters (specific first).
+-- `match` is lowercase; either plain substring (default) or Lua pattern (regex=true).
+local SYNC_RULES = {
+    -- AIMBOT — specific flags first, then general "Aimbot Enabled"
+    { match = "wall check",          key = "Aimbot.Settings.WallCheck" },
+    { match = "silent aim",          key = "Aimbot.Settings.SilentAim" },
+    { match = "target lock",         key = "Aimbot.Settings.TargetLock.Enabled" },
+    { match = "multi.?point",        key = "Aimbot.Settings.MultiPoint.Enabled", regex = true },
+    { match = "auto.?shoot",         key = "Aimbot.Settings.AutoShoot.Enabled",  regex = true },
+    { match = "auto.?stop",          key = "Aimbot.Settings.AutoShoot.AutoStop.Enabled", regex = true },
+    { match = "tp.?aim",             key = "Aimbot.Settings.TPAimEnabled",  regex = true },
+    { match = "teleport.?aim",       key = "Aimbot.Settings.TPAimEnabled",  regex = true },
+    { match = "wallbang",            key = "Aimbot.Settings.WallbangEnabled" },
+    { match = "backtrack",           key = "Aimbot.Settings.UseBacktrack" },
+    { match = "aim.?line",           key = "Aimbot.Settings.AimLineVisuals.Enabled", regex = true },
+    { match = "fov",                 key = "Aimbot.FOVSettings.Enabled" },
+    { match = "aimbot",              key = "Aimbot.Settings.Enabled" },
+
+    -- WALLHACK — specific first
+    { match = "box esp",             key = "WallHack.Visuals.BoxSettings.Enabled" },
+    { match = "box display",         key = "WallHack.Visuals.BoxSettings.Enabled" },
+    { match = "glow",                key = "WallHack.Visuals.GlowSettings.Enabled" },
+    { match = "hud",                 key = "WallHack.Visuals.HUDSettings.Enabled" },
+    { match = "self.?esp",           key = "WallHack.Visuals.SelfESP.Enabled", regex = true },
+    { match = "wallhack",            key = "WallHack.Settings.Enabled" },
+
+    -- ANTI-AIM / DESYNC
+    { match = "desync",              key = "AntiAim.Desync.Settings.Enabled" },
+    { match = "anti.?aim",           key = "AntiAim.Settings.Enabled", regex = true },
+
+    -- SERVER POSITION
+    { match = "server.?position",    key = "ServerPosition.Settings.Enabled", regex = true },
+
+    -- MOVEMENT
+    { match = "spider",              key = "Bhop.Settings.Spider.Enabled" },
+    { match = "fly",                 key = "Fly.Settings.Enabled" },
+    { match = "bhop",                key = "Bhop.Settings.Enabled" },
+    { match = "bunny",               key = "Bhop.Settings.Enabled" },
+    { match = "speed",               key = "Speed.Settings.Enabled" },
+    { match = "fast.?stop",          key = "FastStop.Settings.Enabled",     regex = true },
+    { match = "auto.?straf",         key = "AutoStrafer.Settings.Enabled",  regex = true },
+    { match = "noclip",              key = "Noclip.Settings.Enabled" },
+    { match = "no.?clip",            key = "Noclip.Settings.Enabled",       regex = true },
+}
+
+local function _matchRule(lowerName)
+    for _, rule in ipairs(SYNC_RULES) do
+        if rule.regex then
+            if string.match(lowerName, rule.match) then return rule end
+        else
+            if string.find(lowerName, rule.match, 1, true) then return rule end
+        end
+    end
+    return nil
+end
+
+-- Walks every UI toggle and syncs its visual state to match internal state.
+-- Explicit `_configKey` (set via `AddToggle({ConfigKey = "..."})`) takes priority.
+function H.SyncUI()
+    local Hg = getgenv().AirHub
+    local uiWin = getgenv().airhubUI_Window
+    if not Hg or not uiWin or not uiWin.Tabs then return 0 end
+
+    local synced = 0
+
+    local function syncSection(sec)
+        if not sec or not sec.Elements then return end
+        for _, el in ipairs(sec.Elements) do
+            local meta   = el._meta or {}
+            local elType = meta.Type or el._type
+            local rawName = el._rawName
+            if elType == "Toggle" and rawName and el.Set then
+                local key = el._configKey
+                if not key then
+                    local rule = _matchRule(string.lower(rawName))
+                    if rule then key = rule.key end
+                end
+                if key then
+                    local val = _getState(key)
+                    if val ~= nil then
+                        pcall(el.Set, val and true or false)
+                        synced = synced + 1
+                    end
+                end
+            end
+        end
+    end
+
+    for _, tab in ipairs(uiWin.Tabs) do
+        for _, sec in ipairs(tab.Sections or {}) do syncSection(sec) end
+        for _, sub in ipairs(tab.SubTabs or {}) do
+            for _, sec in ipairs(sub.Sections or {}) do syncSection(sec) end
+        end
+    end
+    return synced
+end
+H._UI = H._UI or {}
+H._UI.SyncUI = H.SyncUI
+-- ============================================================================
+
 local function Config_Apply(data)
     if type(data) ~= "table" then return false end
     local Hg = getgenv().AirHub
@@ -567,7 +684,6 @@ local function Config_Apply(data)
         if type(s) == "table" then Hg.Sound = s end
     end
 
-    -- Legacy support: apply UI state if embedded
     if data.UI then
         local uiWin = getgenv().airhubUI_Window
         if uiWin and uiWin.SetUIState then
@@ -575,11 +691,12 @@ local function Config_Apply(data)
         end
     end
 
-    -- >>> ADDED: auto-activate enabled states after applying
+    -- >>> AFTER all state applied: sync visuals + fire enabled states
     task.defer(function()
-        if H and H.ApplyAllEnabledStates then
-            pcall(H.ApplyAllEnabledStates)
-        end
+        local h = getgenv().AirHub
+        if not h then return end
+        if h.SyncUI then pcall(h.SyncUI) end
+        if h.ApplyAllEnabledStates then pcall(h.ApplyAllEnabledStates) end
     end)
 
     return true
@@ -646,33 +763,24 @@ local function Config_Delete(name)
     return deleted, deleted and "deleted" or "not found"
 end
 
--- >>> ADDED: Migration from legacy AirHub/Configs to airhubUI_Configs
+-- Migration from legacy AirHub/Configs to airhubUI_Configs
 local MIGRATION_MARKER = "airhubUI_Configs/_migration_v1.json"
-
 local function Config_MigrateLegacy()
     if type(listfiles) ~= "function" or type(readfile) ~= "function"
        or type(writefile) ~= "function" then
         return 0, "no filesystem"
     end
-    -- Already migrated?
     local markerOK = pcall(readfile, MIGRATION_MARKER)
     if markerOK then return 0, "already migrated" end
-
-    -- Ensure target folder exists
     pcall(function()
         if type(makefolder) == "function" then pcall(makefolder, "airhubUI_Configs") end
     end)
-
     local migrated = 0
     local listOK, files = pcall(listfiles, LEGACY_FOLDER)
     if not listOK or type(files) ~= "table" then
-        -- No legacy folder — mark as done anyway
-        pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({
-            done = true, migrated = 0, date = os.time(),
-        }))
+        pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({ done = true, migrated = 0, date = os.time() }))
         return 0, "no legacy folder"
     end
-
     for _, path in ipairs(files) do
         local name = path:match("([^/\\]+)%.json$")
         if name then
@@ -680,11 +788,9 @@ local function Config_MigrateLegacy()
             if readOK and content and content ~= "" then
                 local decOK, legacyData = pcall(function() return HttpService:JSONDecode(content) end)
                 if decOK and type(legacyData) == "table" then
-                    -- Legacy format: UI at top level, cheats also at top level
                     local uiState = legacyData.UI
                     legacyData.UI = nil
-                    legacyData.__meta = nil  -- strip old meta if any
-
+                    legacyData.__meta = nil
                     local combined = {
                         __meta = {
                             version = "migrated-v1",
@@ -699,7 +805,6 @@ local function Config_MigrateLegacy()
                         combined.Config   = uiState.Config
                         combined.Elements = uiState.Elements
                     end
-
                     local newName = name .. "_migrated"
                     local encoded = HttpService:JSONEncode(combined)
                     local targetPath = "airhubUI_Configs/" .. newName .. ".json"
@@ -709,10 +814,7 @@ local function Config_MigrateLegacy()
             end
         end
     end
-
-    pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({
-        done = true, migrated = migrated, date = os.time(),
-    }))
+    pcall(writefile, MIGRATION_MARKER, HttpService:JSONEncode({ done = true, migrated = migrated, date = os.time() }))
     return migrated, "ok"
 end
 
@@ -744,15 +846,14 @@ H.Util = {
     PlayKillsound = PlayKillsound,
 }
 
--- >>> CHANGED: extra fields (Serialize / Apply / MigrateLegacy)
 H.Config = {
     Save          = Config_Save,
     Load          = Config_Load,
     Delete        = Config_Delete,
     ListFiles     = Config_ListFiles,
     SanitizeName  = Config_SanitizeName,
-    Serialize     = Config_Serialize,   -- function(includeUI) -> table
-    Apply         = Config_Apply,       -- function(table) -> bool
+    Serialize     = Config_Serialize,
+    Apply         = Config_Apply,
     MigrateLegacy = Config_MigrateLegacy,
 }
 
@@ -848,24 +949,25 @@ H._UI = H._UI or {}
 H._UI.ApplyAllEnabledStates = H.ApplyAllEnabledStates
 
 --// ---------------------------------------------------------------------------
---// Window.OnUnload hook
+--// Window.OnUnload hook + post-import hook
 --// ---------------------------------------------------------------------------
 local Window = getgenv().airhubUI_Window
 if Window then
-    -- >>> ADDED: wire external data provider so one UI config carries everything
     if Window.SetExternalDataProvider then
         Window:SetExternalDataProvider(
-            function()  -- serializer: called by ExportSettings
-                return Config_Serialize(false)  -- no UI (UI is saved by ExportSettings itself)
-            end,
-            function(tbl)  -- deserializer: called by ImportSettings
-                return Config_Apply(tbl)
-            end
+            function() return Config_Serialize(false) end,
+            function(tbl) return Config_Apply(tbl) end
         )
         print("[AirHub] 01_core: external config provider wired OK")
     else
-        warn("[AirHub] 01_core: Window.SetExternalDataProvider missing — " ..
-             "apply library patch or fall back to legacy configs")
+        warn("[AirHub] 01_core: Window.SetExternalDataProvider missing")
+    end
+
+    -- >>> post-import sync: called at very end of ImportSettings
+    if Window.SetPostImportHook then
+        Window:SetPostImportHook(function()
+            if H.SyncUI then pcall(H.SyncUI) end
+        end)
     end
 
     local _origOnUnload = Window.OnUnload
@@ -1020,7 +1122,6 @@ else
     warn("[AirHub] 01_core: airhubUI Window missing — unload hook not installed.")
 end
 
--- >>> ADDED: auto-migrate legacy configs on first run (deferred to let UI init)
 task.defer(function()
     task.wait(2)
     local ok, count, msg = pcall(Config_MigrateLegacy)
@@ -1031,4 +1132,4 @@ task.defer(function()
     end
 end)
 
-print("[AirHub] 01_core: loaded OK (unified config build)")
+print("[AirHub] 01_core: loaded OK (unified config + UI sync build)")
