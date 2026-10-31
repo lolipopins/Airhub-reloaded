@@ -3,34 +3,14 @@
 --// UI:    airhubUI (AddToggle/Slider/Dropdown/Input/Button/Colorpicker).
 --//
 --// FIX (Yaw "shifted"):
---//   1. GetBaseYaw: atan2(-x, -z) для всех reference.
---//   2. Static: убран лишний "+ amount". Yaw slider = точный угол от reference.
---//   3. Player reference: использует Humanoid.MoveDirection.
+--//   1. GetBaseYaw: atan2(x, z) → atan2(-x, -z) для всех reference.
+--//      Раньше для камеры вперёд возвращалось π (180°), т.е. Yaw=0 сразу
+--//      означал "развёрнут на 180°" — ощущение "сдвинутого" Yaw.
+--//   2. Static: убран лишний "+ amount". Слайдер Yaw теперь = точный
+--//      угол от reference-направления.
+--//   3. Player reference: использует Humanoid.MoveDirection (не зависит
+--//      от поворота самого тела, иначе AA крутит сам себя).
 --//   4. Yaw slider: Decimals = 0, шаг 1°.
---//
---// NEW FIX (after review):
---//   5.  Desync: плавный lerp CurrentCFrame → targetCF (сглаживание, не прыжки).
---//   6.  Velocity метод: скорость капается 500 (а не 1000), интерполяция сглаживает.
---//   7.  Persistent BindToRenderStep (один бинд вместо 60/сек).
---//   8.  Motor6D: поиск джойнта по имени (RootJoint/Root/Waist/Neck), а не первый
---//       попавшийся Motor6D. Учтён RandomRotate (delta = oldcf:Inverse() * targetCF).
---//   9.  StopDesync: аккуратный restore (CFrame + Velocity + RotVelocity).
---//   10. AngularVelocity: документирован как Spin-only.
---//   11. CleanupAntiAim: быстрый early-return.
---//   12. shouldApply=false: при переходе в "движение" — восстанавливаем ориентацию.
---//   13. ApplySpeedToAllTracks: единственный write через AdjustSpeed.
---//   14. RandomFrames: AdjustSpeed(0) только если Speed != 0.
---//   15. NetworkOwnerSet: сбрасывается при смене Humanoid.
---//   16. ResetAllSpeeds: также сбрасывает TimePosition в 0.
---//   17. GetBaseYaw: CameraFlatYaw() — единый helper.
---//   18. Localization: else warn, если airhubUI.L отсутствует.
---//
---// NEW FIX (camera):
---//   19. Камера не дёргается вместе с десинком: в render-step камера
---//       компенсируется на (realCF.Position - фактическая позиция HRP после
---//       применения десинка). Работает для CFrame/Position/Network методов
---//       (standard CameraSubject=Humanoid). Для Velocity/Motor6D/HipHeight
---//       delta ≈ 0, камера остаётся как была.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -81,7 +61,7 @@ H.AntiAim = {
             Connection       = nil,
             RenderBindName   = "AirHubDesyncRestore",
             Acc              = 0,
-            CurrentCFrame    = nil,
+            CurrentOffset    = Vector3.new(0, 0, 0),
             TargetOffset     = Vector3.new(0, 0, 0),
             SavedCFrame      = nil,
             RealCFrame       = nil,
@@ -94,7 +74,6 @@ H.AntiAim = {
             RotYaw           = 0,
             RotRoll          = 0,
             NetworkClaimed   = false,
-            RestoreData      = nil,
         },
     },
     AnimationBreaker = {
@@ -111,11 +90,9 @@ H.AntiAim = {
             CurrentTrack    = nil,
             CurrentKey      = nil,
             LastHRP         = nil,
-            LastHum         = nil,
             NetworkOwnerSet = false,
             RandomTimer     = 0,
             LastWarnedId    = nil,
-            Frozen          = false,
         },
         Functions = {},
     },
@@ -129,7 +106,6 @@ H.AntiAim = {
         AngularVelocity   = nil,
         CurrentMotor      = nil,
         OriginalC0        = nil,
-        WasApplying       = false,
     },
 }
 local AntiAim = H.AntiAim
@@ -138,23 +114,21 @@ local AB = AntiAim.AnimationBreaker
 --// ===========================================================================
 --// FIXED: base yaw
 --//   CFrame.Angles(0, yaw, 0).LookVector = (-sin(yaw), 0, -cos(yaw))
+--//   Чтобы LookVector(camera) совпал с LookVector(character) при Yaw=0:
 --//       -sin(yaw) = look.X   →  yaw = atan2(-look.X, -look.Z)
 --//       -cos(yaw) = look.Z
+--//   Раньше было atan2(look.X, look.Z) → для (0,0,-1) возвращало π (180°).
 --// ===========================================================================
-local function CameraFlatYaw()
-    local cam = workspace.CurrentCamera
-    if not cam then return nil end
-    local look = cam.CFrame.LookVector
-    local flat = Vector3.new(look.X, 0, look.Z)
-    if flat.Magnitude > 0.001 then
-        return math.atan2(-flat.X, -flat.Z)
-    end
-    return nil
-end
-
 local function GetBaseYaw(reference, char)
     if reference == "Camera" then
-        return CameraFlatYaw() or 0
+        local cam = workspace.CurrentCamera
+        if not cam then return 0 end
+        local look = cam.CFrame.LookVector
+        local flat = Vector3.new(look.X, 0, look.Z)
+        if flat.Magnitude > 0.001 then
+            return math.atan2(-flat.X, -flat.Z)
+        end
+        return 0
     elseif reference == "Movement" then
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if hrp then
@@ -164,8 +138,17 @@ local function GetBaseYaw(reference, char)
                 return math.atan2(-horizontal.X, -horizontal.Z)
             end
         end
-        return CameraFlatYaw() or 0
+        local cam = workspace.CurrentCamera
+        if cam then
+            local look = cam.CFrame.LookVector
+            local flat = Vector3.new(look.X, 0, look.Z)
+            if flat.Magnitude > 0.001 then
+                return math.atan2(-flat.X, -flat.Z)
+            end
+        end
+        return 0
     elseif reference == "Player" then
+        -- ИСПОЛЬЗУЕМ MoveDirection (не зависит от rotation AA), фолбэк — камера
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
             local md = hum.MoveDirection
@@ -173,7 +156,15 @@ local function GetBaseYaw(reference, char)
                 return math.atan2(-md.X, -md.Z)
             end
         end
-        return CameraFlatYaw() or 0
+        local cam = workspace.CurrentCamera
+        if cam then
+            local look = cam.CFrame.LookVector
+            local flat = Vector3.new(look.X, 0, look.Z)
+            if flat.Magnitude > 0.001 then
+                return math.atan2(-flat.X, -flat.Z)
+            end
+        end
+        return 0
     end
     return 0
 end
@@ -217,22 +208,8 @@ end
 
 local function GetRootJoint(hrp)
     if not hrp then return nil end
-    local char = hrp.Parent
-    if not char then return nil end
-    for _, wanted in ipairs({ "RootJoint", "Root", "Waist" }) do
-        for _, d in ipairs(char:GetDescendants()) do
-            if d:IsA("Motor6D") and d.Name == wanted then
-                return d
-            end
-        end
-    end
     for _, child in ipairs(hrp:GetChildren()) do
         if child:IsA("Motor6D") then return child end
-    end
-    for _, d in ipairs(char:GetDescendants()) do
-        if d:IsA("Motor6D") and d.Part0 == hrp then
-            return d
-        end
     end
     return nil
 end
@@ -245,7 +222,7 @@ local function StartDesync()
     if desync.Internal.Connection then return end
 
     desync.Internal.Acc             = 0
-    desync.Internal.CurrentCFrame   = nil
+    desync.Internal.CurrentOffset   = Vector3.new(0, 0, 0)
     desync.Internal.TargetOffset    = Vector3.new(0, 0, 0)
     desync.Internal.PendingRefresh  = false
     desync.Internal.RealCFrame      = nil
@@ -256,53 +233,12 @@ local function StartDesync()
     desync.Internal.RotYaw          = 0
     desync.Internal.RotRoll         = 0
     desync.Internal.NetworkClaimed  = false
-    desync.Internal.RestoreData     = nil
 
     if desync.Settings.Mode == "OldPosition" then
         local hrp = GetCurrentHRP()
         if hrp then desync.Internal.SavedCFrame = hrp.CFrame end
         desync.Internal.OldPosTimer = 0
     end
-
-    --// FIX #7: один persistent BindToRenderStep (priority 2000 — Last).
-    pcall(function() RunService:UnbindFromRenderStep(desync.Internal.RenderBindName) end)
-    RunService:BindToRenderStep(desync.Internal.RenderBindName, 2000, function()
-        local R = desync.Internal.RestoreData
-        if not R then return end
-        local h = R.hrp
-        if not h or not h.Parent then return end
-
-        pcall(function()
-            h.CFrame      = R.cf
-            h.Velocity    = R.vel
-            h.RotVelocity = R.rotVel
-        end)
-        if R.rootJoint and R.rootJoint.Parent and R.rootC0 then
-            pcall(function() R.rootJoint.C0 = R.rootC0 end)
-        end
-        if R.hum and R.hipH ~= nil then
-            pcall(function() R.hum.HipHeight = R.hipH end)
-        end
-
-        --// FIX #19: не даём камере дёргаться вместе с десинком.
-        --// CameraModule (priority 200) посчитал Camera.CFrame по десинкнутой
-        --// позиции HRP. Сдвигаем камеру на (realHRPPos - actualHRPPos), чтобы
-        --// вернуть её в реальную позицию. Только для методов, которые реально
-        --// сдвигают HRP (CFrame/Position/Network). Для Velocity/Motor6D/HipHeight
-        --// delta ≈ 0 — сдвиг не применяется.
-        if R.cf and R.actualHRPPos then
-            local cam = workspace.CurrentCamera
-            if cam then
-                local subj = cam.CameraSubject
-                if subj == R.hum or subj == R.hrp then
-                    local delta = R.cf.Position - R.actualHRPPos
-                    if delta.Magnitude > 0.001 then
-                        cam.CFrame = cam.CFrame + delta
-                    end
-                end
-            end
-        end
-    end)
 
     desync.Internal.Connection = RunService.Heartbeat:Connect(function(dt)
         if H.ShuttingDown then return end
@@ -321,24 +257,17 @@ local function StartDesync()
         desync.Internal.RealVelocity    = oldvel
         desync.Internal.RealRotVelocity = oldrotvel
 
-        --// FIX #5: инициализация CurrentCFrame + снап при телепорте.
-        if not desync.Internal.CurrentCFrame
-           or (desync.Internal.CurrentCFrame.Position - oldPos).Magnitude > 100 then
-            desync.Internal.CurrentCFrame = oldcf
-        end
-
         local S = desync.Settings
-        local mode     = S.Mode
-        local method   = S.Method or "CFrame"
+        local mode   = S.Mode
+        local method = S.Method or "CFrame"
         local interval = tonumber(S.UpdateInterval) or 0.05
         if interval < 0.01 then interval = 0.01 end
 
-        local rootJoint = GetRootJoint(hrp)
-        local oldRootC0 = rootJoint and rootJoint.C0
-        local oldHipH   = hum and hum.HipHeight
+        local rootJoint   = GetRootJoint(hrp)
+        local oldRootC0   = rootJoint and rootJoint.C0
+        local oldHipH     = hum and hum.HipHeight
 
         local targetCF
-        local instant  = false
 
         if mode == "OldPosition" then
             if not desync.Internal.SavedCFrame then
@@ -363,7 +292,6 @@ local function StartDesync()
         elseif mode == "Void" then
             local voidY = tonumber(S.VoidDepth) or -1000
             targetCF = CFrame.new(oldcf.X, voidY, oldcf.Z)
-            instant  = true
 
         elseif mode == "InPlayer" then
             local targetHrp = GetNearestPlayerHRP(oldcf.Position)
@@ -379,7 +307,6 @@ local function StartDesync()
             else
                 targetCF = oldcf
             end
-            instant = true
 
         else
             desync.Internal.Acc = desync.Internal.Acc + dt
@@ -405,44 +332,32 @@ local function StartDesync()
             )
         end
 
-        --// FIX #5: плавный lerp (80ms сглаживание).
-        if instant then
-            desync.Internal.CurrentCFrame = targetCF
-        else
-            local smoothTime = 0.08
-            local alpha = 1 - math.exp(-dt / smoothTime)
-            desync.Internal.CurrentCFrame = desync.Internal.CurrentCFrame:Lerp(targetCF, alpha)
-        end
-        local applyCF = desync.Internal.CurrentCFrame
-
         local applied = false
         if method == "CFrame" then
-            hrp.CFrame = applyCF
+            hrp.CFrame = targetCF
             applied = true
         elseif method == "Position" then
-            hrp.Position = applyCF.Position
+            hrp.Position = targetCF.Position
             applied = true
         elseif method == "Velocity" then
-            --// FIX #6: cap 500.
-            local diff = applyCF.Position - oldPos
-            local dist = diff.Magnitude
-            if dist > 0.01 then
-                local desiredSpeed = math.min(dist / math.max(dt, 0.001), 500)
-                hrp.Velocity = diff.Unit * desiredSpeed
+            local diff = targetCF.Position - oldPos
+            local mag  = diff.Magnitude
+            if mag > 0.001 then
+                local speed = math.min(mag / math.max(dt, 0.001), 1000)
+                hrp.Velocity = diff.Unit * speed
             else
                 hrp.Velocity = Vector3.new(0, 0, 0)
             end
             applied = true
         elseif method == "Motor6D" then
-            --// FIX #8: и позиция, и поворот (delta).
             if rootJoint and oldRootC0 then
-                local delta = oldcf:Inverse() * applyCF
-                pcall(function() rootJoint.C0 = oldRootC0 * delta end)
+                local offset = targetCF.Position - oldPos
+                pcall(function() rootJoint.C0 = oldRootC0 + offset end)
                 applied = true
             end
         elseif method == "HipHeight" then
             if hum and oldHipH then
-                local yOff = applyCF.Position.Y - oldPos.Y
+                local yOff = targetCF.Position.Y - oldPos.Y
                 pcall(function() hum.HipHeight = oldHipH + yOff end)
                 applied = true
             end
@@ -451,25 +366,25 @@ local function StartDesync()
                 pcall(function() hrp:SetNetworkOwner(LocalPlayer) end)
                 desync.Internal.NetworkClaimed = true
             end
-            hrp.CFrame = applyCF
+            hrp.CFrame = targetCF
             applied = true
         end
 
         if applied then
-            --// FIX #19: сохраняем фактическую позицию HRP после применения.
-            --// CameraModule будет использовать её; мы компенсируем.
-            local actualHRPPos = hrp.CFrame.Position
-            desync.Internal.RestoreData = {
-                hrp          = hrp,
-                cf           = oldcf,            -- real CFrame (куда restore)
-                actualHRPPos = actualHRPPos,     -- куда попал HRP после десинка
-                vel          = oldvel,
-                rotVel       = oldrotvel,
-                rootJoint    = rootJoint,
-                rootC0       = oldRootC0,
-                hum          = hum,
-                hipH         = oldHipH,
-            }
+            RunService:BindToRenderStep(desync.Internal.RenderBindName, 101, function()
+                pcall(function()
+                    hrp.CFrame      = oldcf
+                    hrp.Velocity    = oldvel
+                    hrp.RotVelocity = oldrotvel
+                end)
+                if rootJoint and oldRootC0 then
+                    pcall(function() rootJoint.C0 = oldRootC0 end)
+                end
+                if hum and oldHipH then
+                    pcall(function() hum.HipHeight = oldHipH end)
+                end
+                RunService:UnbindFromRenderStep(desync.Internal.RenderBindName)
+            end)
         end
     end)
 end
@@ -479,14 +394,12 @@ local function StopDesync()
 
     local hrp = GetCurrentHRP()
     if hrp then
-        local realCF    = desync.Internal.RealCFrame
-        local realVel   = desync.Internal.RealVelocity
-        local realRotVel = desync.Internal.RealRotVelocity
+        local realCF = desync.Internal.RealCFrame
         if realCF then
             pcall(function()
                 hrp.CFrame = realCF
-                if realVel    then hrp.Velocity    = realVel    end
-                if realRotVel then hrp.RotVelocity = realRotVel end
+                if desync.Internal.RealVelocity    then hrp.Velocity    = desync.Internal.RealVelocity    end
+                if desync.Internal.RealRotVelocity then hrp.RotVelocity = desync.Internal.RealRotVelocity end
             end)
         end
     end
@@ -497,7 +410,6 @@ local function StopDesync()
     end
 
     pcall(function() RunService:UnbindFromRenderStep(desync.Internal.RenderBindName) end)
-    desync.Internal.RestoreData = nil
 
     desync.Internal.SavedCFrame      = nil
     desync.Internal.RealCFrame       = nil
@@ -506,7 +418,7 @@ local function StopDesync()
     desync.Internal.OldPosTimer      = 0
     desync.Internal.PendingRefresh   = false
     desync.Internal.Acc              = 0
-    desync.Internal.CurrentCFrame    = nil
+    desync.Internal.CurrentOffset    = Vector3.new(0, 0, 0)
     desync.Internal.TargetOffset     = Vector3.new(0, 0, 0)
     desync.Internal.RotAcc           = 0
     desync.Internal.RotPitch         = 0
@@ -617,7 +529,6 @@ local function LoadPresetTrack(animator)
     return true
 end
 
---// FIX #13: один write — через AdjustSpeed.
 local function ApplySpeedToAllTracks(speed)
     local char = LocalPlayer.Character
     if not char then return end
@@ -626,11 +537,13 @@ local function ApplySpeedToAllTracks(speed)
     local ok, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
     if not ok or not tracks then return end
     for _, t in ipairs(tracks) do
-        pcall(function() t:AdjustSpeed(speed) end)
+        pcall(function()
+            t:AdjustSpeed(speed)
+            if t.Speed ~= speed then t.Speed = speed end
+        end)
     end
 end
 
---// FIX #14: AdjustSpeed(0) только если Speed != 0.
 local function ApplyRandomFramesToAllTracks(dt)
     local interval = tonumber(AB.Settings.RandomInterval) or 0.1
     if interval < 0.02 then interval = 0.02 end
@@ -646,7 +559,8 @@ local function ApplyRandomFramesToAllTracks(dt)
     if not ok or not tracks then return end
     for _, t in ipairs(tracks) do
         pcall(function()
-            if t.Speed ~= 0 then t:AdjustSpeed(0) end
+            t:AdjustSpeed(0)
+            if t.Speed ~= 0 then t.Speed = 0 end
             if doJump then
                 local len = t.Length or 0
                 if len > 0 then t.TimePosition = math.random() * len end
@@ -658,7 +572,8 @@ end
 local function ApplyRandomFramesToOurTrack(tr, dt)
     if not tr then return end
     pcall(function()
-        if tr.Speed ~= 0 then tr:AdjustSpeed(0) end
+        tr:AdjustSpeed(0)
+        if tr.Speed ~= 0 then tr.Speed = 0 end
     end)
 
     local interval = tonumber(AB.Settings.RandomInterval) or 0.1
@@ -683,9 +598,7 @@ local function ApplyAnimationBreaker(dt)
         StopOurTrack()
         AB.Internal.NetworkOwnerSet = false
         AB.Internal.LastHRP         = nil
-        AB.Internal.LastHum         = nil
         AB.Internal.CurrentKey      = nil
-        AB.Internal.Frozen          = false
         return
     end
 
@@ -696,16 +609,12 @@ local function ApplyAnimationBreaker(dt)
     end
 
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-
-    if hrp ~= AB.Internal.LastHRP or hum ~= AB.Internal.LastHum then
+    if hrp ~= AB.Internal.LastHRP then
         AB.Internal.LastHRP         = hrp
-        AB.Internal.LastHum         = hum
         AB.Internal.NetworkOwnerSet = false
         StopOurTrack()
         AB.Internal.CurrentKey      = nil
         AB.Internal.RandomTimer     = 0
-        AB.Internal.Frozen          = false
     end
 
     if AB.Settings.ApplyToServer and hrp and not AB.Internal.NetworkOwnerSet then
@@ -733,7 +642,6 @@ local function ApplyAnimationBreaker(dt)
         AB.Internal.CurrentKey  = key
         LoadPresetTrack(animator)
         AB.Internal.RandomTimer = 0
-        AB.Internal.Frozen      = false
     end
 
     local tr = AB.Internal.CurrentTrack
@@ -748,7 +656,10 @@ local function ApplyAnimationBreaker(dt)
         ApplyRandomFramesToOurTrack(tr, dt)
     else
         local speed = tonumber(AB.Settings.Speed) or 1
-        pcall(function() tr:AdjustSpeed(speed) end)
+        pcall(function()
+            tr:AdjustSpeed(speed)
+            if tr.Speed ~= speed then tr.Speed = speed end
+        end)
     end
 end
 
@@ -761,8 +672,7 @@ local function ResetAllSpeeds()
     if not ok or not tracks then return end
     for _, t in ipairs(tracks) do
         pcall(function()
-            if t.Speed ~= 1 then t:AdjustSpeed(1) end
-            t.TimePosition = 0
+            if t.Speed ~= 1 then t.Speed = 1 end
         end)
     end
 end
@@ -774,15 +684,12 @@ local function StopAnimationBreaker()
     AB.Internal.RandomTimer     = 0
     AB.Internal.NetworkOwnerSet = false
     AB.Internal.LastHRP         = nil
-    AB.Internal.LastHum         = nil
-    AB.Internal.Frozen          = false
 end
 
 local function ReloadAnimationPreset()
     StopOurTrack()
     AB.Internal.CurrentKey  = nil
     AB.Internal.RandomTimer = 0
-    AB.Internal.Frozen      = false
 end
 
 AB.Functions.Reload = ReloadAnimationPreset
@@ -812,34 +719,30 @@ end))
 --// Anti-Aim body
 --// ===========================================================================
 local function CleanupAntiAim()
-    local I = AntiAim.Internal
-    if not (I.BodyGyro or I.AlignOrientation or I.Attachment or I.AngularVelocity or I.CurrentMotor) then
-        return
+    if AntiAim.Internal.BodyGyro then
+        pcall(function() AntiAim.Internal.BodyGyro:Destroy() end)
+        AntiAim.Internal.BodyGyro = nil
     end
-    if I.BodyGyro then
-        pcall(function() I.BodyGyro:Destroy() end)
-        I.BodyGyro = nil
+    if AntiAim.Internal.AlignOrientation then
+        pcall(function() AntiAim.Internal.AlignOrientation:Destroy() end)
+        AntiAim.Internal.AlignOrientation = nil
     end
-    if I.AlignOrientation then
-        pcall(function() I.AlignOrientation:Destroy() end)
-        I.AlignOrientation = nil
+    if AntiAim.Internal.Attachment then
+        pcall(function() AntiAim.Internal.Attachment:Destroy() end)
+        AntiAim.Internal.Attachment = nil
     end
-    if I.Attachment then
-        pcall(function() I.Attachment:Destroy() end)
-        I.Attachment = nil
+    if AntiAim.Internal.AngularVelocity then
+        pcall(function() AntiAim.Internal.AngularVelocity:Destroy() end)
+        AntiAim.Internal.AngularVelocity = nil
     end
-    if I.AngularVelocity then
-        pcall(function() I.AngularVelocity:Destroy() end)
-        I.AngularVelocity = nil
-    end
-    if I.CurrentMotor then
-        local motor = I.CurrentMotor
-        local orig  = I.OriginalC0
+    if AntiAim.Internal.CurrentMotor then
+        local motor = AntiAim.Internal.CurrentMotor
+        local orig  = AntiAim.Internal.OriginalC0
         if motor.Parent and orig then
             pcall(function() motor.C0 = orig end)
         end
-        I.CurrentMotor = nil
-        I.OriginalC0   = nil
+        AntiAim.Internal.CurrentMotor = nil
+        AntiAim.Internal.OriginalC0   = nil
     end
 end
 
@@ -867,125 +770,117 @@ local function ApplyAntiAim()
         end
     end
 
-    if not shouldApply then
-        if AntiAim.Internal.WasApplying then
-            CleanupAntiAim()
-            local baseYaw = GetBaseYaw(bodySet.Reference, char)
-            pcall(function()
-                root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, baseYaw, 0)
-            end)
-            AntiAim.Internal.WasApplying = false
-        end
-        return
-    end
-    AntiAim.Internal.WasApplying = true
+    if shouldApply then
+        local baseYaw = GetBaseYaw(bodySet.Reference, char)
+        local amount  = tonumber(bodySet.Amount) or 15
+        local speed   = tonumber(bodySet.Speed) or 5
+        if speed <= 0 then speed = 0.01 end
+        local yaw = 0
 
-    local baseYaw = GetBaseYaw(bodySet.Reference, char)
-    local amount  = tonumber(bodySet.Amount) or 15
-    local speed   = tonumber(bodySet.Speed) or 5
-    if speed <= 0 then speed = 0.01 end
-    local yaw = 0
-
-    if mode == "Static" then
-        yaw = baseYaw + math.rad(bodySet.Yaw)
-    elseif mode == "Spin" then
-        yaw = baseYaw + math.rad((now * speed) % 360 + bodySet.Yaw)
-    elseif mode == "Jitter" then
-        if now - AntiAim.Internal.BodyJitterTime > 1 / speed then
-            AntiAim.Internal.BodyJitterTime = now
-            AntiAim.Internal.BodyJitterOffset = (math.random() - 0.5) * 2 * amount
-        end
-        yaw = baseYaw + math.rad(bodySet.Yaw + AntiAim.Internal.BodyJitterOffset)
-    elseif mode == "Sway" then
-        yaw = baseYaw + math.rad(bodySet.Yaw + math.sin(now * speed) * amount)
-    end
-
-    if method == "CFrame" then
-        CleanupAntiAim()
-        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
-    elseif method == "BodyGyro" then
-        if AntiAim.Internal.AlignOrientation or AntiAim.Internal.AngularVelocity or AntiAim.Internal.CurrentMotor then
-            CleanupAntiAim()
-        end
-        if not AntiAim.Internal.BodyGyro or not AntiAim.Internal.BodyGyro.Parent then
-            local bg = Instance.new("BodyGyro")
-            bg.MaxTorque = Vector3.new(0, 4000, 0)
-            bg.P = 10000
-            bg.D = 100
-            bg.Parent = root
-            AntiAim.Internal.BodyGyro = bg
-        end
-        AntiAim.Internal.BodyGyro.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
-    elseif method == "Motor6D" then
-        if AntiAim.Internal.BodyGyro or AntiAim.Internal.AlignOrientation or AntiAim.Internal.AngularVelocity then
-            CleanupAntiAim()
-        end
-        local motor
-        for _, child in ipairs(char:GetDescendants()) do
-            if child:IsA("Motor6D") and (
-                child.Name == "Neck" or child.Name == "Waist"
-                or child.Name:lower():find("neck") or child.Name:lower():find("waist")
-            ) then
-                motor = child
-                break
+        if mode == "Static" then
+            -- FIX: было baseYaw + math.rad(bodySet.Yaw + amount) → сдвиг на Amount (15°)
+            -- Теперь Yaw = точный угол от base.
+            yaw = baseYaw + math.rad(bodySet.Yaw)
+        elseif mode == "Spin" then
+            yaw = baseYaw + math.rad((now * speed) % 360 + bodySet.Yaw)
+        elseif mode == "Jitter" then
+            if now - AntiAim.Internal.BodyJitterTime > 1 / speed then
+                AntiAim.Internal.BodyJitterTime = now
+                AntiAim.Internal.BodyJitterOffset = (math.random() - 0.5) * 2 * amount
             end
+            yaw = baseYaw + math.rad(bodySet.Yaw + AntiAim.Internal.BodyJitterOffset)
+        elseif mode == "Sway" then
+            yaw = baseYaw + math.rad(bodySet.Yaw + math.sin(now * speed) * amount)
         end
-        if motor then
-            if not AntiAim.Internal.CurrentMotor or AntiAim.Internal.CurrentMotor ~= motor
-               or not AntiAim.Internal.CurrentMotor.Parent then
-                if AntiAim.Internal.CurrentMotor and AntiAim.Internal.OriginalC0 then
-                    local oldMotor = AntiAim.Internal.CurrentMotor
-                    local oldC0    = AntiAim.Internal.OriginalC0
-                    if oldMotor.Parent then pcall(function() oldMotor.C0 = oldC0 end) end
+
+        if method == "CFrame" then
+            CleanupAntiAim()
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+        elseif method == "BodyGyro" then
+            if AntiAim.Internal.AlignOrientation or AntiAim.Internal.AngularVelocity or AntiAim.Internal.CurrentMotor then
+                CleanupAntiAim()
+            end
+            if not AntiAim.Internal.BodyGyro or not AntiAim.Internal.BodyGyro.Parent then
+                local bg = Instance.new("BodyGyro")
+                bg.MaxTorque = Vector3.new(0, 4000, 0)
+                bg.P = 10000
+                bg.D = 100
+                bg.Parent = root
+                AntiAim.Internal.BodyGyro = bg
+            end
+            AntiAim.Internal.BodyGyro.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+        elseif method == "Motor6D" then
+            if AntiAim.Internal.BodyGyro or AntiAim.Internal.AlignOrientation or AntiAim.Internal.AngularVelocity then
+                CleanupAntiAim()
+            end
+            local motor
+            for _, child in ipairs(char:GetDescendants()) do
+                if child:IsA("Motor6D") and (
+                    child.Name == "Neck" or child.Name == "Waist"
+                    or child.Name:lower():find("neck") or child.Name:lower():find("waist")
+                ) then
+                    motor = child
+                    break
                 end
-                AntiAim.Internal.CurrentMotor = motor
-                AntiAim.Internal.OriginalC0   = motor.C0
             end
-            if AntiAim.Internal.CurrentMotor.Parent then
-                pcall(function()
-                    AntiAim.Internal.CurrentMotor.C0 = AntiAim.Internal.OriginalC0 * CFrame.Angles(0, yaw, 0)
-                end)
+            if motor then
+                if not AntiAim.Internal.CurrentMotor or AntiAim.Internal.CurrentMotor ~= motor
+                   or not AntiAim.Internal.CurrentMotor.Parent then
+                    if AntiAim.Internal.CurrentMotor and AntiAim.Internal.OriginalC0 then
+                        local oldMotor = AntiAim.Internal.CurrentMotor
+                        local oldC0    = AntiAim.Internal.OriginalC0
+                        if oldMotor.Parent then pcall(function() oldMotor.C0 = oldC0 end) end
+                    end
+                    AntiAim.Internal.CurrentMotor = motor
+                    AntiAim.Internal.OriginalC0   = motor.C0
+                end
+                if AntiAim.Internal.CurrentMotor.Parent then
+                    pcall(function()
+                        AntiAim.Internal.CurrentMotor.C0 = AntiAim.Internal.OriginalC0 * CFrame.Angles(0, yaw, 0)
+                    end)
+                end
+            else
+                CleanupAntiAim()
             end
-        else
-            CleanupAntiAim()
+        elseif method == "AlignOrientation" then
+            if AntiAim.Internal.BodyGyro or AntiAim.Internal.AngularVelocity or AntiAim.Internal.CurrentMotor then
+                CleanupAntiAim()
+            end
+            if not AntiAim.Internal.Attachment or not AntiAim.Internal.Attachment.Parent then
+                local attachment = Instance.new("Attachment")
+                attachment.Parent = root
+                AntiAim.Internal.Attachment = attachment
+                AntiAim.Internal.AlignOrientation = nil
+            end
+            if not AntiAim.Internal.AlignOrientation or not AntiAim.Internal.AlignOrientation.Parent then
+                local align = Instance.new("AlignOrientation")
+                align.MaxTorque = 4000
+                align.MaxAngularVelocity = math.huge
+                align.Responsiveness = 50
+                align.Parent = root
+                align.Attachment0 = AntiAim.Internal.Attachment
+                align.RigidityEnabled = false
+                AntiAim.Internal.AlignOrientation = align
+            end
+            AntiAim.Internal.AlignOrientation.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+            AntiAim.Internal.AlignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            AntiAim.Internal.AlignOrientation.RigidityEnabled = false
+        elseif method == "AngularVelocity" then
+            if AntiAim.Internal.BodyGyro or AntiAim.Internal.AlignOrientation or AntiAim.Internal.CurrentMotor then
+                CleanupAntiAim()
+            end
+            if not AntiAim.Internal.AngularVelocity or not AntiAim.Internal.AngularVelocity.Parent then
+                local av = Instance.new("AngularVelocity")
+                av.MaxTorque = Vector3.new(0, 4000, 0)
+                av.AngularVelocity = Vector3.new(0, 0, 0)
+                av.Parent = root
+                AntiAim.Internal.AngularVelocity = av
+            end
+            local spinSpeed = (mode == "Spin") and math.rad(speed) or 0
+            AntiAim.Internal.AngularVelocity.AngularVelocity = Vector3.new(0, spinSpeed, 0)
         end
-    elseif method == "AlignOrientation" then
-        if AntiAim.Internal.BodyGyro or AntiAim.Internal.AngularVelocity or AntiAim.Internal.CurrentMotor then
-            CleanupAntiAim()
-        end
-        if not AntiAim.Internal.Attachment or not AntiAim.Internal.Attachment.Parent then
-            local attachment = Instance.new("Attachment")
-            attachment.Parent = root
-            AntiAim.Internal.Attachment = attachment
-            AntiAim.Internal.AlignOrientation = nil
-        end
-        if not AntiAim.Internal.AlignOrientation or not AntiAim.Internal.AlignOrientation.Parent then
-            local align = Instance.new("AlignOrientation")
-            align.MaxTorque = 4000
-            align.MaxAngularVelocity = math.huge
-            align.Responsiveness = 50
-            align.Parent = root
-            align.Attachment0 = AntiAim.Internal.Attachment
-            align.RigidityEnabled = false
-            AntiAim.Internal.AlignOrientation = align
-        end
-        AntiAim.Internal.AlignOrientation.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
-        AntiAim.Internal.AlignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-        AntiAim.Internal.AlignOrientation.RigidityEnabled = false
-    elseif method == "AngularVelocity" then
-        --// NB: AngularVelocity — это rate (угловая скорость), а не target orientation.
-        if AntiAim.Internal.BodyGyro or AntiAim.Internal.AlignOrientation or AntiAim.Internal.CurrentMotor then
-            CleanupAntiAim()
-        end
-        if not AntiAim.Internal.AngularVelocity or not AntiAim.Internal.AngularVelocity.Parent then
-            local av = Instance.new("AngularVelocity")
-            av.MaxTorque = Vector3.new(0, 4000, 0)
-            av.AngularVelocity = Vector3.new(0, 0, 0)
-            av.Parent = root
-            AntiAim.Internal.AngularVelocity = av
-        end
-        local spinSpeed = (mode == "Spin") and math.rad(speed) or 0
-        AntiAim.Internal.AngularVelocity.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+    else
+        CleanupAntiAim()
     end
 end
 
@@ -1044,7 +939,6 @@ AntiAim.Functions = {
             BodyGyro = nil, AlignOrientation = nil,
             Attachment = nil, AngularVelocity = nil,
             CurrentMotor = nil, OriginalC0 = nil,
-            WasApplying = false,
         }
         AntiAim.Desync.Internal.SavedCFrame     = nil
         AntiAim.Desync.Internal.RealCFrame      = nil
@@ -1053,9 +947,7 @@ AntiAim.Functions = {
         AntiAim.Desync.Internal.OldPosTimer     = 0
         AntiAim.Desync.Internal.PendingRefresh  = false
         AntiAim.Desync.Internal.RotAcc          = 0
-        AntiAim.Desync.Internal.CurrentCFrame   = nil
         AntiAim.Desync.Internal.NetworkClaimed  = false
-        AntiAim.Desync.Internal.RestoreData     = nil
         CleanupAntiAim()
         StopDesync()
     end,
@@ -1099,6 +991,7 @@ if not Window then
     return
 end
 
+--// Локализация (инъекция в airhubUI.L)
 do
     local UI = getgenv().airhubUI
     if UI and UI.L and UI.L.en and UI.L.ru then
@@ -1142,7 +1035,7 @@ do
 
             tt_aa_enabled = "Master switch for body anti-aim",
             tt_aa_mode = "Static = fixed angle | Spin = continuous rotation | Jitter = random angle | Sway = sinusoidal oscillation",
-            tt_aa_method = "CFrame = direct write | BodyGyro = physics body | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = spin force (Spin-only)",
+            tt_aa_method = "CFrame = direct write | BodyGyro = physics body | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = spin force",
             tt_aa_reference = "Camera = relative to look | Movement = relative to velocity | Player = relative to move input (fallback camera)",
             tt_aa_yaw = "Base yaw offset in degrees (-180 to 180). 0 = face same direction as reference.",
             tt_aa_amount = "Amplitude for Jitter/Sway (in degrees). Not used in Static or Spin mode.",
@@ -1158,7 +1051,7 @@ do
             tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) on HRP so animation replicates",
             tt_aa_anim_reload = "Re-load the selected animation",
             tt_aa_anim_stop = "Stop and reset all animation speeds",
-            tt_aa_desync_enabled = "Master switch for desync. Camera stays on your real position.",
+            tt_aa_desync_enabled = "Master switch for desync",
             tt_aa_desync_mode = "Default = positional offset | OldPosition = lag position | Void = under map | InPlayer = inside nearest player",
             tt_aa_desync_method = "How the offset is applied (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
             tt_aa_desync_random_rotate = "Also apply random pitch/yaw/roll rotations",
@@ -1214,7 +1107,7 @@ do
 
             tt_aa_enabled = "Главный выключатель анти-аима тела",
             tt_aa_mode = "Static = фикс. угол | Spin = непрерывное вращение | Jitter = случайный угол | Sway = синусоида",
-            tt_aa_method = "CFrame = прямая запись | BodyGyro = физическое тело | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = сила вращения (только Spin)",
+            tt_aa_method = "CFrame = прямая запись | BodyGyro = физическое тело | Motor6D = neck/waist C0 | AlignOrientation = constraint | AngularVelocity = сила вращения",
             tt_aa_reference = "Camera = относительно взгляда | Movement = относительно скорости | Player = относительно ввода движения (фолбэк — камера)",
             tt_aa_yaw = "Базовое смещение рыскания в градусах (-180 до 180). 0 = смотреть туда же, куда референс.",
             tt_aa_amount = "Амплитуда для Jitter/Sway (в градусах). Не используется в Static и Spin.",
@@ -1230,7 +1123,7 @@ do
             tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) на HRP, чтобы анимация реплицировалась",
             tt_aa_anim_reload = "Перезагрузить выбранную анимацию",
             tt_aa_anim_stop = "Остановить и сбросить скорости всех анимаций",
-            tt_aa_desync_enabled = "Главный выключатель десинка. Камера остаётся на реальной позиции.",
+            tt_aa_desync_enabled = "Главный выключатель десинка",
             tt_aa_desync_mode = "Default = смещение позиции | OldPosition = лаг позиции | Void = под картой | InPlayer = внутри ближайшего игрока",
             tt_aa_desync_method = "Как применяется смещение (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
             tt_aa_desync_random_rotate = "Также применять случайные повороты pitch/yaw/roll",
@@ -1249,8 +1142,6 @@ do
         for k, v in pairs(en) do UI.L.en[k] = v end
         for k, v in pairs(ru) do UI.L.ru[k] = v end
         if UI.RefreshTheme then pcall(UI.RefreshTheme) end
-    else
-        warn("[AirHub] 03_antiaim: airhubUI.L недоступен — локализация пропущена")
     end
 end
 
@@ -1295,6 +1186,7 @@ aaMain:AddDropdown({ Name = "aa_method", Value = AntiAim.Settings.Method, List =
 aaMain:AddDropdown({ Name = "aa_reference", Value = AntiAim.Settings.Body.Reference, List = refModes,
     Callback = function(v) setBody("Reference", v) end,
     Tooltip = "tt_aa_reference" })
+-- FIX: явный Decimals = 0 (шаг 1°)
 aaMain:AddSlider({ Name = "aa_yaw", Value = AntiAim.Settings.Body.Yaw,
     Min = -180, Max = 180, Decimals = 0,
     Callback = function(v) setBody("Yaw", v) end,
@@ -1476,4 +1368,4 @@ desyncSec:AddButton({ Name = "aa_desync_save",
     end,
     Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU loc + tooltips + Yaw FIX + desync smoothing + persistent render bind + Motor6D by name + camera FIX)")
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw)")
