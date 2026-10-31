@@ -4,13 +4,13 @@
 --//
 --// FIX (Yaw "shifted"):
 --//   1. GetBaseYaw: atan2(x, z) → atan2(-x, -z) для всех reference.
---//      Раньше для камеры вперёд возвращалось π (180°), т.е. Yaw=0 сразу
---//      означал "развёрнут на 180°" — ощущение "сдвинутого" Yaw.
---//   2. Static: убран лишний "+ amount". Слайдер Yaw теперь = точный
---//      угол от reference-направления.
---//   3. Player reference: использует Humanoid.MoveDirection (не зависит
---//      от поворота самого тела, иначе AA крутит сам себя).
+--//   2. Static: убран лишний "+ amount". Слайдер Yaw = точный угол.
+--//   3. Player reference: использует Humanoid.MoveDirection.
 --//   4. Yaw slider: Decimals = 0, шаг 1°.
+--//
+--// NEW: Visualize Desync (Drawing API)
+--//   Показывает бокс реальной позиции (зелёный), бокс десинк-позиции (красный),
+--//   линию между ними и дистанцию в studs. Требует executor с Drawing API.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -56,6 +56,7 @@ H.AntiAim = {
             InPlayerOffset     = 2,
             RefreshOnShot      = false,
             RandomRotate       = false,
+            Visualize          = false, -- NEW: визуализация десинка
         },
         Internal = {
             Connection       = nil,
@@ -74,6 +75,7 @@ H.AntiAim = {
             RotYaw           = 0,
             RotRoll          = 0,
             NetworkClaimed   = false,
+            LastTargetCF     = nil, -- NEW: последний target CFrame для визуализации
         },
     },
     AnimationBreaker = {
@@ -117,7 +119,6 @@ local AB = AntiAim.AnimationBreaker
 --//   Чтобы LookVector(camera) совпал с LookVector(character) при Yaw=0:
 --//       -sin(yaw) = look.X   →  yaw = atan2(-look.X, -look.Z)
 --//       -cos(yaw) = look.Z
---//   Раньше было atan2(look.X, look.Z) → для (0,0,-1) возвращало π (180°).
 --// ===========================================================================
 local function GetBaseYaw(reference, char)
     if reference == "Camera" then
@@ -148,7 +149,6 @@ local function GetBaseYaw(reference, char)
         end
         return 0
     elseif reference == "Player" then
-        -- ИСПОЛЬЗУЕМ MoveDirection (не зависит от rotation AA), фолбэк — камера
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
             local md = hum.MoveDirection
@@ -215,6 +215,220 @@ local function GetRootJoint(hrp)
 end
 
 --// ===========================================================================
+--// NEW: Desync Visualization (Drawing API)
+--//   Рисует:
+--//     • зелёный бокс — реальная позиция (что видит клиент)
+--//     • красный бокс — targetCF десинка (куда сервер "думает" что ты стоишь)
+--//     • жёлтая линия — соединяет их
+--//     • текст над реальной позицией — величина расхождения в studs
+--//   Требует Drawing API. Если недоступно — предупреждение и авто-выключение.
+--// ===========================================================================
+local Vis = {
+    Enabled     = false,
+    HasDrawing  = false,
+    Lib         = nil,
+    Objects     = {},
+    WarnedOnce  = false,
+}
+
+--// Обнаружение Drawing-библиотеки (executor-specific: Drawing / _G.Drawing / drawing)
+local function TryDrawingLib(L)
+    if not L then return nil end
+    local ok = pcall(function()
+        local t = L.new("Line")
+        t.Visible = false
+        t:Remove()
+    end)
+    return ok and L or nil
+end
+
+local function DetectDrawingLib()
+    local L
+    pcall(function() L = Drawing end)
+    if TryDrawingLib(L) then return L end
+    L = nil
+    pcall(function() L = _G.Drawing end)
+    if TryDrawingLib(L) then return L end
+    L = nil
+    pcall(function() L = drawing end)
+    if TryDrawingLib(L) then return L end
+    if type(getgenv) == "function" then
+        L = nil
+        pcall(function() L = getgenv().Drawing end)
+        if TryDrawingLib(L) then return L end
+    end
+    return nil
+end
+
+Vis.Lib        = DetectDrawingLib()
+Vis.HasDrawing = Vis.Lib ~= nil
+
+local function HideAllVis()
+    for _, obj in pairs(Vis.Objects) do
+        pcall(function() obj.Visible = false end)
+    end
+end
+
+local function DestroyVisObjects()
+    for _, obj in pairs(Vis.Objects) do
+        pcall(function() obj:Remove() end)
+    end
+    Vis.Objects = {}
+end
+
+local function EnsureVisObjects()
+    if not Vis.HasDrawing or not Vis.Lib then return false end
+    if Vis.Objects.RealBox then return true end
+
+    local function mk(kind, props)
+        local o = Vis.Lib.new(kind)
+        if not o then return nil end
+        for k, v in pairs(props) do o[k] = v end
+        o.Visible = false
+        return o
+    end
+
+    Vis.Objects.RealBox = mk("Square", {
+        Thickness = 2,
+        Color     = Color3.fromRGB(80, 220, 120),
+        Filled    = false,
+    })
+    Vis.Objects.DesyncBox = mk("Square", {
+        Thickness = 2,
+        Color     = Color3.fromRGB(240, 80, 80),
+        Filled    = false,
+    })
+    Vis.Objects.Line = mk("Line", {
+        Thickness = 1,
+        Color     = Color3.fromRGB(240, 220, 80),
+    })
+    Vis.Objects.Text = mk("Text", {
+        Size         = 14,
+        Color        = Color3.fromRGB(240, 240, 240),
+        Center       = true,
+        Outline      = true,
+        OutlineColor = Color3.fromRGB(0, 0, 0),
+    })
+    Vis.Objects.RealTag = mk("Text", {
+        Size         = 13,
+        Color        = Color3.fromRGB(80, 220, 120),
+        Center       = true,
+        Outline      = true,
+        OutlineColor = Color3.fromRGB(0, 0, 0),
+        Text         = "REAL",
+    })
+    Vis.Objects.DesyncTag = mk("Text", {
+        Size         = 13,
+        Color        = Color3.fromRGB(240, 80, 80),
+        Center       = true,
+        Outline      = true,
+        OutlineColor = Color3.fromRGB(0, 0, 0),
+        Text         = "DESYNC",
+    })
+    return true
+end
+
+local function UpdateVisualization()
+    if H.ShuttingDown then
+        HideAllVis()
+        return
+    end
+    if not Vis.Enabled or not AntiAim.Desync.Settings.Enabled then
+        HideAllVis()
+        return
+    end
+    if not EnsureVisObjects() then return end
+
+    local desync   = AntiAim.Desync
+    local realCF   = desync.Internal.RealCFrame
+    local targetCF = desync.Internal.LastTargetCF
+    local cam      = workspace.CurrentCamera
+    if not realCF or not targetCF or not cam then
+        HideAllVis()
+        return
+    end
+
+    local realPos   = realCF.Position
+    local targetPos = targetCF.Position
+
+    local rSp, rOn = cam:WorldToViewportPoint(realPos)
+    local tSp, tOn = cam:WorldToViewportPoint(targetPos)
+
+    local O = Vis.Objects
+
+    --// Реальная позиция
+    if rOn and rSp.Z > 0 then
+        local s = math.clamp(2400 / rSp.Z, 4, 240)
+        O.RealBox.Size     = Vector2.new(s, s)
+        O.RealBox.Position = Vector2.new(rSp.X - s / 2, rSp.Y - s / 2)
+        O.RealBox.Visible  = true
+        O.RealTag.Position = Vector2.new(rSp.X, rSp.Y + s / 2 + 2)
+        O.RealTag.Visible  = true
+    else
+        O.RealBox.Visible = false
+        O.RealTag.Visible = false
+    end
+
+    --// Десинк-позиция
+    if tOn and tSp.Z > 0 then
+        local s = math.clamp(2400 / tSp.Z, 4, 240)
+        O.DesyncBox.Size     = Vector2.new(s, s)
+        O.DesyncBox.Position = Vector2.new(tSp.X - s / 2, tSp.Y - s / 2)
+        O.DesyncBox.Visible  = true
+        O.DesyncTag.Position = Vector2.new(tSp.X, tSp.Y + s / 2 + 2)
+        O.DesyncTag.Visible  = true
+    else
+        O.DesyncBox.Visible = false
+        O.DesyncTag.Visible = false
+    end
+
+    --// Соединительная линия
+    if rOn and tOn and rSp.Z > 0 and tSp.Z > 0 then
+        O.Line.From    = Vector2.new(rSp.X, rSp.Y)
+        O.Line.To      = Vector2.new(tSp.X, tSp.Y)
+        O.Line.Visible = true
+    else
+        O.Line.Visible = false
+    end
+
+    --// Дистанция
+    if rOn and rSp.Z > 0 then
+        local d = (targetPos - realPos).Magnitude
+        O.Text.Text     = string.format("Offset: %.2f studs", d)
+        O.Text.Position = Vector2.new(rSp.X, rSp.Y - 24)
+        O.Text.Visible  = true
+    else
+        O.Text.Visible = false
+    end
+end
+
+local function SetVisualizationEnabled(v)
+    Vis.Enabled = v and true or false
+    AntiAim.Desync.Settings.Visualize = Vis.Enabled
+
+    if not Vis.Enabled then
+        HideAllVis()
+        return
+    end
+
+    if not Vis.HasDrawing then
+        if not Vis.WarnedOnce then
+            Vis.WarnedOnce = true
+            warn("[AirHub DesyncVis] Drawing API не найден в этом executor — визуализация недоступна")
+        end
+        Vis.Enabled = false
+        AntiAim.Desync.Settings.Visualize = false
+        return
+    end
+end
+
+local function CleanupVisualization()
+    HideAllVis()
+    DestroyVisObjects()
+    Vis.Enabled = false
+end
+
+--// ===========================================================================
 --// Desync
 --// ===========================================================================
 local function StartDesync()
@@ -233,6 +447,7 @@ local function StartDesync()
     desync.Internal.RotYaw          = 0
     desync.Internal.RotRoll         = 0
     desync.Internal.NetworkClaimed  = false
+    desync.Internal.LastTargetCF    = nil -- NEW
 
     if desync.Settings.Mode == "OldPosition" then
         local hrp = GetCurrentHRP()
@@ -332,6 +547,9 @@ local function StartDesync()
             )
         end
 
+        --// NEW: сохраняем targetCF для визуализации
+        desync.Internal.LastTargetCF = targetCF
+
         local applied = false
         if method == "CFrame" then
             hrp.CFrame = targetCF
@@ -425,6 +643,7 @@ local function StopDesync()
     desync.Internal.RotYaw           = 0
     desync.Internal.RotRoll          = 0
     desync.Internal.NetworkClaimed   = false
+    desync.Internal.LastTargetCF     = nil -- NEW
 end
 
 --// ===========================================================================
@@ -778,8 +997,6 @@ local function ApplyAntiAim()
         local yaw = 0
 
         if mode == "Static" then
-            -- FIX: было baseYaw + math.rad(bodySet.Yaw + amount) → сдвиг на Amount (15°)
-            -- Теперь Yaw = точный угол от base.
             yaw = baseYaw + math.rad(bodySet.Yaw)
         elseif mode == "Spin" then
             yaw = baseYaw + math.rad((now * speed) % 360 + bodySet.Yaw)
@@ -891,6 +1108,18 @@ RunService:BindToRenderStep(AA_BIND_NAME, 201, function()
     xpcall(ApplyAntiAim, HandleError)
 end)
 
+--// NEW: render step для визуализации десинка (приоритет 202 — после anti-aim)
+local VIS_BIND_NAME = "AirHubDesyncVis"
+AntiAim.VIS_BIND_NAME = VIS_BIND_NAME
+pcall(function() RunService:UnbindFromRenderStep(VIS_BIND_NAME) end)
+RunService:BindToRenderStep(VIS_BIND_NAME, 202, function()
+    if H.ShuttingDown then
+        pcall(DestroyVisObjects)
+        return
+    end
+    xpcall(UpdateVisualization, HandleError)
+end)
+
 --// ===========================================================================
 --// Public functions
 --// ===========================================================================
@@ -922,6 +1151,7 @@ AntiAim.Functions = {
             InPlayerOffset = 2,
             RefreshOnShot = false,
             RandomRotate = false,
+            Visualize = false, -- NEW
         }
         AB.Settings = {
             Enabled        = false,
@@ -948,8 +1178,10 @@ AntiAim.Functions = {
         AntiAim.Desync.Internal.PendingRefresh  = false
         AntiAim.Desync.Internal.RotAcc          = 0
         AntiAim.Desync.Internal.NetworkClaimed  = false
+        AntiAim.Desync.Internal.LastTargetCF    = nil -- NEW
         CleanupAntiAim()
         StopDesync()
+        pcall(CleanupVisualization) -- NEW
     end,
 
     SaveOldPosition = function()
@@ -975,6 +1207,11 @@ AntiAim.Functions = {
 AntiAim.StartDesync    = StartDesync
 AntiAim.StopDesync     = StopDesync
 AntiAim.CleanupAntiAim = CleanupAntiAim
+
+--// NEW: публичный API визуализации
+AntiAim.SetVisualizationEnabled = SetVisualizationEnabled
+AntiAim.CleanupVisualization    = CleanupVisualization
+AntiAim.HasDrawingAPI           = function() return Vis.HasDrawing end
 
 AntiAim.StartAnimationBreaker = function() AB.Settings.Enabled = true end
 AntiAim.StopAnimationBreaker  = StopAnimationBreaker
@@ -1031,6 +1268,7 @@ do
             aa_desync_void = "Void Depth (Y)",
             aa_desync_inplayer = "InPlayer Offset (studs)",
             aa_desync_refresh_shot = "Refresh position on shot",
+            aa_desync_visualize = "Visualize Desync", -- NEW
             aa_desync_save = "Save Current Position",
 
             tt_aa_enabled = "Master switch for body anti-aim",
@@ -1065,6 +1303,7 @@ do
             tt_aa_desync_void = "Y coordinate for Void mode",
             tt_aa_desync_inplayer = "Forward offset from nearest player when InPlayer mode",
             tt_aa_desync_refresh_shot = "Refresh saved position right before shooting",
+            tt_aa_desync_visualize = "Draws green (real) and red (desync) boxes with a yellow connecting line + distance text. Requires Drawing API.", -- NEW
             tt_aa_desync_save = "Manually save current position for OldPosition mode",
         }
         local ru = {
@@ -1103,6 +1342,7 @@ do
             aa_desync_void = "Глубина пустоты (Y)",
             aa_desync_inplayer = "Смещение InPlayer (studs)",
             aa_desync_refresh_shot = "Обновлять позицию при выстреле",
+            aa_desync_visualize = "Визуализировать десинк", -- NEW
             aa_desync_save = "Сохранить текущую позицию",
 
             tt_aa_enabled = "Главный выключатель анти-аима тела",
@@ -1137,6 +1377,7 @@ do
             tt_aa_desync_void = "Координата Y для режима Void",
             tt_aa_desync_inplayer = "Смещение вперёд от ближайшего игрока в режиме InPlayer",
             tt_aa_desync_refresh_shot = "Обновлять сохранённую позицию прямо перед выстрелом",
+            tt_aa_desync_visualize = "Рисует зелёный (реальная) и красный (десинк) боксы с жёлтой линией и дистанцией в studs. Требует Drawing API.", -- NEW
             tt_aa_desync_save = "Вручную сохранить текущую позицию для режима OldPosition",
         }
         for k, v in pairs(en) do UI.L.en[k] = v end
@@ -1149,7 +1390,7 @@ H._UI = H._UI or {}
 local AntiTab = Window:AddTab({ Name = "Anti-Aim", Icon = ">" })
 H._UI.AntiTab = AntiTab
 
-local relAnimPreset  = AntiAim.ReloadAnimationPreset
+local relAnimPreset   = AntiAim.ReloadAnimationPreset
 local stopAnimBreaker = AntiAim.StopAnimationBreaker
 local applyAnimPreset = AntiAim.ApplyAnimationPreset
 
@@ -1186,7 +1427,6 @@ aaMain:AddDropdown({ Name = "aa_method", Value = AntiAim.Settings.Method, List =
 aaMain:AddDropdown({ Name = "aa_reference", Value = AntiAim.Settings.Body.Reference, List = refModes,
     Callback = function(v) setBody("Reference", v) end,
     Tooltip = "tt_aa_reference" })
--- FIX: явный Decimals = 0 (шаг 1°)
 aaMain:AddSlider({ Name = "aa_yaw", Value = AntiAim.Settings.Body.Yaw,
     Min = -180, Max = 180, Decimals = 0,
     Callback = function(v) setBody("Yaw", v) end,
@@ -1357,6 +1597,13 @@ desyncSec:AddToggle({ Name = "aa_desync_refresh_shot",
     Value = AntiAim.Desync.Settings.RefreshOnShot or false,
     Callback = function(v) setDesync("RefreshOnShot", v) end,
     Tooltip = "tt_aa_desync_refresh_shot" })
+
+--// NEW: визуализация десинка
+desyncSec:AddToggle({ Name = "aa_desync_visualize",
+    Value = AntiAim.Desync.Settings.Visualize or false,
+    Callback = function(v) SetVisualizationEnabled(v) end,
+    Tooltip = "tt_aa_desync_visualize" })
+
 desyncSec:AddButton({ Name = "aa_desync_save",
     Callback = function()
         if AntiAim.Functions and AntiAim.Functions.SaveOldPosition then
@@ -1368,4 +1615,4 @@ desyncSec:AddButton({ Name = "aa_desync_save",
     end,
     Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw)")
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw + Desync Visualization)")
