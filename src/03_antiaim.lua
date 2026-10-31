@@ -8,9 +8,8 @@
 --//   3. Player reference: использует Humanoid.MoveDirection.
 --//   4. Yaw slider: Decimals = 0, шаг 1°.
 --//
---// NEW: Visualize Desync (Drawing API)
---//   Показывает бокс реальной позиции (зелёный), бокс десинк-позиции (красный),
---//   линию между ними и дистанцию в studs. Требует executor с Drawing API.
+--// NEW: Visualize Desync (Drawing API) + customization settings.
+--// NEW: DesyncFrom — ориентация десинка: Player (yaw персонажа) или Camera (yaw камеры).
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -45,6 +44,7 @@ H.AntiAim = {
             Enabled            = false,
             Mode               = "Default",
             Method             = "CFrame",
+            DesyncFrom         = "Player", -- NEW: "Player" | "Camera"
             X                  = 5,
             Y                  = 5,
             Z                  = 5,
@@ -56,7 +56,7 @@ H.AntiAim = {
             InPlayerOffset     = 2,
             RefreshOnShot      = false,
             RandomRotate       = false,
-            Visualize          = false, -- NEW: визуализация десинка
+            Visualize          = false, -- NEW
         },
         Internal = {
             Connection       = nil,
@@ -75,7 +75,7 @@ H.AntiAim = {
             RotYaw           = 0,
             RotRoll          = 0,
             NetworkClaimed   = false,
-            LastTargetCF     = nil, -- NEW: последний target CFrame для визуализации
+            LastTargetCF     = nil, -- NEW
         },
     },
     AnimationBreaker = {
@@ -115,10 +115,6 @@ local AB = AntiAim.AnimationBreaker
 
 --// ===========================================================================
 --// FIXED: base yaw
---//   CFrame.Angles(0, yaw, 0).LookVector = (-sin(yaw), 0, -cos(yaw))
---//   Чтобы LookVector(camera) совпал с LookVector(character) при Yaw=0:
---//       -sin(yaw) = look.X   →  yaw = atan2(-look.X, -look.Z)
---//       -cos(yaw) = look.Z
 --// ===========================================================================
 local function GetBaseYaw(reference, char)
     if reference == "Camera" then
@@ -214,14 +210,34 @@ local function GetRootJoint(hrp)
     return nil
 end
 
+--// NEW: вращает offset-вектор так, чтобы он был ориентирован по reference.
+--//   "Player"  → offset остаётся в локальном пространстве персонажа (как было).
+--//   "Camera"  → offset поворачивается на (cameraYaw - characterYaw),
+--//               т.е. направление offset следует за камерой, а не за телом.
+local function RotateOffsetToReference(offsetVec, charCF, reference)
+    if reference ~= "Camera" then return offsetVec end
+    local cam = workspace.CurrentCamera
+    if not cam then return offsetVec end
+
+    local camLook = cam.CFrame.LookVector
+    local flatCam = Vector3.new(camLook.X, 0, camLook.Z)
+    if flatCam.Magnitude < 0.001 then return offsetVec end
+    local camYaw = math.atan2(-flatCam.X, -flatCam.Z)
+
+    local charLook = charCF.LookVector
+    local flatChar = Vector3.new(charLook.X, 0, charLook.Z)
+    local charYaw = 0
+    if flatChar.Magnitude > 0.001 then
+        charYaw = math.atan2(-flatChar.X, -flatChar.Z)
+    end
+
+    local diff = camYaw - charYaw
+    local rotated = CFrame.Angles(0, diff, 0) * CFrame.new(offsetVec)
+    return rotated.Position
+end
+
 --// ===========================================================================
---// NEW: Desync Visualization (Drawing API)
---//   Рисует:
---//     • зелёный бокс — реальная позиция (что видит клиент)
---//     • красный бокс — targetCF десинка (куда сервер "думает" что ты стоишь)
---//     • жёлтая линия — соединяет их
---//     • текст над реальной позицией — величина расхождения в studs
---//   Требует Drawing API. Если недоступно — предупреждение и авто-выключение.
+--// NEW: Desync Visualization (Drawing API) + customization
 --// ===========================================================================
 local Vis = {
     Enabled     = false,
@@ -229,9 +245,22 @@ local Vis = {
     Lib         = nil,
     Objects     = {},
     WarnedOnce  = false,
+    Settings    = {
+        ShowBoxes       = true,
+        ShowLine        = true,
+        ShowDistance    = true,
+        ShowTags        = true,
+        RealColor       = Color3.fromRGB(80, 220, 120),
+        DesyncColor     = Color3.fromRGB(240, 80, 80),
+        LineColor       = Color3.fromRGB(240, 220, 80),
+        TextColor       = Color3.fromRGB(240, 240, 240),
+        BoxThickness    = 2,
+        LineThickness   = 1,
+        TextSize        = 14,
+        TagSize         = 13,
+    },
 }
 
---// Обнаружение Drawing-библиотеки (executor-specific: Drawing / _G.Drawing / drawing)
 local function TryDrawingLib(L)
     if not L then return nil end
     local ok = pcall(function()
@@ -289,43 +318,62 @@ local function EnsureVisObjects()
     end
 
     Vis.Objects.RealBox = mk("Square", {
-        Thickness = 2,
-        Color     = Color3.fromRGB(80, 220, 120),
+        Thickness = Vis.Settings.BoxThickness,
+        Color     = Vis.Settings.RealColor,
         Filled    = false,
     })
     Vis.Objects.DesyncBox = mk("Square", {
-        Thickness = 2,
-        Color     = Color3.fromRGB(240, 80, 80),
+        Thickness = Vis.Settings.BoxThickness,
+        Color     = Vis.Settings.DesyncColor,
         Filled    = false,
     })
     Vis.Objects.Line = mk("Line", {
-        Thickness = 1,
-        Color     = Color3.fromRGB(240, 220, 80),
+        Thickness = Vis.Settings.LineThickness,
+        Color     = Vis.Settings.LineColor,
     })
     Vis.Objects.Text = mk("Text", {
-        Size         = 14,
-        Color        = Color3.fromRGB(240, 240, 240),
+        Size         = Vis.Settings.TextSize,
+        Color        = Vis.Settings.TextColor,
         Center       = true,
         Outline      = true,
         OutlineColor = Color3.fromRGB(0, 0, 0),
     })
     Vis.Objects.RealTag = mk("Text", {
-        Size         = 13,
-        Color        = Color3.fromRGB(80, 220, 120),
+        Size         = Vis.Settings.TagSize,
+        Color        = Vis.Settings.RealColor,
         Center       = true,
         Outline      = true,
         OutlineColor = Color3.fromRGB(0, 0, 0),
         Text         = "REAL",
     })
     Vis.Objects.DesyncTag = mk("Text", {
-        Size         = 13,
-        Color        = Color3.fromRGB(240, 80, 80),
+        Size         = Vis.Settings.TagSize,
+        Color        = Vis.Settings.DesyncColor,
         Center       = true,
         Outline      = true,
         OutlineColor = Color3.fromRGB(0, 0, 0),
         Text         = "DESYNC",
     })
     return true
+end
+
+--// Применяем текущие настройки Vis.Settings к объектам каждый кадр,
+--// чтобы изменения из UI (цвета/толщина/размер) применялись мгновенно.
+local function ApplyVisSettings(O)
+    pcall(function()
+        O.RealBox.Color       = Vis.Settings.RealColor
+        O.RealBox.Thickness   = Vis.Settings.BoxThickness
+        O.DesyncBox.Color     = Vis.Settings.DesyncColor
+        O.DesyncBox.Thickness = Vis.Settings.BoxThickness
+        O.Line.Color          = Vis.Settings.LineColor
+        O.Line.Thickness      = Vis.Settings.LineThickness
+        O.Text.Color          = Vis.Settings.TextColor
+        O.Text.Size           = Vis.Settings.TextSize
+        O.RealTag.Color       = Vis.Settings.RealColor
+        O.RealTag.Size        = Vis.Settings.TagSize
+        O.DesyncTag.Color     = Vis.Settings.DesyncColor
+        O.DesyncTag.Size      = Vis.Settings.TagSize
+    end)
 end
 
 local function UpdateVisualization()
@@ -348,42 +396,53 @@ local function UpdateVisualization()
         return
     end
 
+    local O = Vis.Objects
+    ApplyVisSettings(O)
+
     local realPos   = realCF.Position
     local targetPos = targetCF.Position
 
     local rSp, rOn = cam:WorldToViewportPoint(realPos)
     local tSp, tOn = cam:WorldToViewportPoint(targetPos)
 
-    local O = Vis.Objects
+    local S = Vis.Settings
 
     --// Реальная позиция
-    if rOn and rSp.Z > 0 then
+    if S.ShowBoxes and rOn and rSp.Z > 0 then
         local s = math.clamp(2400 / rSp.Z, 4, 240)
         O.RealBox.Size     = Vector2.new(s, s)
         O.RealBox.Position = Vector2.new(rSp.X - s / 2, rSp.Y - s / 2)
         O.RealBox.Visible  = true
-        O.RealTag.Position = Vector2.new(rSp.X, rSp.Y + s / 2 + 2)
-        O.RealTag.Visible  = true
+        if S.ShowTags then
+            O.RealTag.Position = Vector2.new(rSp.X, rSp.Y + s / 2 + 2)
+            O.RealTag.Visible  = true
+        else
+            O.RealTag.Visible = false
+        end
     else
         O.RealBox.Visible = false
         O.RealTag.Visible = false
     end
 
     --// Десинк-позиция
-    if tOn and tSp.Z > 0 then
+    if S.ShowBoxes and tOn and tSp.Z > 0 then
         local s = math.clamp(2400 / tSp.Z, 4, 240)
         O.DesyncBox.Size     = Vector2.new(s, s)
         O.DesyncBox.Position = Vector2.new(tSp.X - s / 2, tSp.Y - s / 2)
         O.DesyncBox.Visible  = true
-        O.DesyncTag.Position = Vector2.new(tSp.X, tSp.Y + s / 2 + 2)
-        O.DesyncTag.Visible  = true
+        if S.ShowTags then
+            O.DesyncTag.Position = Vector2.new(tSp.X, tSp.Y + s / 2 + 2)
+            O.DesyncTag.Visible  = true
+        else
+            O.DesyncTag.Visible = false
+        end
     else
         O.DesyncBox.Visible = false
         O.DesyncTag.Visible = false
     end
 
     --// Соединительная линия
-    if rOn and tOn and rSp.Z > 0 and tSp.Z > 0 then
+    if S.ShowLine and rOn and tOn and rSp.Z > 0 and tSp.Z > 0 then
         O.Line.From    = Vector2.new(rSp.X, rSp.Y)
         O.Line.To      = Vector2.new(tSp.X, tSp.Y)
         O.Line.Visible = true
@@ -392,7 +451,7 @@ local function UpdateVisualization()
     end
 
     --// Дистанция
-    if rOn and rSp.Z > 0 then
+    if S.ShowDistance and rOn and rSp.Z > 0 then
         local d = (targetPos - realPos).Magnitude
         O.Text.Text     = string.format("Offset: %.2f studs", d)
         O.Text.Position = Vector2.new(rSp.X, rSp.Y - 24)
@@ -447,7 +506,7 @@ local function StartDesync()
     desync.Internal.RotYaw          = 0
     desync.Internal.RotRoll         = 0
     desync.Internal.NetworkClaimed  = false
-    desync.Internal.LastTargetCF    = nil -- NEW
+    desync.Internal.LastTargetCF    = nil
 
     if desync.Settings.Mode == "OldPosition" then
         local hrp = GetCurrentHRP()
@@ -529,7 +588,13 @@ local function StartDesync()
                 desync.Internal.Acc = 0
                 desync.Internal.TargetOffset = BuildDefaultOffset(S)
             end
-            targetCF = oldcf * CFrame.new(desync.Internal.TargetOffset)
+            --// NEW: ориентация offset по DesyncFrom (Player / Camera)
+            local offsetVec = RotateOffsetToReference(
+                desync.Internal.TargetOffset,
+                oldcf,
+                S.DesyncFrom or "Player"
+            )
+            targetCF = oldcf * CFrame.new(offsetVec)
         end
 
         if S.RandomRotate then
@@ -547,7 +612,6 @@ local function StartDesync()
             )
         end
 
-        --// NEW: сохраняем targetCF для визуализации
         desync.Internal.LastTargetCF = targetCF
 
         local applied = false
@@ -643,7 +707,7 @@ local function StopDesync()
     desync.Internal.RotYaw           = 0
     desync.Internal.RotRoll          = 0
     desync.Internal.NetworkClaimed   = false
-    desync.Internal.LastTargetCF     = nil -- NEW
+    desync.Internal.LastTargetCF     = nil
 end
 
 --// ===========================================================================
@@ -1108,7 +1172,7 @@ RunService:BindToRenderStep(AA_BIND_NAME, 201, function()
     xpcall(ApplyAntiAim, HandleError)
 end)
 
---// NEW: render step для визуализации десинка (приоритет 202 — после anti-aim)
+--// Render step для визуализации десинка
 local VIS_BIND_NAME = "AirHubDesyncVis"
 AntiAim.VIS_BIND_NAME = VIS_BIND_NAME
 pcall(function() RunService:UnbindFromRenderStep(VIS_BIND_NAME) end)
@@ -1142,6 +1206,7 @@ AntiAim.Functions = {
             Enabled = false,
             Mode = "Default",
             Method = "CFrame",
+            DesyncFrom = "Player", -- NEW
             X = 5, Y = 5, Z = 5,
             Random = false,
             UpdateInterval = 0.05,
@@ -1151,7 +1216,7 @@ AntiAim.Functions = {
             InPlayerOffset = 2,
             RefreshOnShot = false,
             RandomRotate = false,
-            Visualize = false, -- NEW
+            Visualize = false,
         }
         AB.Settings = {
             Enabled        = false,
@@ -1178,10 +1243,10 @@ AntiAim.Functions = {
         AntiAim.Desync.Internal.PendingRefresh  = false
         AntiAim.Desync.Internal.RotAcc          = 0
         AntiAim.Desync.Internal.NetworkClaimed  = false
-        AntiAim.Desync.Internal.LastTargetCF    = nil -- NEW
+        AntiAim.Desync.Internal.LastTargetCF    = nil
         CleanupAntiAim()
         StopDesync()
-        pcall(CleanupVisualization) -- NEW
+        pcall(CleanupVisualization)
     end,
 
     SaveOldPosition = function()
@@ -1208,10 +1273,10 @@ AntiAim.StartDesync    = StartDesync
 AntiAim.StopDesync     = StopDesync
 AntiAim.CleanupAntiAim = CleanupAntiAim
 
---// NEW: публичный API визуализации
 AntiAim.SetVisualizationEnabled = SetVisualizationEnabled
 AntiAim.CleanupVisualization    = CleanupVisualization
 AntiAim.HasDrawingAPI           = function() return Vis.HasDrawing end
+AntiAim.VisSettings             = Vis.Settings
 
 AntiAim.StartAnimationBreaker = function() AB.Settings.Enabled = true end
 AntiAim.StopAnimationBreaker  = StopAnimationBreaker
@@ -1228,7 +1293,7 @@ if not Window then
     return
 end
 
---// Локализация (инъекция в airhubUI.L)
+--// Локализация
 do
     local UI = getgenv().airhubUI
     if UI and UI.L and UI.L.en and UI.L.ru then
@@ -1236,6 +1301,7 @@ do
             aa_body = "Body (Server)",
             aa_anim = "Animation Breaker",
             aa_desync = "Desync (Client)",
+            aa_vis = "Desync Visualizer",
             aa_enabled = "Enabled",
             aa_mode = "Mode",
             aa_method = "Method",
@@ -1257,6 +1323,7 @@ do
             aa_desync_enabled = "Enabled",
             aa_desync_mode = "Mode",
             aa_desync_method = "Method",
+            aa_desync_from = "Desync From",
             aa_desync_random_rotate = "Random Rotate (pitch/yaw/roll)",
             aa_desync_x = "X",
             aa_desync_y = "Y",
@@ -1268,8 +1335,21 @@ do
             aa_desync_void = "Void Depth (Y)",
             aa_desync_inplayer = "InPlayer Offset (studs)",
             aa_desync_refresh_shot = "Refresh position on shot",
-            aa_desync_visualize = "Visualize Desync", -- NEW
+            aa_desync_visualize = "Visualize Desync",
             aa_desync_save = "Save Current Position",
+
+            aa_vis_boxes = "Show Boxes",
+            aa_vis_line = "Show Line",
+            aa_vis_distance = "Show Distance",
+            aa_vis_tags = "Show Tags (REAL/DESYNC)",
+            aa_vis_real_color = "Real Color",
+            aa_vis_desync_color = "Desync Color",
+            aa_vis_line_color = "Line Color",
+            aa_vis_text_color = "Text Color",
+            aa_vis_box_thickness = "Box Thickness",
+            aa_vis_line_thickness = "Line Thickness",
+            aa_vis_text_size = "Text Size",
+            aa_vis_tag_size = "Tag Size",
 
             tt_aa_enabled = "Master switch for body anti-aim",
             tt_aa_mode = "Static = fixed angle | Spin = continuous rotation | Jitter = random angle | Sway = sinusoidal oscillation",
@@ -1292,6 +1372,7 @@ do
             tt_aa_desync_enabled = "Master switch for desync",
             tt_aa_desync_mode = "Default = positional offset | OldPosition = lag position | Void = under map | InPlayer = inside nearest player",
             tt_aa_desync_method = "How the offset is applied (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
+            tt_aa_desync_from = "Player = offset follows character yaw (body) | Camera = offset follows camera yaw (view)",
             tt_aa_desync_random_rotate = "Also apply random pitch/yaw/roll rotations",
             tt_aa_desync_x = "X offset magnitude",
             tt_aa_desync_y = "Y offset magnitude",
@@ -1303,13 +1384,27 @@ do
             tt_aa_desync_void = "Y coordinate for Void mode",
             tt_aa_desync_inplayer = "Forward offset from nearest player when InPlayer mode",
             tt_aa_desync_refresh_shot = "Refresh saved position right before shooting",
-            tt_aa_desync_visualize = "Draws green (real) and red (desync) boxes with a yellow connecting line + distance text. Requires Drawing API.", -- NEW
+            tt_aa_desync_visualize = "Draws green (real) and red (desync) boxes with a yellow connecting line + distance text. Requires Drawing API.",
             tt_aa_desync_save = "Manually save current position for OldPosition mode",
+
+            tt_aa_vis_boxes = "Show the green (real) and red (desync) square boxes",
+            tt_aa_vis_line = "Show the yellow line connecting real and desync positions",
+            tt_aa_vis_distance = "Show the offset distance in studs above the real box",
+            tt_aa_vis_tags = "Show REAL / DESYNC labels under each box",
+            tt_aa_vis_real_color = "Color of the real position box and REAL tag",
+            tt_aa_vis_desync_color = "Color of the desync position box and DESYNC tag",
+            tt_aa_vis_line_color = "Color of the connecting line",
+            tt_aa_vis_text_color = "Color of the distance text",
+            tt_aa_vis_box_thickness = "Outline thickness of the boxes (pixels)",
+            tt_aa_vis_line_thickness = "Thickness of the connecting line (pixels)",
+            tt_aa_vis_text_size = "Font size of the distance text",
+            tt_aa_vis_tag_size = "Font size of the REAL / DESYNC labels",
         }
         local ru = {
             aa_body = "Тело (сервер)",
             aa_anim = "Ломатель анимаций",
             aa_desync = "Десинк (клиент)",
+            aa_vis = "Визуализация десинка",
             aa_enabled = "Включено",
             aa_mode = "Режим",
             aa_method = "Метод",
@@ -1331,6 +1426,7 @@ do
             aa_desync_enabled = "Включено",
             aa_desync_mode = "Режим",
             aa_desync_method = "Метод",
+            aa_desync_from = "Ориентация десинка",
             aa_desync_random_rotate = "Случайный поворот (pitch/yaw/roll)",
             aa_desync_x = "X",
             aa_desync_y = "Y",
@@ -1342,8 +1438,21 @@ do
             aa_desync_void = "Глубина пустоты (Y)",
             aa_desync_inplayer = "Смещение InPlayer (studs)",
             aa_desync_refresh_shot = "Обновлять позицию при выстреле",
-            aa_desync_visualize = "Визуализировать десинк", -- NEW
+            aa_desync_visualize = "Визуализировать десинк",
             aa_desync_save = "Сохранить текущую позицию",
+
+            aa_vis_boxes = "Показывать боксы",
+            aa_vis_line = "Показывать линию",
+            aa_vis_distance = "Показывать дистанцию",
+            aa_vis_tags = "Показывать метки (REAL/DESYNC)",
+            aa_vis_real_color = "Цвет реальной позиции",
+            aa_vis_desync_color = "Цвет десинк-позиции",
+            aa_vis_line_color = "Цвет линии",
+            aa_vis_text_color = "Цвет текста",
+            aa_vis_box_thickness = "Толщина бокса",
+            aa_vis_line_thickness = "Толщина линии",
+            aa_vis_text_size = "Размер текста",
+            aa_vis_tag_size = "Размер меток",
 
             tt_aa_enabled = "Главный выключатель анти-аима тела",
             tt_aa_mode = "Static = фикс. угол | Spin = непрерывное вращение | Jitter = случайный угол | Sway = синусоида",
@@ -1366,6 +1475,7 @@ do
             tt_aa_desync_enabled = "Главный выключатель десинка",
             tt_aa_desync_mode = "Default = смещение позиции | OldPosition = лаг позиции | Void = под картой | InPlayer = внутри ближайшего игрока",
             tt_aa_desync_method = "Как применяется смещение (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
+            tt_aa_desync_from = "Player = offset идёт по yaw персонажа (тело) | Camera = offset идёт по yaw камеры (взгляд)",
             tt_aa_desync_random_rotate = "Также применять случайные повороты pitch/yaw/roll",
             tt_aa_desync_x = "Амплитуда смещения по X",
             tt_aa_desync_y = "Амплитуда смещения по Y",
@@ -1377,8 +1487,21 @@ do
             tt_aa_desync_void = "Координата Y для режима Void",
             tt_aa_desync_inplayer = "Смещение вперёд от ближайшего игрока в режиме InPlayer",
             tt_aa_desync_refresh_shot = "Обновлять сохранённую позицию прямо перед выстрелом",
-            tt_aa_desync_visualize = "Рисует зелёный (реальная) и красный (десинк) боксы с жёлтой линией и дистанцией в studs. Требует Drawing API.", -- NEW
+            tt_aa_desync_visualize = "Рисует зелёный (реальная) и красный (десинк) боксы с жёлтой линией и дистанцией в studs. Требует Drawing API.",
             tt_aa_desync_save = "Вручную сохранить текущую позицию для режима OldPosition",
+
+            tt_aa_vis_boxes = "Показывать зелёный (реальная позиция) и красный (десинк) квадратные боксы",
+            tt_aa_vis_line = "Показывать жёлтую линию между реальной и десинк-позицией",
+            tt_aa_vis_distance = "Показывать дистанцию смещения в studs над реальным боксом",
+            tt_aa_vis_tags = "Показывать метки REAL / DESYNC под каждым боксом",
+            tt_aa_vis_real_color = "Цвет бокса реальной позиции и метки REAL",
+            tt_aa_vis_desync_color = "Цвет бокса десинк-позиции и метки DESYNC",
+            tt_aa_vis_line_color = "Цвет соединительной линии",
+            tt_aa_vis_text_color = "Цвет текста дистанции",
+            tt_aa_vis_box_thickness = "Толщина контура боксов (пиксели)",
+            tt_aa_vis_line_thickness = "Толщина соединительной линии (пиксели)",
+            tt_aa_vis_text_size = "Размер шрифта текста дистанции",
+            tt_aa_vis_tag_size = "Размер шрифта меток REAL / DESYNC",
         }
         for k, v in pairs(en) do UI.L.en[k] = v end
         for k, v in pairs(ru) do UI.L.ru[k] = v end
@@ -1397,12 +1520,21 @@ local applyAnimPreset = AntiAim.ApplyAnimationPreset
 local function setBody(k, v) AntiAim.Settings.Body[k] = v end
 local function setDesync(k, v) AntiAim.Desync.Settings[k] = v end
 local function setAB(k, v) AB.Settings[k] = v end
+local function setVis(k, v) Vis.Settings[k] = v end
+
+--// Хелпер для Colorpicker callback — поддерживает и Color3, и {Color=Color3}
+local function extractColor(c)
+    if type(c) == "table" and c.Color then return c.Color end
+    if typeof(c) == "Color3" then return c end
+    return nil
+end
 
 local aaModes      = { "Static", "Spin", "Jitter", "Sway" }
 local refModes     = { "Camera", "Movement", "Player" }
 local aaMethods    = { "CFrame", "BodyGyro", "Motor6D", "AlignOrientation", "AngularVelocity" }
 local desyncModes  = { "Default", "OldPosition", "Void", "InPlayer" }
 local desyncMethods = { "CFrame", "Position", "Velocity", "Motor6D", "HipHeight", "Network" }
+local desyncFromList = { "Player", "Camera" }
 local animModeList = { "Speed", "RandomFrames" }
 local animPresetList = {
     "None", "Custom", "Tornado", "AntiAim", "Moving AntiAim",
@@ -1540,6 +1672,14 @@ desyncSec:AddDropdown({ Name = "aa_desync_method",
         end
     end,
     Tooltip = "tt_aa_desync_method" })
+
+--// NEW: Desync From (Player / Camera)
+desyncSec:AddDropdown({ Name = "aa_desync_from",
+    Value = AntiAim.Desync.Settings.DesyncFrom or "Player",
+    List = desyncFromList,
+    Callback = function(v) setDesync("DesyncFrom", v) end,
+    Tooltip = "tt_aa_desync_from" })
+
 desyncSec:AddToggle({ Name = "aa_desync_random_rotate",
     Value = AntiAim.Desync.Settings.RandomRotate or false,
     Callback = function(v) setDesync("RandomRotate", v) end,
@@ -1597,13 +1737,10 @@ desyncSec:AddToggle({ Name = "aa_desync_refresh_shot",
     Value = AntiAim.Desync.Settings.RefreshOnShot or false,
     Callback = function(v) setDesync("RefreshOnShot", v) end,
     Tooltip = "tt_aa_desync_refresh_shot" })
-
---// NEW: визуализация десинка
 desyncSec:AddToggle({ Name = "aa_desync_visualize",
     Value = AntiAim.Desync.Settings.Visualize or false,
     Callback = function(v) SetVisualizationEnabled(v) end,
     Tooltip = "tt_aa_desync_visualize" })
-
 desyncSec:AddButton({ Name = "aa_desync_save",
     Callback = function()
         if AntiAim.Functions and AntiAim.Functions.SaveOldPosition then
@@ -1615,4 +1752,67 @@ desyncSec:AddButton({ Name = "aa_desync_save",
     end,
     Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw + Desync Visualization)")
+--// -------- RIGHT: Desync Visualizer --------
+local visSec = AntiTab:CreateSection({ Name = "aa_vis", Side = "Right" })
+visSec:AddToggle({ Name = "aa_vis_boxes", Value = Vis.Settings.ShowBoxes,
+    Callback = function(v) setVis("ShowBoxes", v) end,
+    Tooltip = "tt_aa_vis_boxes" })
+visSec:AddToggle({ Name = "aa_vis_line", Value = Vis.Settings.ShowLine,
+    Callback = function(v) setVis("ShowLine", v) end,
+    Tooltip = "tt_aa_vis_line" })
+visSec:AddToggle({ Name = "aa_vis_distance", Value = Vis.Settings.ShowDistance,
+    Callback = function(v) setVis("ShowDistance", v) end,
+    Tooltip = "tt_aa_vis_distance" })
+visSec:AddToggle({ Name = "aa_vis_tags", Value = Vis.Settings.ShowTags,
+    Callback = function(v) setVis("ShowTags", v) end,
+    Tooltip = "tt_aa_vis_tags" })
+
+--// Цвета
+visSec:AddColorpicker({ Name = "aa_vis_real_color", Value = Vis.Settings.RealColor,
+    Callback = function(c)
+        local col = extractColor(c)
+        if col then setVis("RealColor", col) end
+    end,
+    Tooltip = "tt_aa_vis_real_color" })
+visSec:AddColorpicker({ Name = "aa_vis_desync_color", Value = Vis.Settings.DesyncColor,
+    Callback = function(c)
+        local col = extractColor(c)
+        if col then setVis("DesyncColor", col) end
+    end,
+    Tooltip = "tt_aa_vis_desync_color" })
+visSec:AddColorpicker({ Name = "aa_vis_line_color", Value = Vis.Settings.LineColor,
+    Callback = function(c)
+        local col = extractColor(c)
+        if col then setVis("LineColor", col) end
+    end,
+    Tooltip = "tt_aa_vis_line_color" })
+visSec:AddColorpicker({ Name = "aa_vis_text_color", Value = Vis.Settings.TextColor,
+    Callback = function(c)
+        local col = extractColor(c)
+        if col then setVis("TextColor", col) end
+    end,
+    Tooltip = "tt_aa_vis_text_color" })
+
+--// Толщина / размеры
+visSec:AddSlider({ Name = "aa_vis_box_thickness",
+    Value = Vis.Settings.BoxThickness,
+    Min = 1, Max = 6, Decimals = 0,
+    Callback = function(v) setVis("BoxThickness", math.floor(v)) end,
+    Tooltip = "tt_aa_vis_box_thickness" })
+visSec:AddSlider({ Name = "aa_vis_line_thickness",
+    Value = Vis.Settings.LineThickness,
+    Min = 1, Max = 6, Decimals = 0,
+    Callback = function(v) setVis("LineThickness", math.floor(v)) end,
+    Tooltip = "tt_aa_vis_line_thickness" })
+visSec:AddSlider({ Name = "aa_vis_text_size",
+    Value = Vis.Settings.TextSize,
+    Min = 10, Max = 32, Decimals = 0,
+    Callback = function(v) setVis("TextSize", math.floor(v)) end,
+    Tooltip = "tt_aa_vis_text_size" })
+visSec:AddSlider({ Name = "aa_vis_tag_size",
+    Value = Vis.Settings.TagSize,
+    Min = 10, Max = 32, Decimals = 0,
+    Callback = function(v) setVis("TagSize", math.floor(v)) end,
+    Tooltip = "tt_aa_vis_tag_size" })
+
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + FIXED Yaw + Desync Visualization + DesyncFrom + Visualizer settings)")
