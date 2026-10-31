@@ -15,17 +15,22 @@
 --//   8.  Motor6D: поиск джойнта по имени (RootJoint/Root/Waist/Neck), а не первый
 --//       попавшийся Motor6D. Учтён RandomRotate (delta = oldcf:Inverse() * targetCF).
 --//   9.  StopDesync: аккуратный restore (CFrame + Velocity + RotVelocity).
---//   10. AngularVelocity: документирован как Spin-only (yaw/amount игнорируются,
---//       AV — это rate, а не orientation).
---//   11. CleanupAntiAim: быстрый early-return, если нечего чистить.
---//   12. shouldApply=false: при переходе в "движение" — восстанавливаем ориентацию
---//       по baseYaw (один раз, не каждый кадр).
---//   13. ApplySpeedToAllTracks: единственный write через AdjustSpeed (без .Speed=).
---//   14. RandomFrames: AdjustSpeed(0) только если Speed != 0 (не спамим).
---//   15. NetworkOwnerSet: сбрасывается при смене Humanoid (респавн), не только HRP.
+--//   10. AngularVelocity: документирован как Spin-only.
+--//   11. CleanupAntiAim: быстрый early-return.
+--//   12. shouldApply=false: при переходе в "движение" — восстанавливаем ориентацию.
+--//   13. ApplySpeedToAllTracks: единственный write через AdjustSpeed.
+--//   14. RandomFrames: AdjustSpeed(0) только если Speed != 0.
+--//   15. NetworkOwnerSet: сбрасывается при смене Humanoid.
 --//   16. ResetAllSpeeds: также сбрасывает TimePosition в 0.
---//   17. GetBaseYaw: CameraFlatYaw() — единый helper, без дублирования.
+--//   17. GetBaseYaw: CameraFlatYaw() — единый helper.
 --//   18. Localization: else warn, если airhubUI.L отсутствует.
+--//
+--// NEW FIX (camera):
+--//   19. Камера не дёргается вместе с десинком: в render-step камера
+--//       компенсируется на (realCF.Position - фактическая позиция HRP после
+--//       применения десинка). Работает для CFrame/Position/Network методов
+--//       (standard CameraSubject=Humanoid). Для Velocity/Motor6D/HipHeight
+--//       delta ≈ 0, камера остаётся как была.
 
 local H = getgenv().AirHub
 if not H or not H._CoreLoaded then warn("[AirHub] 03_antiaim: core not loaded") return end
@@ -76,7 +81,7 @@ H.AntiAim = {
             Connection       = nil,
             RenderBindName   = "AirHubDesyncRestore",
             Acc              = 0,
-            CurrentCFrame    = nil,     -- плавно тянем к targetCF
+            CurrentCFrame    = nil,
             TargetOffset     = Vector3.new(0, 0, 0),
             SavedCFrame      = nil,
             RealCFrame       = nil,
@@ -89,7 +94,7 @@ H.AntiAim = {
             RotYaw           = 0,
             RotRoll          = 0,
             NetworkClaimed   = false,
-            RestoreData      = nil,     -- снимок для render-step restore
+            RestoreData      = nil,
         },
     },
     AnimationBreaker = {
@@ -106,11 +111,11 @@ H.AntiAim = {
             CurrentTrack    = nil,
             CurrentKey      = nil,
             LastHRP         = nil,
-            LastHum         = nil,      -- FIX #15: отслеживаем Humanoid (респавн)
+            LastHum         = nil,
             NetworkOwnerSet = false,
             RandomTimer     = 0,
             LastWarnedId    = nil,
-            Frozen          = false,    -- FIX #14: флаг, что уже заморожено
+            Frozen          = false,
         },
         Functions = {},
     },
@@ -124,7 +129,7 @@ H.AntiAim = {
         AngularVelocity   = nil,
         CurrentMotor      = nil,
         OriginalC0        = nil,
-        WasApplying       = false,      -- FIX #12
+        WasApplying       = false,
     },
 }
 local AntiAim = H.AntiAim
@@ -133,7 +138,6 @@ local AB = AntiAim.AnimationBreaker
 --// ===========================================================================
 --// FIXED: base yaw
 --//   CFrame.Angles(0, yaw, 0).LookVector = (-sin(yaw), 0, -cos(yaw))
---//   Чтобы LookVector(camera) совпал с LookVector(character) при Yaw=0:
 --//       -sin(yaw) = look.X   →  yaw = atan2(-look.X, -look.Z)
 --//       -cos(yaw) = look.Z
 --// ===========================================================================
@@ -211,13 +215,10 @@ local function GetNearestPlayerHRP(myPos)
     return nearest
 end
 
---// FIX #8: ищем по имени (RootJoint/Root/Waist/Neck), а не первый Motor6D.
 local function GetRootJoint(hrp)
     if not hrp then return nil end
     local char = hrp.Parent
     if not char then return nil end
-
-    -- 1) По имени в character (R6: Torso.RootJoint, R15: LowerTorso.Root и т.д.)
     for _, wanted in ipairs({ "RootJoint", "Root", "Waist" }) do
         for _, d in ipairs(char:GetDescendants()) do
             if d:IsA("Motor6D") and d.Name == wanted then
@@ -225,13 +226,9 @@ local function GetRootJoint(hrp)
             end
         end
     end
-
-    -- 2) Fallback: любой Motor6D внутри HRP
     for _, child in ipairs(hrp:GetChildren()) do
         if child:IsA("Motor6D") then return child end
     end
-
-    -- 3) Последний резерв: любой Motor6D в character, у которого Part0 == HRP
     for _, d in ipairs(char:GetDescendants()) do
         if d:IsA("Motor6D") and d.Part0 == hrp then
             return d
@@ -267,14 +264,14 @@ local function StartDesync()
         desync.Internal.OldPosTimer = 0
     end
 
-    --// FIX #7: один persistent BindToRenderStep (priority 2000 — очень поздно,
-    --// чтобы восстановить CFrame после физики, но до GPU-рендера кадра).
+    --// FIX #7: один persistent BindToRenderStep (priority 2000 — Last).
     pcall(function() RunService:UnbindFromRenderStep(desync.Internal.RenderBindName) end)
     RunService:BindToRenderStep(desync.Internal.RenderBindName, 2000, function()
         local R = desync.Internal.RestoreData
         if not R then return end
         local h = R.hrp
         if not h or not h.Parent then return end
+
         pcall(function()
             h.CFrame      = R.cf
             h.Velocity    = R.vel
@@ -285,6 +282,25 @@ local function StartDesync()
         end
         if R.hum and R.hipH ~= nil then
             pcall(function() R.hum.HipHeight = R.hipH end)
+        end
+
+        --// FIX #19: не даём камере дёргаться вместе с десинком.
+        --// CameraModule (priority 200) посчитал Camera.CFrame по десинкнутой
+        --// позиции HRP. Сдвигаем камеру на (realHRPPos - actualHRPPos), чтобы
+        --// вернуть её в реальную позицию. Только для методов, которые реально
+        --// сдвигают HRP (CFrame/Position/Network). Для Velocity/Motor6D/HipHeight
+        --// delta ≈ 0 — сдвиг не применяется.
+        if R.cf and R.actualHRPPos then
+            local cam = workspace.CurrentCamera
+            if cam then
+                local subj = cam.CameraSubject
+                if subj == R.hum or subj == R.hrp then
+                    local delta = R.cf.Position - R.actualHRPPos
+                    if delta.Magnitude > 0.001 then
+                        cam.CFrame = cam.CFrame + delta
+                    end
+                end
+            end
         end
     end)
 
@@ -305,8 +321,7 @@ local function StartDesync()
         desync.Internal.RealVelocity    = oldvel
         desync.Internal.RealRotVelocity = oldrotvel
 
-        --// FIX #5: инициализация CurrentCFrame. При респавне/телепорте (dist>100)
-        --// снапимся, чтобы не тянуть lerp из старой точки.
+        --// FIX #5: инициализация CurrentCFrame + снап при телепорте.
         if not desync.Internal.CurrentCFrame
            or (desync.Internal.CurrentCFrame.Position - oldPos).Magnitude > 100 then
             desync.Internal.CurrentCFrame = oldcf
@@ -323,7 +338,7 @@ local function StartDesync()
         local oldHipH   = hum and hum.HipHeight
 
         local targetCF
-        local instant  = false  -- телепорт без сглаживания
+        local instant  = false
 
         if mode == "OldPosition" then
             if not desync.Internal.SavedCFrame then
@@ -390,8 +405,7 @@ local function StartDesync()
             )
         end
 
-        --// FIX #5: плавный lerp (80ms сглаживание) — избавляет от дёрганья Velocity.
-        --// Void/InPlayer — телепорт без сглаживания (иначе физика успеет дёрнуть).
+        --// FIX #5: плавный lerp (80ms сглаживание).
         if instant then
             desync.Internal.CurrentCFrame = targetCF
         else
@@ -409,7 +423,7 @@ local function StartDesync()
             hrp.Position = applyCF.Position
             applied = true
         elseif method == "Velocity" then
-            --// FIX #6: cap 500 (не 1000), плюс сглаживание через applyCF.
+            --// FIX #6: cap 500.
             local diff = applyCF.Position - oldPos
             local dist = diff.Magnitude
             if dist > 0.01 then
@@ -420,7 +434,7 @@ local function StartDesync()
             end
             applied = true
         elseif method == "Motor6D" then
-            --// FIX #8: применяем и позицию, и поворот (через delta).
+            --// FIX #8: и позиция, и поворот (delta).
             if rootJoint and oldRootC0 then
                 local delta = oldcf:Inverse() * applyCF
                 pcall(function() rootJoint.C0 = oldRootC0 * delta end)
@@ -433,8 +447,6 @@ local function StartDesync()
                 applied = true
             end
         elseif method == "Network" then
-            --// NB: SetNetworkOwner(LocalPlayer) на своём HRP — no-op по факту
-            --// (ты и так владелец). Оставлено для совместимости; эффект ~0.
             if not desync.Internal.NetworkClaimed then
                 pcall(function() hrp:SetNetworkOwner(LocalPlayer) end)
                 desync.Internal.NetworkClaimed = true
@@ -444,16 +456,19 @@ local function StartDesync()
         end
 
         if applied then
-            --// FIX #7: обновляем снимок, render-bind восстановит визуал.
+            --// FIX #19: сохраняем фактическую позицию HRP после применения.
+            --// CameraModule будет использовать её; мы компенсируем.
+            local actualHRPPos = hrp.CFrame.Position
             desync.Internal.RestoreData = {
-                hrp       = hrp,
-                cf        = oldcf,
-                vel       = oldvel,
-                rotVel    = oldrotvel,
-                rootJoint = rootJoint,
-                rootC0    = oldRootC0,
-                hum       = hum,
-                hipH      = oldHipH,
+                hrp          = hrp,
+                cf           = oldcf,            -- real CFrame (куда restore)
+                actualHRPPos = actualHRPPos,     -- куда попал HRP после десинка
+                vel          = oldvel,
+                rotVel       = oldrotvel,
+                rootJoint    = rootJoint,
+                rootC0       = oldRootC0,
+                hum          = hum,
+                hipH         = oldHipH,
             }
         end
     end)
@@ -615,7 +630,7 @@ local function ApplySpeedToAllTracks(speed)
     end
 end
 
---// FIX #14: AdjustSpeed(0) только если реально нужно (Speed != 0).
+--// FIX #14: AdjustSpeed(0) только если Speed != 0.
 local function ApplyRandomFramesToAllTracks(dt)
     local interval = tonumber(AB.Settings.RandomInterval) or 0.1
     if interval < 0.02 then interval = 0.02 end
@@ -683,7 +698,6 @@ local function ApplyAnimationBreaker(dt)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
 
-    --// FIX #15: сброс при смене HRP ИЛИ Humanoid (респавн).
     if hrp ~= AB.Internal.LastHRP or hum ~= AB.Internal.LastHum then
         AB.Internal.LastHRP         = hrp
         AB.Internal.LastHum         = hum
@@ -738,7 +752,6 @@ local function ApplyAnimationBreaker(dt)
     end
 end
 
---// FIX #16: также сбрасываем TimePosition в 0.
 local function ResetAllSpeeds()
     local char = LocalPlayer.Character
     if not char then return end
@@ -798,7 +811,6 @@ end))
 --// ===========================================================================
 --// Anti-Aim body
 --// ===========================================================================
---// FIX #11: быстрый early-return, если нечего чистить.
 local function CleanupAntiAim()
     local I = AntiAim.Internal
     if not (I.BodyGyro or I.AlignOrientation or I.Attachment or I.AngularVelocity or I.CurrentMotor) then
@@ -855,8 +867,6 @@ local function ApplyAntiAim()
         end
     end
 
-    --// FIX #12: при переходе "применяли → перестали" (движение) — восстановим
-    --// ориентацию по baseYaw ОДИН раз, чтобы не залипало в случайном угле.
     if not shouldApply then
         if AntiAim.Internal.WasApplying then
             CleanupAntiAim()
@@ -964,8 +974,6 @@ local function ApplyAntiAim()
         AntiAim.Internal.AlignOrientation.RigidityEnabled = false
     elseif method == "AngularVelocity" then
         --// NB: AngularVelocity — это rate (угловая скорость), а не target orientation.
-        --// Осмысленно только в режиме Spin. Static/Jitter/Sway с AV дают 0 (ничего),
-        --// для этих режимов используйте BodyGyro / AlignOrientation / CFrame.
         if AntiAim.Internal.BodyGyro or AntiAim.Internal.AlignOrientation or AntiAim.Internal.CurrentMotor then
             CleanupAntiAim()
         end
@@ -1091,7 +1099,6 @@ if not Window then
     return
 end
 
---// FIX #18: else warn, если UI.L отсутствует.
 do
     local UI = getgenv().airhubUI
     if UI and UI.L and UI.L.en and UI.L.ru then
@@ -1151,7 +1158,7 @@ do
             tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) on HRP so animation replicates",
             tt_aa_anim_reload = "Re-load the selected animation",
             tt_aa_anim_stop = "Stop and reset all animation speeds",
-            tt_aa_desync_enabled = "Master switch for desync",
+            tt_aa_desync_enabled = "Master switch for desync. Camera stays on your real position.",
             tt_aa_desync_mode = "Default = positional offset | OldPosition = lag position | Void = under map | InPlayer = inside nearest player",
             tt_aa_desync_method = "How the offset is applied (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
             tt_aa_desync_random_rotate = "Also apply random pitch/yaw/roll rotations",
@@ -1223,7 +1230,7 @@ do
             tt_aa_anim_apply_server = "SetNetworkOwner(LocalPlayer) на HRP, чтобы анимация реплицировалась",
             tt_aa_anim_reload = "Перезагрузить выбранную анимацию",
             tt_aa_anim_stop = "Остановить и сбросить скорости всех анимаций",
-            tt_aa_desync_enabled = "Главный выключатель десинка",
+            tt_aa_desync_enabled = "Главный выключатель десинка. Камера остаётся на реальной позиции.",
             tt_aa_desync_mode = "Default = смещение позиции | OldPosition = лаг позиции | Void = под картой | InPlayer = внутри ближайшего игрока",
             tt_aa_desync_method = "Как применяется смещение (CFrame/Position/Velocity/Motor6D/HipHeight/Network)",
             tt_aa_desync_random_rotate = "Также применять случайные повороты pitch/yaw/roll",
@@ -1469,4 +1476,4 @@ desyncSec:AddButton({ Name = "aa_desync_save",
     end,
     Tooltip = "tt_aa_desync_save" })
 
-print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU localization + tooltips + Yaw FIX + desync smoothing + persistent render bind + Motor6D search by name + AV doc + animation breaker optimizations)")
+print("[AirHub] 03_antiaim: loaded OK (logic + airhubUI tab + RU loc + tooltips + Yaw FIX + desync smoothing + persistent render bind + Motor6D by name + camera FIX)")
