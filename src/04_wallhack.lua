@@ -2048,15 +2048,19 @@ local hatModes = { "Closed", "Opened" }
 
 -- LEFT
 local visWH = VisualsTab:CreateSection({ Name = "vis_wallhack" })
-visWH:AddToggle({ Name = "vis_enabled", Value = WallHack.Settings.Enabled,
+visWH:AddToggle({ Name = "vis_enabled",
+    ConfigKey = "WallHack.Settings.Enabled", Value = WallHack.Settings.Enabled,
     Callback = function(v) WallHack.Settings.Enabled = v; refreshChams() end, Tooltip = "tt_vis_enabled" })
-visWH:AddToggle({ Name = "vis_team_check", Value = WallHack.Settings.TeamCheck,
+visWH:AddToggle({ Name = "vis_team_check",
+    ConfigKey = "WallHack.Settings.TeamCheck", Value = WallHack.Settings.TeamCheck,
     Callback = function(v) WallHack.Settings.TeamCheck = v end, Tooltip = "tt_vis_team" })
-visWH:AddToggle({ Name = "vis_alive_check", Value = WallHack.Settings.AliveCheck,
+visWH:AddToggle({ Name = "vis_alive_check",
+    ConfigKey = "WallHack.Settings.AliveCheck", Value = WallHack.Settings.AliveCheck,
     Callback = function(v) WallHack.Settings.AliveCheck = v end, Tooltip = "tt_vis_alive" })
 
 local visBox = VisualsTab:CreateSection({ Name = "vis_boxes" })
-visBox:AddToggle({ Name = "vis_box_enabled", Value = WallHack.Visuals.BoxSettings.Enabled,
+visBox:AddToggle({ Name = "vis_box_enabled",
+    ConfigKey = "WallHack.Visuals.BoxSettings.Enabled", Value = WallHack.Visuals.BoxSettings.Enabled,
     Callback = function(v) setBox("Enabled", v) end, Tooltip = "tt_vis_box_enabled" })
 visBox:AddDropdown({ Name = "vis_box_type",
     Value = (WallHack.Visuals.BoxSettings.Type == 1 and "3D" or "2D"), List = { "3D", "2D" },
@@ -2069,13 +2073,15 @@ visBox:AddSlider({ Name = "vis_box_transparency", Value = WallHack.Visuals.BoxSe
     Min = 0, Max = 1, Decimals = 2, Callback = function(v) setBox("Transparency", v) end, Tooltip = "tt_vis_box_transparency" })
 visBox:AddSlider({ Name = "vis_box_thickness", Value = WallHack.Visuals.BoxSettings.Thickness,
     Min = 1, Max = 5, Callback = function(v) setBox("Thickness", v) end, Tooltip = "tt_vis_box_thickness" })
-visBox:AddToggle({ Name = "vis_box_filled", Value = WallHack.Visuals.BoxSettings.Filled,
+visBox:AddToggle({ Name = "vis_box_filled",
+    ConfigKey = "WallHack.Visuals.BoxSettings.Filled", Value = WallHack.Visuals.BoxSettings.Filled,
     Callback = function(v) setBox("Filled", v) end, Tooltip = "tt_vis_box_filled" })
 visBox:AddSlider({ Name = "vis_box_scale", Value = WallHack.Visuals.BoxSettings.Increase,
     Min = 1, Max = 5, Callback = function(v) setBox("Increase", v) end, Tooltip = "tt_vis_box_scale" })
 
 local visTracer = VisualsTab:CreateSection({ Name = "vis_tracers" })
-visTracer:AddToggle({ Name = "vis_tracer_enabled", Value = WallHack.Visuals.TracerSettings.Enabled,
+visTracer:AddToggle({ Name = "vis_tracer_enabled",
+    ConfigKey = "WallHack.Visuals.TracerSettings.Enabled", Value = WallHack.Visuals.TracerSettings.Enabled,
     Callback = function(v) setTracer("Enabled", v) end, Tooltip = "tt_vis_tracer_enabled" })
 visTracer:AddColorpicker({ Name = "vis_tracer_color", Default = WallHack.Visuals.TracerSettings.Color,
     Callback = function(v) WallHack.Visuals.TracerSettings.Color = SafeColor(v, Color3.fromRGB(255,100,100)) end, Tooltip = "tt_vis_tracer_color" })
@@ -2087,35 +2093,44 @@ visTracer:AddDropdown({ Name = "vis_tracer_origin", Value = WallHack.Visuals.Tra
     List = tracerOrigins, Callback = function(v) setTracer("Origin", v) end, Tooltip = "tt_vis_tracer_origin" })
 
 local hudSec = VisualsTab:CreateSection({ Name = "vis_hud" })
-hudSec:AddToggle({ Name = "vis_hud_enabled", Value = WallHack.Visuals.HUDSettings.Enabled,
+hudSec:AddToggle({ Name = "vis_hud_enabled",
+    ConfigKey = "WallHack.Visuals.HUDSettings.Enabled", Value = WallHack.Visuals.HUDSettings.Enabled,
     Callback = function(v) WallHack.Visuals.HUDSettings.Enabled = v; if v then startHUD() else stopHUD() end end, Tooltip = "tt_vis_hud_enabled" })
 hudSec:AddDropdown({ Name = "vis_hud_pos", Value = WallHack.Visuals.HUDSettings.Position or "TopLeft",
     List = hudPositions, Callback = function(v) setHUD("Position", v) end, Tooltip = "tt_vis_hud_pos" })
-hudSec:AddToggle({ Name = "vis_hud_players", Value = WallHack.Visuals.HUDSettings.ShowPlayers ~= false,
+hudSec:AddToggle({ Name = "vis_hud_players",
+    ConfigKey = "WallHack.Visuals.HUDSettings.ShowPlayers", Value = WallHack.Visuals.HUDSettings.ShowPlayers ~= false,
     Callback = function(v) setHUD("ShowPlayers", v) end, Tooltip = "tt_vis_hud_players" })
-hudSec:AddToggle({ Name = "vis_hud_fps", Value = WallHack.Visuals.HUDSettings.ShowFPS ~= false,
+hudSec:AddToggle({ Name = "vis_hud_fps",
+    ConfigKey = "WallHack.Visuals.HUDSettings.ShowFPS", Value = WallHack.Visuals.HUDSettings.ShowFPS ~= false,
     Callback = function(v) setHUD("ShowFPS", v) end, Tooltip = "tt_vis_hud_fps" })
-hudSec:AddToggle({ Name = "vis_hud_ping", Value = WallHack.Visuals.HUDSettings.ShowPing ~= false,
+hudSec:AddToggle({ Name = "vis_hud_ping",
+    ConfigKey = "WallHack.Visuals.HUDSettings.ShowPing", Value = WallHack.Visuals.HUDSettings.ShowPing ~= false,
     Callback = function(v) setHUD("ShowPing", v) end, Tooltip = "tt_vis_hud_ping" })
-hudSec:AddToggle({ Name = "vis_hud_session", Value = WallHack.Visuals.HUDSettings.ShowSession ~= false,
+hudSec:AddToggle({ Name = "vis_hud_session",
+    ConfigKey = "WallHack.Visuals.HUDSettings.ShowSession", Value = WallHack.Visuals.HUDSettings.ShowSession ~= false,
     Callback = function(v) setHUD("ShowSession", v) end, Tooltip = "tt_vis_hud_session" })
 
 -- RIGHT
 local visNames = VisualsTab:CreateSection({ Name = "vis_names", Side = "Right" })
-visNames:AddToggle({ Name = "vis_name_enabled", Value = WallHack.Visuals.NameSettings.Enabled,
+visNames:AddToggle({ Name = "vis_name_enabled",
+    ConfigKey = "WallHack.Visuals.NameSettings.Enabled", Value = WallHack.Visuals.NameSettings.Enabled,
     Callback = function(v) setName("Enabled", v) end, Tooltip = "tt_vis_name_enabled" })
 visNames:AddColorpicker({ Name = "vis_name_color", Default = WallHack.Visuals.NameSettings.Color,
     Callback = function(v) WallHack.Visuals.NameSettings.Color = SafeColor(v, Color3.fromRGB(255,255,255)) end, Tooltip = "tt_vis_name_color" })
 visNames:AddSlider({ Name = "vis_name_size", Value = WallHack.Visuals.NameSettings.Size,
     Min = 8, Max = 24, Callback = function(v) setName("Size", math.floor(v)) end, Tooltip = "tt_vis_name_size" })
-visNames:AddToggle({ Name = "vis_name_distance", Value = WallHack.Visuals.NameSettings.ShowDistance ~= false,
+visNames:AddToggle({ Name = "vis_name_distance",
+    ConfigKey = "WallHack.Visuals.NameSettings.ShowDistance", Value = WallHack.Visuals.NameSettings.ShowDistance ~= false,
     Callback = function(v) setName("ShowDistance", v) end, Tooltip = "tt_vis_name_distance" })
-visNames:AddToggle({ Name = "vis_name_health", Value = WallHack.Visuals.NameSettings.ShowHealth ~= false,
+visNames:AddToggle({ Name = "vis_name_health",
+    ConfigKey = "WallHack.Visuals.NameSettings.ShowHealth", Value = WallHack.Visuals.NameSettings.ShowHealth ~= false,
     Callback = function(v) setName("ShowHealth", v) end, Tooltip = "tt_vis_name_health" })
 
 -- UNIFIED CHAMS SECTION — Material is now a mode
 local chamsSec = VisualsTab:CreateSection({ Name = "vis_chams", Side = "Right" })
-chamsSec:AddToggle({ Name = "vis_chams_enabled", Value = Chams.Enabled,
+chamsSec:AddToggle({ Name = "vis_chams_enabled",
+    ConfigKey = "WallHack.Visuals.ChamsSettings.Enabled", Value = Chams.Enabled,
     Callback = function(v) Chams.Enabled = v; refreshChams() end, Tooltip = "tt_vis_chams_enabled" })
 chamsSec:AddDropdown({ Name = "vis_chams_mode", Value = Chams.Mode or "Outline", List = CHAMS_MODES,
     Callback = function(v) Chams.Mode = v; refreshChams() end, Tooltip = "tt_vis_chams_mode" })
@@ -2129,7 +2144,8 @@ chamsSec:AddColorpicker({ Name = "vis_chams_outline_color", Default = Chams.Outl
     Callback = function(v) Chams.OutlineColor = SafeColor(v, Color3.fromRGB(0,255,255)); refreshChams() end, Tooltip = "tt_vis_chams_outline_color" })
 chamsSec:AddSlider({ Name = "vis_chams_outline_transparency", Value = Chams.OutlineTransparency,
     Min = 0, Max = 1, Decimals = 2, Callback = function(v) Chams.OutlineTransparency = v; refreshChams() end, Tooltip = "tt_vis_chams_outline_transparency" })
-chamsSec:AddToggle({ Name = "vis_chams_always_top", Value = Chams.AlwaysOnTop ~= false,
+chamsSec:AddToggle({ Name = "vis_chams_always_top",
+    ConfigKey = "WallHack.Visuals.ChamsSettings.AlwaysOnTop", Value = Chams.AlwaysOnTop ~= false,
     Callback = function(v) Chams.AlwaysOnTop = v; refreshChams() end, Tooltip = "tt_vis_chams_always_top" })
 
 chamsSec:AddDivider({ Text = "vis_chams_group_texture" })
@@ -2152,18 +2168,21 @@ chamsSec:AddSlider({ Name = "vis_chams_material_transparency", Value = Chams.Mat
 chamsSec:AddSlider({ Name = "vis_chams_material_reflectance", Value = Chams.MaterialReflectance or 0,
     Min = 0, Max = 1, Decimals = 2,
     Callback = function(v) Chams.MaterialReflectance = v; refreshChams() end, Tooltip = "tt_vis_chams_material_reflectance" })
-chamsSec:AddToggle({ Name = "vis_chams_material_rainbow", Value = Chams.MaterialRainbow or false,
+chamsSec:AddToggle({ Name = "vis_chams_material_rainbow",
+    ConfigKey = "WallHack.Visuals.ChamsSettings.MaterialRainbow", Value = Chams.MaterialRainbow or false,
     Callback = function(v) Chams.MaterialRainbow = v; refreshChams() end, Tooltip = "tt_vis_chams_material_rainbow" })
 chamsSec:AddSlider({ Name = "vis_chams_material_rainbow_speed", Value = Chams.MaterialRainbowSpeed or 0.5,
     Min = 0.1, Max = 3, Decimals = 2,
     Callback = function(v) Chams.MaterialRainbowSpeed = v; refreshChams() end, Tooltip = "tt_vis_chams_material_rainbow_speed" })
 
 local seSec = VisualsTab:CreateSection({ Name = "vis_selfesp", Side = "Right" })
-seSec:AddToggle({ Name = "vis_se_enabled", Value = WallHack.Visuals.SelfESP.Enabled,
+seSec:AddToggle({ Name = "vis_se_enabled",
+    ConfigKey = "WallHack.Visuals.SelfESP.Enabled", Value = WallHack.Visuals.SelfESP.Enabled,
     Callback = function(v) WallHack.Visuals.SelfESP.Enabled = v; if v then startSelfESP() else stopSelfESP() end end, Tooltip = "tt_vis_se_enabled" })
 
 seSec:AddDivider({ Text = "vis_se_group_chams" })
-seSec:AddToggle({ Name = "vis_se_chams_enabled", Value = WallHack.Visuals.SelfESP.Chams.Enabled,
+seSec:AddToggle({ Name = "vis_se_chams_enabled",
+    ConfigKey = "WallHack.Visuals.SelfESP.Chams.Enabled", Value = WallHack.Visuals.SelfESP.Chams.Enabled,
     Callback = function(v) setChamsSelf("Enabled", v); refreshSelfESP() end, Tooltip = "tt_vis_se_chams_enabled" })
 seSec:AddDropdown({ Name = "vis_se_chams_mode", Value = WallHack.Visuals.SelfESP.Chams.Mode or "Both",
     List = SELF_CHAMS_MODES, Callback = function(v) setChamsSelf("Mode", v); refreshSelfESP() end, Tooltip = "tt_vis_se_chams_mode" })
@@ -2175,7 +2194,8 @@ seSec:AddColorpicker({ Name = "vis_se_outline_color", Default = WallHack.Visuals
     Callback = function(v) WallHack.Visuals.SelfESP.Chams.OutlineColor = SafeColor(v, Color3.fromRGB(255,255,255)); refreshSelfESP() end, Tooltip = "tt_vis_se_outline_color" })
 seSec:AddSlider({ Name = "vis_se_outline_transparency", Value = WallHack.Visuals.SelfESP.Chams.OutlineTransparency,
     Min = 0, Max = 1, Decimals = 2, Callback = function(v) setChamsSelf("OutlineTransparency", v); refreshSelfESP() end, Tooltip = "tt_vis_se_outline_transparency" })
-seSec:AddToggle({ Name = "vis_se_always_top", Value = WallHack.Visuals.SelfESP.Chams.AlwaysOnTop ~= false,
+seSec:AddToggle({ Name = "vis_se_always_top",
+    ConfigKey = "WallHack.Visuals.SelfESP.Chams.AlwaysOnTop", Value = WallHack.Visuals.SelfESP.Chams.AlwaysOnTop ~= false,
     Callback = function(v) setChamsSelf("AlwaysOnTop", v); refreshSelfESP() end, Tooltip = "tt_vis_se_always_top" })
 seSec:AddDropdown({ Name = "vis_se_texture_preset", Value = WallHack.Visuals.SelfESP.Chams.TexturePreset or "None",
     List = texturePresetList, Callback = function(v) setChamsSelf("TexturePreset", v); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_preset" })
@@ -2187,7 +2207,8 @@ seSec:AddDropdown({ Name = "vis_se_texture_faces", Value = WallHack.Visuals.Self
     List = textureFaces, Callback = function(v) setChamsSelf("TextureFaces", v); refreshSelfESP() end, Tooltip = "tt_vis_se_texture_faces" })
 
 seSec:AddDivider({ Text = "vis_se_group_hat" })
-seSec:AddToggle({ Name = "vis_se_hat_enabled", Value = WallHack.Visuals.SelfESP.ChinaHat.Enabled,
+seSec:AddToggle({ Name = "vis_se_hat_enabled",
+    ConfigKey = "WallHack.Visuals.SelfESP.ChinaHat.Enabled", Value = WallHack.Visuals.SelfESP.ChinaHat.Enabled,
     Callback = function(v) setHat("Enabled", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_enabled" })
 seSec:AddDropdown({ Name = "vis_se_hat_mode", Value = WallHack.Visuals.SelfESP.ChinaHat.Mode or "Closed",
     List = hatModes, Callback = function(v) setHat("Mode", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_mode" })
@@ -2203,11 +2224,13 @@ seSec:AddSlider({ Name = "vis_se_hat_sides", Value = WallHack.Visuals.SelfESP.Ch
     Min = 6, Max = 128, Callback = function(v) setHat("Sides", math.floor(v)); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_sides" })
 seSec:AddSlider({ Name = "vis_se_hat_rotation", Value = WallHack.Visuals.SelfESP.ChinaHat.Rotation,
     Min = 0, Max = 360, Callback = function(v) setHat("Rotation", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotation" })
-seSec:AddToggle({ Name = "vis_se_hat_autoro", Value = WallHack.Visuals.SelfESP.ChinaHat.AutoRotate,
+seSec:AddToggle({ Name = "vis_se_hat_autoro",
+    ConfigKey = "WallHack.Visuals.SelfESP.ChinaHat.AutoRotate", Value = WallHack.Visuals.SelfESP.ChinaHat.AutoRotate,
     Callback = function(v) setHat("AutoRotate", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_autoro" })
 seSec:AddSlider({ Name = "vis_se_hat_rotospeed", Value = WallHack.Visuals.SelfESP.ChinaHat.RotateSpeed,
     Min = 10, Max = 720, Callback = function(v) setHat("RotateSpeed", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rotospeed" })
-seSec:AddToggle({ Name = "vis_se_hat_rainbow", Value = WallHack.Visuals.SelfESP.ChinaHat.Rainbow,
+seSec:AddToggle({ Name = "vis_se_hat_rainbow",
+    ConfigKey = "WallHack.Visuals.SelfESP.ChinaHat.Rainbow", Value = WallHack.Visuals.SelfESP.ChinaHat.Rainbow,
     Callback = function(v) setHat("Rainbow", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rainbow" })
 seSec:AddSlider({ Name = "vis_se_hat_rainbow_speed", Value = WallHack.Visuals.SelfESP.ChinaHat.RainbowSpeed,
     Min = 0.1, Max = 3, Decimals = 2, Callback = function(v) setHat("RainbowSpeed", v); refreshSelfESP() end, Tooltip = "tt_vis_se_hat_rainbow_speed" })
@@ -2223,11 +2246,13 @@ seSec:AddDropdown({ Name = "vis_se_hat_material", Value = WallHack.Visuals.SelfE
 
 local spSec = VisualsTab:CreateSection({ Name = "vis_sp", Side = "Right" })
 local spInitEnabled = (SP and SP.Settings and SP.Settings.Enabled) == true
-spSec:AddToggle({ Name = "vis_sp_enabled", Value = spInitEnabled,
+spSec:AddToggle({ Name = "vis_sp_enabled",
+    ConfigKey = "ServerPosition.Settings.Enabled", Value = spInitEnabled,
     Callback = function(v) if not SP or not SP.Settings then return end
         SP.Settings.Enabled = v; if v then spStop(); spStart() else spStop() end
     end, Tooltip = "tt_vis_sp_enabled" })
-spSec:AddToggle({ Name = "vis_sp_rgb", Value = (SP and SP.Settings and SP.Settings.RGB) ~= false,
+spSec:AddToggle({ Name = "vis_sp_rgb",
+    ConfigKey = "ServerPosition.Settings.RGB", Value = (SP and SP.Settings and SP.Settings.RGB) ~= false,
     Callback = function(v) if SP and SP.Settings then SP.Settings.RGB = v end end, Tooltip = "tt_vis_sp_rgb" })
 spSec:AddSlider({ Name = "vis_sp_strength", Value = (SP and SP.Settings and SP.Settings.Strength) or 1,
     Min = 0, Max = 5, Decimals = 1, Callback = function(v) if SP and SP.Settings then SP.Settings.Strength = v end end, Tooltip = "tt_vis_sp_strength" })

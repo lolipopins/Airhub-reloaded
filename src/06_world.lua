@@ -1252,7 +1252,9 @@ local function setRef(key, ctrl) refs[key] = ctrl end
 local function syncRef(key, value)
     local c = refs[key]
     if not c then return end
-    if type(c.Set) == "function" then pcall(function() c:Set(value) end) end
+    -- Element.Set is a plain function (v, fire); calling it with `:` would pass
+    -- the element itself as `v` and corrupt the displayed value.
+    if type(c.Set) == "function" then pcall(c.Set, value) end
 end
 
 local function SyncPresetUI()

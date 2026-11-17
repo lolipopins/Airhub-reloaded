@@ -25,12 +25,14 @@ end
 if not H.Logging then
     H.Logging = { Enabled = true, ShowHit = true, ShowMiss = true, Duration = 1, FontSize = 18 }
 end
-if not H.Sounds then
-    H.Sounds = {
-        HitsoundEnabled  = false, HitsoundID = 83717596220569, HitsoundVolume = 1,
-        KillsoundEnabled = false, KillsoundID = 83717596220569, KillsoundVolume = 1,
-    }
-end
+-- H.Sound is the settings table (created in 01_core); H.Sounds is an alias,
+-- NOT the instance container (that is H.SoundInstances in 01_core).
+H.Sounds = H.Sounds or H.Sound or {
+    HitsoundEnabled  = false, HitsoundID = 83717596220569, HitsoundVolume = 1,
+    KillsoundEnabled = false, KillsoundID = 83717596220569, KillsoundVolume = 1,
+}
+H.Sounds.HitsoundCustomId  = H.Sounds.HitsoundCustomId  or ""
+H.Sounds.KillsoundCustomId = H.Sounds.KillsoundCustomId or ""
 H.Sound = H.Sounds
 
 local Util                = H.Util
@@ -2894,13 +2896,17 @@ local aimModesList = { "Silent", "Instant", "Smooth", "CFrame" }
 
 -- // LEFT column
 local secA = AimbotTab:CreateSection({ Name = "aim_main" })
-secA:AddToggle({ Name = "aim_enabled", Value = AS.Enabled or false,
+secA:AddToggle({ Name = "aim_enabled",
+    ConfigKey = "Aimbot.Settings.Enabled", Value = AS.Enabled or false,
     Callback = function(v) aSet("Enabled", v) end, Tooltip = "tt_aim_enabled" })
-secA:AddToggle({ Name = "aim_toggle", Value = AS.Toggle or false,
+secA:AddToggle({ Name = "aim_toggle",
+    ConfigKey = "Aimbot.Settings.Toggle", Value = AS.Toggle or false,
     Callback = function(v) aSet("Toggle", v) end, Tooltip = "tt_aim_toggle" })
-secA:AddToggle({ Name = "aim_ignore_fov", Value = AS.IgnoreFOV or false,
+secA:AddToggle({ Name = "aim_ignore_fov",
+    ConfigKey = "Aimbot.Settings.IgnoreFOV", Value = AS.IgnoreFOV or false,
     Callback = function(v) aSet("IgnoreFOV", v) end, Tooltip = "tt_aim_ignore_fov" })
 secA:AddToggle({ Name = "aim_check_from_player",
+    ConfigKey = "Aimbot.Settings.CheckFromPlayerOnTP",
     Value = AS.CheckFromPlayerOnTP ~= false,
     Callback = function(v) aSet("CheckFromPlayerOnTP", v) end,
     Tooltip = "tt_aim_check_from_player" })
@@ -2909,6 +2915,7 @@ secA:AddDropdown({ Name = "aim_lock_part", Value = AS.LockPart or "Head",
     Callback = function(v) aSet("LockPart", v) end,
     Tooltip = "tt_aim_lock_part" })
 secA:AddToggle({ Name = "aim_fallback_visible",
+    ConfigKey = "Aimbot.Settings.FallbackToVisible",
     Value = AS.FallbackToVisible or false,
     Callback = function(v) aSet("FallbackToVisible", v) end,
     Tooltip = "tt_aim_fallback_visible" })
@@ -2937,7 +2944,8 @@ secA:AddSlider({ Name = "aim_hz", Value = AS.AimbotHz or 120,
     Min = 30, Max = 240,
     Callback = function(v) aSet("AimbotHz", v) end,
     Tooltip = "tt_aim_hz" })
-secA:AddToggle({ Name = "aim_target_npc", Value = AS.TargetNPCs or false,
+secA:AddToggle({ Name = "aim_target_npc",
+    ConfigKey = "Aimbot.Settings.TargetNPCs", Value = AS.TargetNPCs or false,
     Callback = function(v) aSet("TargetNPCs", v) end,
     Tooltip = "tt_aim_target_npc" })
 secA:AddInput({ Name = "aim_npc_filter",
@@ -2948,6 +2956,7 @@ secA:AddInput({ Name = "aim_npc_filter",
 local secTL = AimbotTab:CreateSection({ Name = "aim_target_lock" })
 local TL = AS.TargetLock or {}
 secTL:AddToggle({ Name = "aim_tl_enabled",
+    ConfigKey = "Aimbot.Settings.TargetLock.Enabled",
     Value = TL.Enabled or false,
     Callback = function(v) aSetTL("Enabled", v) end,
     Tooltip = "tt_aim_tl_enabled" })
@@ -2964,12 +2973,14 @@ secTL:AddSlider({ Name = "aim_tl_seconds",
     Callback = function(v) aSetTL("Seconds", v) end,
     Tooltip = "tt_aim_tl_seconds" })
 secTL:AddToggle({ Name = "aim_tl_stick",
+    ConfigKey = "Aimbot.Settings.TargetLock.StickBeyondFOV",
     Value = TL.StickBeyondFOV ~= false,
     Callback = function(v) aSetTL("StickBeyondFOV", v) end,
     Tooltip = "tt_aim_tl_stick" })
 
 local predSec = AimbotTab:CreateSection({ Name = "aim_prediction" })
-predSec:AddToggle({ Name = "aim_pred_enabled", Value = AS.PredictionEnabled or false,
+predSec:AddToggle({ Name = "aim_pred_enabled",
+    ConfigKey = "Aimbot.Settings.PredictionEnabled", Value = AS.PredictionEnabled or false,
     Callback = function(v) aSet("PredictionEnabled", v) end,
     Tooltip = "tt_aim_pred_enabled" })
 predSec:AddSlider({ Name = "aim_pred_x", Value = AS.PredictionX or 0,
@@ -2988,6 +2999,7 @@ predSec:AddSlider({ Name = "aim_pred_time", Value = AS.PredictionTime or 0.15,
 local secMP = AimbotTab:CreateSection({ Name = "aim_multipoint" })
 local MP = AS.MultiPoint or {}
 secMP:AddToggle({ Name = "aim_mp_enabled",
+    ConfigKey = "Aimbot.Settings.MultiPoint.Enabled",
     Value = MP.Enabled or false,
     Callback = function(v) aSetMP("Enabled", v) end,
     Tooltip = "tt_aim_mp_enabled" })
@@ -3002,10 +3014,12 @@ secMP:AddSlider({ Name = "aim_mp_jitter",
     Callback = function(v) aSetMP("JitterTries", math.floor(v)) end,
     Tooltip = "tt_aim_mp_jitter" })
 secMP:AddToggle({ Name = "aim_mp_adaptive",
+    ConfigKey = "Aimbot.Settings.MultiPoint.AdaptiveDensity",
     Value = MP.AdaptiveDensity ~= false,
     Callback = function(v) aSetMP("AdaptiveDensity", v) end,
     Tooltip = "tt_aim_mp_adaptive" })
 secMP:AddToggle({ Name = "aim_mp_refine",
+    ConfigKey = "Aimbot.Settings.MultiPoint.RefineEdges",
     Value = MP.RefineEdges ~= false,
     Callback = function(v) aSetMP("RefineEdges", v) end,
     Tooltip = "tt_aim_mp_refine" })
@@ -3014,14 +3028,17 @@ secMP:AddSlider({ Name = "aim_mp_maxrays",
     Callback = function(v) aSetMP("MaxRaysPerPart", math.floor(v)) end,
     Tooltip = "tt_aim_mp_maxrays" })
 secMP:AddToggle({ Name = "aim_mp_include_all",
+    ConfigKey = "Aimbot.Settings.MultiPoint.IncludeAllParts",
     Value = MP.IncludeAllParts ~= false,
     Callback = function(v) aSetMP("IncludeAllParts", v) end,
     Tooltip = "tt_aim_mp_include_all" })
 secMP:AddToggle({ Name = "aim_mp_apply_nearest",
+    ConfigKey = "Aimbot.Settings.MultiPoint.ApplyToNearest",
     Value = MP.ApplyToNearest ~= false,
     Callback = function(v) aSetMP("ApplyToNearest", v) end,
     Tooltip = "tt_aim_mp_apply_nearest" })
 secMP:AddToggle({ Name = "aim_mp_front",
+    ConfigKey = "Aimbot.Settings.MultiPoint.FrontFacingOnly",
     Value = MP.FrontFacingOnly ~= false,
     Callback = function(v) aSetMP("FrontFacingOnly", v) end,
     Tooltip = "tt_aim_mp_front" })
@@ -3030,6 +3047,7 @@ local secMPV = AimbotTab:CreateSection({ Name = "aim_multipoint_visuals" })
 -- FIX: MPVcfg — избегаем shadowing MPV
 local MPVcfg = AS.MultiPointVisuals or {}
 secMPV:AddToggle({ Name = "aim_mpv_enabled",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.Enabled",
     Value = MPVcfg.Enabled or false,
     Callback = function(v) aSetMPVcfg("Enabled", v) end,
     Tooltip = "tt_aim_mpv_enabled" })
@@ -3037,20 +3055,24 @@ secMPV:AddDropdown({ Name = "aim_mpv_style", Value = MPVcfg.Style or "Grid", Lis
     Callback = function(v) aSetMPVcfg("Style", v) end,
     Tooltip = "tt_aim_mpv_style" })
 secMPV:AddToggle({ Name = "aim_mpv_show_all",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.ShowAllParts",
     Value = MPVcfg.ShowAllParts ~= false,
     Callback = function(v) aSetMPVcfg("ShowAllParts", v) end,
     Tooltip = "tt_aim_mpv_show_all" })
 secMPV:AddToggle({ Name = "aim_mpv_only_mesh",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.OnlyMeshHits",
     Value = MPVcfg.OnlyMeshHits ~= false,
     Callback = function(v)
         aSetMPVcfg("OnlyMeshHits", v)
         aSetMPVcfg("ShowMisses", not v)
     end, Tooltip = "tt_aim_mpv_only_mesh" })
 secMPV:AddToggle({ Name = "aim_mpv_refined",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.ShowRefined",
     Value = MPVcfg.ShowRefined ~= false,
     Callback = function(v) aSetMPVcfg("ShowRefined", v) end,
     Tooltip = "tt_aim_mpv_refined" })
 secMPV:AddToggle({ Name = "aim_mpv_misses",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.ShowMisses",
     Value = MPVcfg.ShowMisses == true,
     Callback = function(v)
         aSetMPVcfg("ShowMisses", v)
@@ -3061,6 +3083,7 @@ secMPV:AddSlider({ Name = "aim_mpv_radius",
     Callback = function(v) aSetMPVcfg("PointRadius", v) end,
     Tooltip = "tt_aim_mpv_radius" })
 secMPV:AddToggle({ Name = "aim_mpv_filled",
+    ConfigKey = "Aimbot.Settings.MultiPointVisuals.PointFilled",
     Value = MPVcfg.PointFilled ~= false,
     Callback = function(v) aSetMPVcfg("PointFilled", v) end,
     Tooltip = "tt_aim_mpv_filled" })
@@ -3072,6 +3095,7 @@ secMPV:AddSlider({ Name = "aim_mpv_maxpoints",
 local secLine = AimbotTab:CreateSection({ Name = "aim_aimline" })
 local AL = AS.AimLineVisuals or {}
 secLine:AddToggle({ Name = "aim_line_enabled",
+    ConfigKey = "Aimbot.Settings.AimLineVisuals.Enabled",
     Value = AL.Enabled or false,
     Callback = function(v) aSetLine("Enabled", v) end,
     Tooltip = "tt_aim_line_enabled" })
@@ -3086,10 +3110,12 @@ secLine:AddSlider({ Name = "aim_line_thickness",
 
 local secE = AimbotTab:CreateSection({ Name = "aim_fov" })
 secE:AddToggle({ Name = "aim_fov_enabled",
+    ConfigKey = "Aimbot.FOVSettings.Enabled",
     Value = (Aimbot.FOVSettings and Aimbot.FOVSettings.Enabled) ~= false,
     Callback = function(v) aSetFov("Enabled", v) end,
     Tooltip = "tt_aim_fov_enabled" })
 secE:AddToggle({ Name = "aim_fov_visible",
+    ConfigKey = "Aimbot.FOVSettings.Visible",
     Value = (Aimbot.FOVSettings and Aimbot.FOVSettings.Visible) ~= false,
     Callback = function(v) aSetFov("Visible", v) end,
     Tooltip = "tt_aim_fov_visible" })
@@ -3101,7 +3127,8 @@ secE:AddSlider({ Name = "aim_fov_radius",
 
 -- // RIGHT column
 local secW = AimbotTab:CreateSection({ Name = "aim_visibility", Side = "Right" })
-secW:AddToggle({ Name = "aim_wallcheck", Value = AS.WallCheck or false,
+secW:AddToggle({ Name = "aim_wallcheck",
+    ConfigKey = "Aimbot.Settings.WallCheck", Value = AS.WallCheck or false,
     Callback = function(v) aSet("WallCheck", v) end,
     Tooltip = "tt_aim_wallcheck" })
 secW:AddDropdown({ Name = "aim_wallcheck_mode",
@@ -3112,13 +3139,16 @@ secW:AddDropdown({ Name = "aim_wallcheck_method",
     Value = AS.WallCheckMethod or "Raycast", List = wallCheckMethods,
     Callback = function(v) aSet("WallCheckMethod", v) end,
     Tooltip = "tt_aim_wallcheck_method" })
-secW:AddToggle({ Name = "aim_delay_shot", Value = AS.DelayShot ~= false,
+secW:AddToggle({ Name = "aim_delay_shot",
+    ConfigKey = "Aimbot.Settings.DelayShot", Value = AS.DelayShot ~= false,
     Callback = function(v) aSet("DelayShot", v) end,
     Tooltip = "tt_aim_delay_shot" })
-secW:AddToggle({ Name = "aim_alive_check", Value = AS.AliveCheck ~= false,
+secW:AddToggle({ Name = "aim_alive_check",
+    ConfigKey = "Aimbot.Settings.AliveCheck", Value = AS.AliveCheck ~= false,
     Callback = function(v) aSet("AliveCheck", v) end,
     Tooltip = "tt_aim_alive_check" })
 secW:AddToggle({ Name = "aim_team_check",
+    ConfigKey = "Aimbot.Settings.TeamCheck.Enabled",
     Value = (AS.TeamCheck and AS.TeamCheck.Enabled) ~= false,
     Callback = function(v) aSetTeam("Enabled", v) end,
     Tooltip = "tt_aim_team_check" })
@@ -3128,6 +3158,7 @@ secW:AddDropdown({ Name = "aim_team_mode",
     Callback = function(v) aSetTeam("Mode", v) end,
     Tooltip = "tt_aim_team_mode" })
 secW:AddToggle({ Name = "aim_team_neutral",
+    ConfigKey = "Aimbot.Settings.TeamCheck.TreatNeutralAsEnemy",
     Value = (AS.TeamCheck and AS.TeamCheck.TreatNeutralAsEnemy) ~= false,
     Callback = function(v) aSetTeam("TreatNeutralAsEnemy", v) end,
     Tooltip = "tt_aim_team_neutral" })
@@ -3147,7 +3178,8 @@ secD:AddDropdown({ Name = "aim_silent_mode", Value = AS.SilentAimMode or "Camera
             pcall(Aimbot.RemoveMHTProxy)
         end
     end, Tooltip = "tt_aim_silent_mode" })
-secD:AddToggle({ Name = "aim_use_backtrack", Value = AS.UseBacktrack or false,
+secD:AddToggle({ Name = "aim_use_backtrack",
+    ConfigKey = "Aimbot.Settings.UseBacktrack", Value = AS.UseBacktrack or false,
     Callback = function(v)
         aSet("UseBacktrack", v)
         if v then
@@ -3159,12 +3191,14 @@ secD:AddToggle({ Name = "aim_use_backtrack", Value = AS.UseBacktrack or false,
         end
     end, Tooltip = "tt_aim_use_backtrack" })
 secD:AddToggle({ Name = "aim_backtrack_ghost",
+    ConfigKey = "Aimbot.Settings.BacktrackAimAtGhost",
     Value = AS.BacktrackAimAtGhost or false,
     Callback = function(v) aSet("BacktrackAimAtGhost", v) end,
     Tooltip = "tt_aim_backtrack_ghost" })
 
 local secWB = AimbotTab:CreateSection({ Name = "aim_wallbang", Side = "Right" })
-secWB:AddToggle({ Name = "aim_wb_enabled", Value = AS.WallbangEnabled or false,
+secWB:AddToggle({ Name = "aim_wb_enabled",
+    ConfigKey = "Aimbot.Settings.WallbangEnabled", Value = AS.WallbangEnabled or false,
     Callback = function(v) aSetWB("WallbangEnabled", v) end,
     Tooltip = "tt_aim_wb_enabled" })
 secWB:AddDropdown({ Name = "aim_wb_method", Value = AS.WallbangMethod or "RemotePatch",
@@ -3185,7 +3219,8 @@ secWB:AddInput({ Name = "aim_wb_distance",
     end, Tooltip = "tt_aim_wb_distance" })
 
 local secTP = AimbotTab:CreateSection({ Name = "aim_tpaim", Side = "Right" })
-secTP:AddToggle({ Name = "aim_tp_enabled", Value = AS.TPAimEnabled or false,
+secTP:AddToggle({ Name = "aim_tp_enabled",
+    ConfigKey = "Aimbot.Settings.TPAimEnabled", Value = AS.TPAimEnabled or false,
     Callback = function(v) aSetTP("TPAimEnabled", v) end,
     Tooltip = "tt_aim_tp_enabled" })
 secTP:AddDropdown({ Name = "aim_tp_method", Value = AS.TPAimMethod or "MagicBullet",
@@ -3202,16 +3237,19 @@ secTP:AddInput({ Name = "aim_tp_distance",
         if n and n > 0 then aSetTP("TPAimDistance", n) end
     end, Tooltip = "tt_aim_tp_distance" })
 secTP:AddToggle({ Name = "aim_tp_return",
+    ConfigKey = "Aimbot.Settings.TPAimReturnOnKill",
     Value = AS.TPAimReturnOnKill ~= false,
     Callback = function(v) aSetTP("TPAimReturnOnKill", v) end,
     Tooltip = "tt_aim_tp_return" })
 
 local secAS = AimbotTab:CreateSection({ Name = "aim_autoshoot", Side = "Right" })
 secAS:AddToggle({ Name = "aim_as_enabled",
+    ConfigKey = "Aimbot.Settings.AutoShoot.Enabled",
     Value = (AS.AutoShoot and AS.AutoShoot.Enabled) or false,
     Callback = function(v) aSetAS("Enabled", v) end,
     Tooltip = "tt_aim_as_enabled" })
 secAS:AddToggle({ Name = "aim_as_only_aiming",
+    ConfigKey = "Aimbot.Settings.AutoShoot.OnlyWhenAiming",
     Value = (AS.AutoShoot and AS.AutoShoot.OnlyWhenAiming) ~= false,
     Callback = function(v) aSetAS("OnlyWhenAiming", v) end,
     Tooltip = "tt_aim_as_only_aiming" })
@@ -3227,6 +3265,7 @@ secAS:AddDropdown({ Name = "aim_as_key", Value = "Left Click",
         aSetAS("ShootKey", (v == "Left Click") and "MouseButton1" or "MouseButton2")
     end, Tooltip = "tt_aim_as_key" })
 secAS:AddToggle({ Name = "aim_as_autostop",
+    ConfigKey = "Aimbot.Settings.AutoShoot.AutoStop.Enabled",
     Value = (AS.AutoShoot and AS.AutoShoot.AutoStop and AS.AutoShoot.AutoStop.Enabled) or false,
     Callback = function(v)
         if Aimbot.Settings and Aimbot.Settings.AutoShoot and Aimbot.Settings.AutoShoot.AutoStop then

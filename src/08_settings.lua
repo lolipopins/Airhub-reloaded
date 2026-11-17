@@ -229,10 +229,12 @@ H.Logging = H.Logging or {
     Enabled = true, ShowHit = true, ShowMiss = true,
     Duration = 1, FontSize = 18,
 }
-H.Sounds = H.Sounds or {
+H.Sounds = H.Sounds or H.Sound or {
     HitsoundEnabled = false, HitsoundID = 83717596220569, HitsoundVolume = 1,
     KillsoundEnabled = false, KillsoundID = 83717596220569, KillsoundVolume = 1,
 }
+H.Sounds.HitsoundCustomId  = H.Sounds.HitsoundCustomId  or ""
+H.Sounds.KillsoundCustomId = H.Sounds.KillsoundCustomId or ""
 H.Sound = H.Sounds
 
 -- Sound presets
@@ -264,6 +266,8 @@ end
 local previewSounds = {}
 local function PlayPreviewById(id)
     if not id or id <= 0 then return end
+    local win = getgenv().airhubUI_Window
+    if win and win._importing then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
     local ok, snd = pcall(function()
@@ -354,6 +358,12 @@ local function ResetEverything()
     Hg.Sounds.KillsoundID      = soundPresets["gamesense"]
     Hg.Sounds.HitsoundCustomId = ""
     Hg.Sounds.KillsoundCustomId = ""
+
+    -- Put the menu back to its defaults too (fire callbacks so features stop),
+    -- then re-apply any still-enabled state from the fresh settings.
+    local uiWin = getgenv().airhubUI_Window
+    if uiWin and uiWin.ResetElements then pcall(uiWin.ResetElements, uiWin) end
+    if Hg.ApplyAllEnabledStates then pcall(Hg.ApplyAllEnabledStates) end
 end
 
 --// ---------------------------------------------------------------------------
@@ -454,18 +464,21 @@ local logSec = SettingsTab:CreateSection({ Name = "set_sec_logs" })
 
 logSec:AddToggle({
     Name = "set_logs_enabled",
+    ConfigKey = "Logging.Enabled",
     Value = H.Logging.Enabled,
     Callback = function(v) H.Logging.Enabled = v end,
     Tooltip = "tt_set_logs_enabled",
 })
 logSec:AddToggle({
     Name = "set_show_hits",
+    ConfigKey = "Logging.ShowHit",
     Value = H.Logging.ShowHit,
     Callback = function(v) H.Logging.ShowHit = v end,
     Tooltip = "tt_set_show_hits",
 })
 logSec:AddToggle({
     Name = "set_show_miss",
+    ConfigKey = "Logging.ShowMiss",
     Value = H.Logging.ShowMiss,
     Callback = function(v) H.Logging.ShowMiss = v end,
     Tooltip = "tt_set_show_miss",
@@ -489,6 +502,7 @@ logSec:AddSlider({
 logSec:AddDivider({ Text = "set_hitsound" })
 logSec:AddToggle({
     Name = "set_hit_enabled",
+    ConfigKey = "Sound.HitsoundEnabled",
     Value = H.Sounds.HitsoundEnabled,
     Callback = function(v) H.Sounds.HitsoundEnabled = v end,
     Tooltip = "tt_set_hit_enabled",
@@ -542,6 +556,7 @@ logSec:AddButton({
 logSec:AddDivider({ Text = "set_killsound" })
 logSec:AddToggle({
     Name = "set_kill_enabled",
+    ConfigKey = "Sound.KillsoundEnabled",
     Value = H.Sounds.KillsoundEnabled,
     Callback = function(v) H.Sounds.KillsoundEnabled = v end,
     Tooltip = "tt_set_kill_enabled",

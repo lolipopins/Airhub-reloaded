@@ -145,7 +145,7 @@ end))
 --// ---------------------------------------------------------------------------
 --// Sounds
 --// ---------------------------------------------------------------------------
-H.Sounds = H.Sounds or { Hitsound = nil, Killsound = nil }
+H.SoundInstances = H.SoundInstances or {}
 
 local function LoadSound(id, volume)
     local sound = Instance.new("Sound")
@@ -158,25 +158,27 @@ end
 local function PlayHitsound()
     local s = H.Sound
     if not s or not s.HitsoundEnabled then return end
-    if not H.Sounds.Hitsound or H.Sounds.Hitsound.SoundId ~= "rbxassetid://" .. s.HitsoundID then
-        if H.Sounds.Hitsound then H.Sounds.Hitsound:Destroy() end
-        H.Sounds.Hitsound = LoadSound(s.HitsoundID, s.HitsoundVolume)
+    local inst = H.SoundInstances
+    if not inst.Hitsound or inst.Hitsound.SoundId ~= "rbxassetid://" .. s.HitsoundID then
+        if inst.Hitsound then inst.Hitsound:Destroy() end
+        inst.Hitsound = LoadSound(s.HitsoundID, s.HitsoundVolume)
     else
-        H.Sounds.Hitsound.Volume = s.HitsoundVolume
+        inst.Hitsound.Volume = s.HitsoundVolume
     end
-    H.Sounds.Hitsound:Play()
+    inst.Hitsound:Play()
 end
 
 local function PlayKillsound()
     local s = H.Sound
     if not s or not s.KillsoundEnabled then return end
-    if not H.Sounds.Killsound or H.Sounds.Killsound.SoundId ~= "rbxassetid://" .. s.KillsoundID then
-        if H.Sounds.Killsound then H.Sounds.Killsound:Destroy() end
-        H.Sounds.Killsound = LoadSound(s.KillsoundID, s.KillsoundVolume)
+    local inst = H.SoundInstances
+    if not inst.Killsound or inst.Killsound.SoundId ~= "rbxassetid://" .. s.KillsoundID then
+        if inst.Killsound then inst.Killsound:Destroy() end
+        inst.Killsound = LoadSound(s.KillsoundID, s.KillsoundVolume)
     else
-        H.Sounds.Killsound.Volume = s.KillsoundVolume
+        inst.Killsound.Volume = s.KillsoundVolume
     end
-    H.Sounds.Killsound:Play()
+    inst.Killsound:Play()
 end
 
 --// ---------------------------------------------------------------------------
@@ -221,26 +223,22 @@ pcall(function()
 end)
 
 local function Config_Encode(value)
-    local t = type(value)
+    local t = typeof(value)
     if t == "number" or t == "string" or t == "boolean" then
         return value
+    elseif t == "Color3" then
+        return { __t = "Color3", R = value.R, G = value.G, B = value.B }
+    elseif t == "Vector3" then
+        return { __t = "Vector3", X = value.X, Y = value.Y, Z = value.Z }
+    elseif t == "Vector2" then
+        return { __t = "Vector2", X = value.X, Y = value.Y }
     elseif t == "table" then
-        if type(value.R) == "number" and type(value.G) == "number" and type(value.B) == "number"
-            and value.X == nil then
-            return { __t = "Color3", R = value.R, G = value.G, B = value.B }
-        elseif type(value.X) == "number" and type(value.Y) == "number" and type(value.Z) == "number"
-            and value.R == nil then
-            return { __t = "Vector3", X = value.X, Y = value.Y, Z = value.Z }
-        elseif type(value.X) == "number" and type(value.Y) == "number" and value.Z == nil then
-            return { __t = "Vector2", X = value.X, Y = value.Y }
-        else
-            local out = {}
-            for k, v in pairs(value) do
-                local enc = Config_Encode(v)
-                if enc ~= nil then out[k] = enc end
-            end
-            return out
+        local out = {}
+        for k, v in pairs(value) do
+            local enc = Config_Encode(v)
+            if enc ~= nil then out[k] = enc end
         end
+        return out
     end
     return nil
 end
@@ -323,7 +321,10 @@ local function Config_Serialize(includeUI)
 end
 
 -- ============================================================================
--- UI SYNC — Fixes "phantom enabled" (internal = true, toggle shows OFF)
+-- UI SYNC — explicit ConfigKey only.
+-- Heuristic name matching was removed: raw element names are localization keys
+-- (e.g. "mv_bhop_pulse", "aa_desync_visualize"), so substring rules misfired
+-- and toggled unrelated features after loading a config.
 -- ============================================================================
 -- Reads a dot-path like "Aimbot.Settings.Enabled" and returns the value
 local function _getState(path)
@@ -345,64 +346,8 @@ local function _getState(path)
     return target[parts[#parts]]
 end
 
--- Heuristic rules: order matters (specific first).
--- `match` is lowercase; either plain substring (default) or Lua pattern (regex=true).
-local SYNC_RULES = {
-    -- AIMBOT — specific flags first, then general "Aimbot Enabled"
-    { match = "wall check",          key = "Aimbot.Settings.WallCheck" },
-    { match = "silent aim",          key = "Aimbot.Settings.SilentAim" },
-    { match = "target lock",         key = "Aimbot.Settings.TargetLock.Enabled" },
-    { match = "multi.?point",        key = "Aimbot.Settings.MultiPoint.Enabled", regex = true },
-    { match = "auto.?shoot",         key = "Aimbot.Settings.AutoShoot.Enabled",  regex = true },
-    { match = "auto.?stop",          key = "Aimbot.Settings.AutoShoot.AutoStop.Enabled", regex = true },
-    { match = "tp.?aim",             key = "Aimbot.Settings.TPAimEnabled",  regex = true },
-    { match = "teleport.?aim",       key = "Aimbot.Settings.TPAimEnabled",  regex = true },
-    { match = "wallbang",            key = "Aimbot.Settings.WallbangEnabled" },
-    { match = "backtrack",           key = "Aimbot.Settings.UseBacktrack" },
-    { match = "aim.?line",           key = "Aimbot.Settings.AimLineVisuals.Enabled", regex = true },
-    { match = "fov",                 key = "Aimbot.FOVSettings.Enabled" },
-    { match = "aimbot",              key = "Aimbot.Settings.Enabled" },
-
-    -- WALLHACK — specific first
-    { match = "box esp",             key = "WallHack.Visuals.BoxSettings.Enabled" },
-    { match = "box display",         key = "WallHack.Visuals.BoxSettings.Enabled" },
-    { match = "glow",                key = "WallHack.Visuals.GlowSettings.Enabled" },
-    { match = "hud",                 key = "WallHack.Visuals.HUDSettings.Enabled" },
-    { match = "self.?esp",           key = "WallHack.Visuals.SelfESP.Enabled", regex = true },
-    { match = "wallhack",            key = "WallHack.Settings.Enabled" },
-
-    -- ANTI-AIM / DESYNC
-    { match = "desync",              key = "AntiAim.Desync.Settings.Enabled" },
-    { match = "anti.?aim",           key = "AntiAim.Settings.Enabled", regex = true },
-
-    -- SERVER POSITION
-    { match = "server.?position",    key = "ServerPosition.Settings.Enabled", regex = true },
-
-    -- MOVEMENT
-    { match = "spider",              key = "Bhop.Settings.Spider.Enabled" },
-    { match = "fly",                 key = "Fly.Settings.Enabled" },
-    { match = "bhop",                key = "Bhop.Settings.Enabled" },
-    { match = "bunny",               key = "Bhop.Settings.Enabled" },
-    { match = "speed",               key = "Speed.Settings.Enabled" },
-    { match = "fast.?stop",          key = "FastStop.Settings.Enabled",     regex = true },
-    { match = "auto.?straf",         key = "AutoStrafer.Settings.Enabled",  regex = true },
-    { match = "noclip",              key = "Noclip.Settings.Enabled" },
-    { match = "no.?clip",            key = "Noclip.Settings.Enabled",       regex = true },
-}
-
-local function _matchRule(lowerName)
-    for _, rule in ipairs(SYNC_RULES) do
-        if rule.regex then
-            if string.match(lowerName, rule.match) then return rule end
-        else
-            if string.find(lowerName, rule.match, 1, true) then return rule end
-        end
-    end
-    return nil
-end
-
 -- Walks every UI toggle and syncs its visual state to match internal state.
--- Explicit `_configKey` (set via `AddToggle({ConfigKey = "..."})`) takes priority.
+-- Only elements that explicitly declare `ConfigKey` are synced.
 function H.SyncUI()
     local Hg = getgenv().AirHub
     local uiWin = getgenv().airhubUI_Window
@@ -412,21 +357,31 @@ function H.SyncUI()
 
     local function syncSection(sec)
         if not sec or not sec.Elements then return end
-        for _, el in ipairs(sec.Elements) do
-            local meta   = el._meta or {}
-            local elType = meta.Type or el._type
-            local rawName = el._rawName
-            if elType == "Toggle" and rawName and el.Set then
-                local key = el._configKey
-                if not key then
-                    local rule = _matchRule(string.lower(rawName))
-                    if rule then key = rule.key end
-                end
-                if key then
+        for _, rawEl in ipairs(sec.Elements) do
+            -- Buttons / labels / dividers are Instances, not element tables.
+            local el = (type(rawEl) == "table") and rawEl or nil
+            if el then
+                local meta   = el._meta or {}
+                local elType = meta.Type or el._type
+                local key    = el._configKey
+                if key and el.Set then
                     local val = _getState(key)
                     if val ~= nil then
-                        pcall(el.Set, val and true or false)
-                        synced = synced + 1
+                        if elType == "Toggle" then
+                            -- fire=false: reflect backend state without re-running callbacks
+                            pcall(el.Set, val and true or false, false)
+                            synced = synced + 1
+                        elseif elType == "Slider" then
+                            if type(val) == "number" then
+                                pcall(el.Set, val, false)
+                                synced = synced + 1
+                            end
+                        elseif elType == "Dropdown" or elType == "Input" then
+                            if type(val) == "string" then
+                                pcall(el.Set, val, false)
+                                synced = synced + 1
+                            end
+                        end
                     end
                 end
             end
@@ -449,6 +404,8 @@ local function Config_Apply(data)
     if type(data) ~= "table" then return false end
     local Hg = getgenv().AirHub
     if not Hg then return false end
+    local uiWin = getgenv().airhubUI_Window
+    local importing = (uiWin and uiWin._importing) and true or false
 
     if data.Aimbot and Hg.Aimbot then
         local d = Config_Decode(data.Aimbot)
@@ -535,7 +492,16 @@ local function Config_Apply(data)
             if g.Enabled == nil then g.Enabled = true end
             if g.Transparency == nil then g.Transparency = 0.5 end
             if g.Mode == nil then g.Mode = "Outline" end
-            Hg.WallHack.Visuals.GlowSettings = g
+            -- Merge instead of replacing: 04_wallhack keeps a local alias
+            -- (`Chams = WallHack.Visuals.ChamsSettings`) captured at load time,
+            -- so replacing the table would make chams UI callbacks write into a
+            -- detached table.
+            local target = Hg.WallHack.Visuals.ChamsSettings
+                            or Hg.WallHack.Visuals.GlowSettings
+                            or {}
+            for k, v in pairs(g) do target[k] = v end
+            Hg.WallHack.Visuals.ChamsSettings = target
+            Hg.WallHack.Visuals.GlowSettings  = target
         end
     end
 
@@ -681,23 +647,33 @@ local function Config_Apply(data)
 
     if data.Sound then
         local s = Config_Decode(data.Sound)
-        if type(s) == "table" then Hg.Sound = s end
+        if type(s) == "table" then
+            -- Keep a single shared table: 02_aimbot/08_settings keep H.Sounds and
+            -- H.Sound aliased, and UI callbacks close over H.Sounds.
+            local target = Hg.Sounds or Hg.Sound or {}
+            for k, v in pairs(s) do target[k] = v end
+            Hg.Sound  = target
+            Hg.Sounds = target
+        end
     end
 
-    if data.UI then
-        local uiWin = getgenv().airhubUI_Window
+    if data.UI and not importing then
         if uiWin and uiWin.SetUIState then
             pcall(function() uiWin:SetUIState(data.UI) end)
         end
     end
 
-    -- >>> AFTER all state applied: sync visuals + fire enabled states
-    task.defer(function()
-        local h = getgenv().AirHub
-        if not h then return end
-        if h.SyncUI then pcall(h.SyncUI) end
-        if h.ApplyAllEnabledStates then pcall(h.ApplyAllEnabledStates) end
-    end)
+    -- >>> AFTER all state applied: sync visuals + fire enabled states.
+    -- While ImportSettings is running, its post-import hook does this once
+    -- everything (including element callbacks) has been applied.
+    if not importing then
+        task.defer(function()
+            local h = getgenv().AirHub
+            if not h then return end
+            if h.SyncUI then pcall(h.SyncUI) end
+            if h.ApplyAllEnabledStates then pcall(h.ApplyAllEnabledStates) end
+        end)
+    end
 
     return true
 end
@@ -944,6 +920,45 @@ function H.ApplyAllEnabledStates()
             end
         end
     end
+
+    if Hg.AntiAim and Hg.AntiAim.AnimationBreaker and Hg.AntiAim.AnimationBreaker.Settings then
+        local ABS = Hg.AntiAim.AnimationBreaker.Settings
+        if ABS.Enabled then
+            if Hg.AntiAim.StartAnimationBreaker then pcall(Hg.AntiAim.StartAnimationBreaker) end
+        else
+            ABS.Enabled = false
+            if Hg.AntiAim.StopAnimationBreaker then pcall(Hg.AntiAim.StopAnimationBreaker) end
+        end
+    end
+
+    if Hg.Exploits and Hg.Exploits.Settings and Hg.Exploits.Functions then
+        local ES = Hg.Exploits.Settings
+        local EF = Hg.Exploits.Functions
+        local function applyFlag(flag, startFn, stopFn)
+            if ES[flag] then
+                if EF[startFn] then pcall(EF[startFn]) end
+            else
+                if EF[stopFn] then pcall(EF[stopFn]) end
+            end
+        end
+        applyFlag("AntiFling",        "StartAntiFling",       "StopAntiFling")
+        applyFlag("AntiVoid",         "StartAntiVoid",        "StopAntiVoid")
+        applyFlag("AntiTeleport",     "StartAntiTeleport",    "StopAntiTeleport")
+        applyFlag("AntiRagdoll",      "StartAntiRagdoll",     "StopAntiRagdoll")
+        applyFlag("InfiniteJump",     "StartInfiniteJump",    "StopInfiniteJump")
+        applyFlag("AntiAFK",          "StartAntiAFK",         "StopAntiAFK")
+        applyFlag("InstantPrompt",    "StartInstantPrompt",   "StopInstantPrompt")
+        applyFlag("Invisible",        "StartInvisible",       "StopInvisible")
+        applyFlag("SeeThroughWalls",  "StartSeeThroughWalls", "StopSeeThroughWalls")
+        applyFlag("Fullbright",       "StartFullbright",      "StopFullbright")
+        applyFlag("RemoveFog",        "StartRemoveFog",       "StopRemoveFog")
+        applyFlag("RemoveSkybox",     "StartRemoveSkybox",    "StopRemoveSkybox")
+        applyFlag("HitboxExpander",   "StartHitboxExpander",  "StopHitboxExpander")
+        applyFlag("BacktrackEnabled", "StartBacktrack",       "StopBacktrack")
+        if EF.SetFakeLagEnabled then
+            pcall(EF.SetFakeLagEnabled, ES.FakeLagEnabled and true or false)
+        end
+    end
 end
 H._UI = H._UI or {}
 H._UI.ApplyAllEnabledStates = H.ApplyAllEnabledStates
@@ -963,10 +978,11 @@ if Window then
         warn("[AirHub] 01_core: Window.SetExternalDataProvider missing")
     end
 
-    -- >>> post-import sync: called at very end of ImportSettings
+    -- >>> post-import sync: called at the very end of ImportSettings
     if Window.SetPostImportHook then
         Window:SetPostImportHook(function()
             if H.SyncUI then pcall(H.SyncUI) end
+            if H.ApplyAllEnabledStates then pcall(H.ApplyAllEnabledStates) end
         end)
     end
 
@@ -1095,9 +1111,9 @@ if Window then
         H.ActiveLogs = {}
 
         if H.ErrorText then pcall(function() H.ErrorText:Remove() end) end
-        if H.Sounds then
-            if H.Sounds.Hitsound then pcall(function() H.Sounds.Hitsound:Destroy() end) end
-            if H.Sounds.Killsound then pcall(function() H.Sounds.Killsound:Destroy() end) end
+        if H.SoundInstances then
+            if H.SoundInstances.Hitsound then pcall(function() H.SoundInstances.Hitsound:Destroy() end) end
+            if H.SoundInstances.Killsound then pcall(function() H.SoundInstances.Killsound:Destroy() end) end
         end
 
         pcall(UntrackAll)

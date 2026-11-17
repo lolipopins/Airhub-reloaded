@@ -1515,18 +1515,21 @@ local spiderModes  = { "Default", "Pixelwalk", "Wallfucker" }
 
 -- ---------- AutoStrafer (Left) ----------
 local asSec = tab:CreateSection({ Name = "sec_mov_autostrafer" })
-asSec:AddToggle({ Name = "mv_as_enabled", Value = AutoStrafer.Settings.Enabled,
+asSec:AddToggle({ Name = "mv_as_enabled",
+    ConfigKey = "AutoStrafer.Settings.Enabled", Value = AutoStrafer.Settings.Enabled,
     Callback = function(v)
         AutoStrafer.Settings.Enabled = v
         if not v and AutoStrafer.Functions.Stop then AutoStrafer.Functions.Stop() end
     end, Tooltip = "tt_mv_as_enabled" })
 asSec:AddDropdown({ Name = "mv_as_key", Value = AutoStrafer.Settings.Key or "Space", List = strafeKeys,
     Callback = function(v) AutoStrafer.Settings.Key = v end, Tooltip = "tt_mv_as_key" })
-asSec:AddToggle({ Name = "mv_as_toggle", Value = AutoStrafer.Settings.Toggle or false,
+asSec:AddToggle({ Name = "mv_as_toggle",
+    ConfigKey = "AutoStrafer.Settings.Toggle", Value = AutoStrafer.Settings.Toggle or false,
     Callback = function(v) AutoStrafer.Settings.Toggle = v end, Tooltip = "tt_mv_as_toggle" })
 asSec:AddDropdown({ Name = "mv_as_mode", Value = AutoStrafer.Settings.Mode or "Legit", List = strafeModes,
     Callback = function(v) AutoStrafer.Settings.Mode = v end, Tooltip = "tt_mv_as_mode" })
-asSec:AddToggle({ Name = "mv_as_invert", Value = AutoStrafer.Settings.Invert or false,
+asSec:AddToggle({ Name = "mv_as_invert",
+    ConfigKey = "AutoStrafer.Settings.Invert", Value = AutoStrafer.Settings.Invert or false,
     Callback = function(v) AutoStrafer.Settings.Invert = v end, Tooltip = "tt_mv_as_invert" })
 asSec:AddSlider({ Name = "mv_as_spam", Value = AutoStrafer.Settings.SpamDelay or 0.05,
     Min = 0.01, Max = 0.3, Decimals = 2,
@@ -1534,7 +1537,8 @@ asSec:AddSlider({ Name = "mv_as_spam", Value = AutoStrafer.Settings.SpamDelay or
 
 -- ---------- Fly (Left) ----------
 local flySec = tab:CreateSection({ Name = "sec_mov_fly" })
-flySec:AddToggle({ Name = "mv_fly_enabled", Value = Fly.Settings.Enabled,
+flySec:AddToggle({ Name = "mv_fly_enabled",
+    ConfigKey = "Fly.Settings.Enabled", Value = Fly.Settings.Enabled,
     Callback = function(v)
         Fly.Settings.Enabled = v
         if not v then
@@ -1551,7 +1555,8 @@ flySec:AddDropdown({ Name = "mv_fly_method", Value = Fly.Settings.Method or "Bod
     Callback = function(v) Fly.Settings.Method = v; Fly_ClearInstances() end, Tooltip = "tt_mv_fly_method" })
 flySec:AddDropdown({ Name = "mv_fly_key", Value = Fly.Settings.ToggleKey or "F", List = flyKeys,
     Callback = function(v) Fly.Settings.ToggleKey = v end, Tooltip = "tt_mv_fly_key" })
-flySec:AddToggle({ Name = "mv_fly_toggle", Value = Fly.Settings.Toggle or false,
+flySec:AddToggle({ Name = "mv_fly_toggle",
+    ConfigKey = "Fly.Settings.Toggle", Value = Fly.Settings.Toggle or false,
     Callback = function(v) Fly.Settings.Toggle = v end, Tooltip = "tt_mv_fly_toggle" })
 flySec:AddSlider({ Name = "mv_fly_speed", Value = Fly.Settings.Speed or 30, Min = 1, Max = 200,
     Callback = function(v) Fly.Settings.Speed = v end, Tooltip = "tt_mv_fly_speed" })
@@ -1560,12 +1565,14 @@ flySec:AddSlider({ Name = "mv_fly_upspeed", Value = Fly.Settings.UpSpeed or 20, 
 flySec:AddSlider({ Name = "mv_fly_smoothness", Value = Fly.Settings.Smoothness or 0.5,
     Min = 0.05, Max = 1, Decimals = 2,
     Callback = function(v) Fly.Settings.Smoothness = v end, Tooltip = "tt_mv_fly_smoothness" })
-flySec:AddToggle({ Name = "mv_fly_usekeys", Value = Fly.Settings.UseKeys ~= false,
+flySec:AddToggle({ Name = "mv_fly_usekeys",
+    ConfigKey = "Fly.Settings.UseKeys", Value = Fly.Settings.UseKeys ~= false,
     Callback = function(v) Fly.Settings.UseKeys = v end, Tooltip = "tt_mv_fly_usekeys" })
 
 -- ---------- Fly — Target Orbit (Left) ----------
 local flyOrbSec = tab:CreateSection({ Name = "sec_mov_flyorbit" })
-flyOrbSec:AddToggle({ Name = "mv_fo_enabled", Value = Fly.Settings.TargetOrbit.Enabled,
+flyOrbSec:AddToggle({ Name = "mv_fo_enabled",
+    ConfigKey = "Fly.Settings.TargetOrbit.Enabled", Value = Fly.Settings.TargetOrbit.Enabled,
     Callback = function(v) Fly.Settings.TargetOrbit.Enabled = v end, Tooltip = "tt_mv_fo_enabled" })
 flyOrbSec:AddSlider({ Name = "mv_fo_speed", Value = Fly.Settings.TargetOrbit.OrbitSpeed or 20,
     Min = 1, Max = 100, Decimals = 1,
@@ -1588,16 +1595,20 @@ flyOrbSec:AddSlider({ Name = "mv_fo_ff", Value = Fly.Settings.TargetOrbit.FeedFo
 flyOrbSec:AddSlider({ Name = "mv_fo_deadzone", Value = Fly.Settings.TargetOrbit.Deadzone or 0.3,
     Min = 0, Max = 3, Decimals = 2,
     Callback = function(v) Fly.Settings.TargetOrbit.Deadzone = v end, Tooltip = "tt_mv_fo_deadzone" })
-flyOrbSec:AddToggle({ Name = "mv_fo_clockwise", Value = Fly.Settings.TargetOrbit.Clockwise ~= false,
+flyOrbSec:AddToggle({ Name = "mv_fo_clockwise",
+    ConfigKey = "Fly.Settings.TargetOrbit.Clockwise", Value = Fly.Settings.TargetOrbit.Clockwise ~= false,
     Callback = function(v) Fly.Settings.TargetOrbit.Clockwise = v end, Tooltip = "tt_mv_fo_clockwise" })
-flyOrbSec:AddToggle({ Name = "mv_fo_fallback", Value = Fly.Settings.TargetOrbit.FallbackToFly ~= false,
+flyOrbSec:AddToggle({ Name = "mv_fo_fallback",
+    ConfigKey = "Fly.Settings.TargetOrbit.FallbackToFly", Value = Fly.Settings.TargetOrbit.FallbackToFly ~= false,
     Callback = function(v) Fly.Settings.TargetOrbit.FallbackToFly = v end, Tooltip = "tt_mv_fo_fallback" })
-flyOrbSec:AddToggle({ Name = "mv_fo_aimcam", Value = Fly.Settings.TargetOrbit.AimCamera ~= false,
+flyOrbSec:AddToggle({ Name = "mv_fo_aimcam",
+    ConfigKey = "Fly.Settings.TargetOrbit.AimCamera", Value = Fly.Settings.TargetOrbit.AimCamera ~= false,
     Callback = function(v) Fly.Settings.TargetOrbit.AimCamera = v end, Tooltip = "tt_mv_fo_aimcam" })
 
 -- ---------- Bhop (Right) ----------
 local bhopSec = tab:CreateSection({ Name = "sec_mov_bhop", Side = "Right" })
-bhopSec:AddToggle({ Name = "mv_bhop_enabled", Value = Bhop.Settings.Enabled,
+bhopSec:AddToggle({ Name = "mv_bhop_enabled",
+    ConfigKey = "Bhop.Settings.Enabled", Value = Bhop.Settings.Enabled,
     Callback = function(v)
         Bhop.Settings.Enabled = v
         if not v then
@@ -1611,16 +1622,20 @@ bhopSec:AddDropdown({ Name = "mv_bhop_mode", Value = Bhop.Settings.Mode or "New"
     Callback = function(v) Bhop.Settings.Mode = v end, Tooltip = "tt_mv_bhop_mode" })
 bhopSec:AddDropdown({ Name = "mv_bhop_key", Value = Bhop.Settings.AutoJumpKey or "Space", List = bhopKeys,
     Callback = function(v) Bhop.Settings.AutoJumpKey = v end, Tooltip = "tt_mv_bhop_key" })
-bhopSec:AddToggle({ Name = "mv_bhop_blockspace", Value = Bhop.Settings.BlockSpaceFromGame ~= false,
+bhopSec:AddToggle({ Name = "mv_bhop_blockspace",
+    ConfigKey = "Bhop.Settings.BlockSpaceFromGame", Value = Bhop.Settings.BlockSpaceFromGame ~= false,
     Callback = function(v) Bhop.Settings.BlockSpaceFromGame = v end, Tooltip = "tt_mv_bhop_blockspace" })
-bhopSec:AddToggle({ Name = "mv_bhop_pulse", Value = Bhop.Settings.SpaceReleasePulse == true,
+bhopSec:AddToggle({ Name = "mv_bhop_pulse",
+    ConfigKey = "Bhop.Settings.SpaceReleasePulse", Value = Bhop.Settings.SpaceReleasePulse == true,
     Callback = function(v) Bhop.Settings.SpaceReleasePulse = v end, Tooltip = "tt_mv_bhop_pulse" })
-bhopSec:AddToggle({ Name = "mv_bhop_bypass", Value = Bhop.Settings.BypassJump ~= false,
+bhopSec:AddToggle({ Name = "mv_bhop_bypass",
+    ConfigKey = "Bhop.Settings.BypassJump", Value = Bhop.Settings.BypassJump ~= false,
     Callback = function(v) Bhop.Settings.BypassJump = v end, Tooltip = "tt_mv_bhop_bypass" })
 bhopSec:AddSlider({ Name = "mv_bhop_cooldown", Value = Bhop.Settings.JumpCooldown or 0.05,
     Min = 0.01, Max = 0.5, Decimals = 2,
     Callback = function(v) Bhop.Settings.JumpCooldown = v end, Tooltip = "tt_mv_bhop_cooldown" })
-bhopSec:AddToggle({ Name = "mv_bhop_airboost", Value = Bhop.Settings.AirBoost ~= false,
+bhopSec:AddToggle({ Name = "mv_bhop_airboost",
+    ConfigKey = "Bhop.Settings.AirBoost", Value = Bhop.Settings.AirBoost ~= false,
     Callback = function(v) Bhop.Settings.AirBoost = v end, Tooltip = "tt_mv_bhop_airboost" })
 bhopSec:AddSlider({ Name = "mv_bhop_airboostdiv", Value = Bhop.Settings.AirBoostDivisor or 5.9,
     Min = 1, Max = 30, Decimals = 1,
@@ -1628,7 +1643,8 @@ bhopSec:AddSlider({ Name = "mv_bhop_airboostdiv", Value = Bhop.Settings.AirBoost
 
 -- ---------- Spider (Right) ----------
 local spiderSec = tab:CreateSection({ Name = "sec_mov_spider", Side = "Right" })
-spiderSec:AddToggle({ Name = "mv_spider_enabled", Value = Bhop.Settings.Spider.Enabled,
+spiderSec:AddToggle({ Name = "mv_spider_enabled",
+    ConfigKey = "Bhop.Settings.Spider.Enabled", Value = Bhop.Settings.Spider.Enabled,
     Callback = function(v) Bhop.Settings.Spider.Enabled = v end, Tooltip = "tt_mv_spider_enabled" })
 spiderSec:AddDropdown({ Name = "mv_spider_mode",
     Value = Bhop.Settings.Spider.Mode or "Default",
@@ -1666,9 +1682,11 @@ pxwSec:AddSlider({ Name = "mv_pxw_predicttime", Value = Bhop.Settings.Spider.Pix
 pxwSec:AddSlider({ Name = "mv_pxw_heightoffset", Value = Bhop.Settings.Spider.Pixelwalk.HeightOffset or 2.0,
     Min = 0, Max = 5, Decimals = 1,
     Callback = function(v) Bhop.Settings.Spider.Pixelwalk.HeightOffset = v end, Tooltip = "tt_mv_pxw_heightoffset" })
-pxwSec:AddToggle({ Name = "mv_pxw_forcerunning", Value = Bhop.Settings.Spider.Pixelwalk.ForceRunning ~= false,
+pxwSec:AddToggle({ Name = "mv_pxw_forcerunning",
+    ConfigKey = "Bhop.Settings.Spider.Pixelwalk.ForceRunning", Value = Bhop.Settings.Spider.Pixelwalk.ForceRunning ~= false,
     Callback = function(v) Bhop.Settings.Spider.Pixelwalk.ForceRunning = v end, Tooltip = "tt_mv_pxw_forcerunning" })
-pxwSec:AddToggle({ Name = "mv_pxw_requireflat", Value = Bhop.Settings.Spider.Pixelwalk.RequireFlat ~= false,
+pxwSec:AddToggle({ Name = "mv_pxw_requireflat",
+    ConfigKey = "Bhop.Settings.Spider.Pixelwalk.RequireFlat", Value = Bhop.Settings.Spider.Pixelwalk.RequireFlat ~= false,
     Callback = function(v) Bhop.Settings.Spider.Pixelwalk.RequireFlat = v end, Tooltip = "tt_mv_pxw_requireflat" })
 
 local wfkSec = tab:CreateSection({ Name = "sec_mov_wallfucker", Side = "Right" })
@@ -1681,7 +1699,8 @@ wfkSec:AddSlider({ Name = "mv_wfk_range", Value = Bhop.Settings.Spider.Wallfucke
 wfkSec:AddSlider({ Name = "mv_wfk_rays", Value = Bhop.Settings.Spider.Wallfucker.RayCount or 8,
     Min = 4, Max = 24,
     Callback = function(v) Bhop.Settings.Spider.Wallfucker.RayCount = math.floor(v) end, Tooltip = "tt_mv_wfk_rays" })
-wfkSec:AddToggle({ Name = "mv_wfk_holdY", Value = Bhop.Settings.Spider.Wallfucker.HoldY ~= false,
+wfkSec:AddToggle({ Name = "mv_wfk_holdY",
+    ConfigKey = "Bhop.Settings.Spider.Wallfucker.HoldY", Value = Bhop.Settings.Spider.Wallfucker.HoldY ~= false,
     Callback = function(v) Bhop.Settings.Spider.Wallfucker.HoldY = v end, Tooltip = "tt_mv_wfk_holdY" })
 wfkSec:AddSlider({ Name = "mv_wfk_push", Value = Bhop.Settings.Spider.Wallfucker.PushStrength or 0,
     Min = 0, Max = 50, Decimals = 1,
@@ -1689,29 +1708,35 @@ wfkSec:AddSlider({ Name = "mv_wfk_push", Value = Bhop.Settings.Spider.Wallfucker
 
 -- ---------- Speed (Right) ----------
 local speedSec = tab:CreateSection({ Name = "sec_mov_speed", Side = "Right" })
-speedSec:AddToggle({ Name = "mv_speed_enabled", Value = Speed.Settings.Enabled,
+speedSec:AddToggle({ Name = "mv_speed_enabled",
+    ConfigKey = "Speed.Settings.Enabled", Value = Speed.Settings.Enabled,
     Callback = function(v) Speed.Settings.Enabled = v end, Tooltip = "tt_mv_speed_enabled" })
 speedSec:AddDropdown({ Name = "mv_speed_method", Value = Speed.Settings.Method or "WalkSpeed", List = speedMethods,
     Callback = function(v) Speed.Settings.Method = v end, Tooltip = "tt_mv_speed_method" })
 speedSec:AddSlider({ Name = "mv_speed_ground", Value = Speed.Settings.GroundSpeed or 30, Min = 1, Max = 500,
     Callback = function(v) Speed.Settings.GroundSpeed = v end, Tooltip = "tt_mv_speed_ground" })
-speedSec:AddToggle({ Name = "mv_speed_useair", Value = Speed.Settings.UseAirSpeed or false,
+speedSec:AddToggle({ Name = "mv_speed_useair",
+    ConfigKey = "Speed.Settings.UseAirSpeed", Value = Speed.Settings.UseAirSpeed or false,
     Callback = function(v) Speed.Settings.UseAirSpeed = v end, Tooltip = "tt_mv_speed_useair" })
 speedSec:AddSlider({ Name = "mv_speed_air", Value = Speed.Settings.AirSpeed or 30, Min = 1, Max = 500,
     Callback = function(v) Speed.Settings.AirSpeed = v end, Tooltip = "tt_mv_speed_air" })
-speedSec:AddToggle({ Name = "mv_speed_inair", Value = Speed.Settings.InAirOnly or false,
+speedSec:AddToggle({ Name = "mv_speed_inair",
+    ConfigKey = "Speed.Settings.InAirOnly", Value = Speed.Settings.InAirOnly or false,
     Callback = function(v) Speed.Settings.InAirOnly = v end, Tooltip = "tt_mv_speed_inair" })
 
 -- ---------- FastStop (Left) ----------
 local fsSec = tab:CreateSection({ Name = "sec_mov_faststop" })
-fsSec:AddToggle({ Name = "mv_fs_enabled", Value = FastStop.Settings.Enabled,
+fsSec:AddToggle({ Name = "mv_fs_enabled",
+    ConfigKey = "FastStop.Settings.Enabled", Value = FastStop.Settings.Enabled,
     Callback = function(v) FastStop.Settings.Enabled = v end, Tooltip = "tt_mv_fs_enabled" })
-fsSec:AddToggle({ Name = "mv_fs_stopy", Value = FastStop.Settings.StopY or false,
+fsSec:AddToggle({ Name = "mv_fs_stopy",
+    ConfigKey = "FastStop.Settings.StopY", Value = FastStop.Settings.StopY or false,
     Callback = function(v) FastStop.Settings.StopY = v end, Tooltip = "tt_mv_fs_stopy" })
 
 -- ---------- Noclip (Right) ----------
 local noclipSec = tab:CreateSection({ Name = "sec_mov_noclip", Side = "Right" })
-noclipSec:AddToggle({ Name = "mv_noclip_enabled", Value = Noclip.Settings.Enabled,
+noclipSec:AddToggle({ Name = "mv_noclip_enabled",
+    ConfigKey = "Noclip.Settings.Enabled", Value = Noclip.Settings.Enabled,
     Callback = function(v) Noclip.Settings.Enabled = v end, Tooltip = "tt_mv_noclip_enabled" })
 
 print("[AirHub] 06_movement: loaded OK (RU loc + tooltips + improved Fly Orbit)")

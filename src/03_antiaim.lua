@@ -1547,7 +1547,8 @@ local animPresetList = {
 
 --// -------- LEFT: Body (Server) --------
 local aaMain = AntiTab:CreateSection({ Name = "aa_body" })
-aaMain:AddToggle({ Name = "aa_enabled", Value = AntiAim.Settings.Enabled,
+aaMain:AddToggle({ Name = "aa_enabled",
+    ConfigKey = "AntiAim.Settings.Enabled", Value = AntiAim.Settings.Enabled,
     Callback = function(v) AntiAim.Settings.Enabled = v end,
     Tooltip = "tt_aa_enabled" })
 aaMain:AddDropdown({ Name = "aa_mode", Value = AntiAim.Settings.Mode, List = aaModes,
@@ -1578,6 +1579,7 @@ aaMain:AddInput({ Name = "aa_speed",
     end,
     Tooltip = "tt_aa_speed" })
 aaMain:AddToggle({ Name = "aa_ignore_moving",
+    ConfigKey = "AntiAim.Settings.Body.IgnoreMoving",
     Value = AntiAim.Settings.Body.IgnoreMoving,
     Callback = function(v) setBody("IgnoreMoving", v) end,
     Tooltip = "tt_aa_ignore_moving" })
@@ -1589,7 +1591,8 @@ aaMain:AddSlider({ Name = "aa_move_threshold",
 
 --// -------- LEFT: Animation Breaker --------
 local animSec = AntiTab:CreateSection({ Name = "aa_anim" })
-animSec:AddToggle({ Name = "aa_anim_enabled", Value = AB.Settings.Enabled,
+animSec:AddToggle({ Name = "aa_anim_enabled",
+    ConfigKey = "AntiAim.AnimationBreaker.Settings.Enabled", Value = AB.Settings.Enabled,
     Callback = function(v)
         setAB("Enabled", v)
         if not v then pcall(stopAnimBreaker) end
@@ -1626,6 +1629,7 @@ animSec:AddSlider({ Name = "aa_anim_interval",
     Callback = function(v) setAB("RandomInterval", v) end,
     Tooltip = "tt_aa_anim_interval" })
 animSec:AddToggle({ Name = "aa_anim_apply_server",
+    ConfigKey = "AntiAim.AnimationBreaker.Settings.ApplyToServer",
     Value = AB.Settings.ApplyToServer ~= false,
     Callback = function(v) setAB("ApplyToServer", v) end,
     Tooltip = "tt_aa_anim_apply_server" })
@@ -1646,7 +1650,8 @@ animSec:AddButton({ Name = "aa_anim_stop",
 
 --// -------- RIGHT: Desync (Client) --------
 local desyncSec = AntiTab:CreateSection({ Name = "aa_desync", Side = "Right" })
-desyncSec:AddToggle({ Name = "aa_desync_enabled", Value = AntiAim.Desync.Settings.Enabled,
+desyncSec:AddToggle({ Name = "aa_desync_enabled",
+    ConfigKey = "AntiAim.Desync.Settings.Enabled", Value = AntiAim.Desync.Settings.Enabled,
     Callback = function(v)
         AntiAim.Desync.Settings.Enabled = v
         if v then StartDesync() else StopDesync() end
@@ -1706,6 +1711,7 @@ desyncSec:AddInput({ Name = "aa_desync_z",
     end,
     Tooltip = "tt_aa_desync_z" })
 desyncSec:AddToggle({ Name = "aa_desync_random",
+    ConfigKey = "AntiAim.Desync.Settings.Random",
     Value = AntiAim.Desync.Settings.Random or false,
     Callback = function(v) setDesync("Random", v) end,
     Tooltip = "tt_aa_desync_random" })
@@ -1715,6 +1721,7 @@ desyncSec:AddSlider({ Name = "aa_desync_interval",
     Callback = function(v) setDesync("UpdateInterval", v) end,
     Tooltip = "tt_aa_desync_interval" })
 desyncSec:AddToggle({ Name = "aa_desync_oldpos_enabled",
+    ConfigKey = "AntiAim.Desync.Settings.OldPosDelayEnabled",
     Value = AntiAim.Desync.Settings.OldPosDelayEnabled ~= false,
     Callback = function(v) setDesync("OldPosDelayEnabled", v) end,
     Tooltip = "tt_aa_desync_oldpos_enabled" })
@@ -1734,10 +1741,12 @@ desyncSec:AddSlider({ Name = "aa_desync_inplayer",
     Callback = function(v) setDesync("InPlayerOffset", v) end,
     Tooltip = "tt_aa_desync_inplayer" })
 desyncSec:AddToggle({ Name = "aa_desync_refresh_shot",
+    ConfigKey = "AntiAim.Desync.Settings.RefreshOnShot",
     Value = AntiAim.Desync.Settings.RefreshOnShot or false,
     Callback = function(v) setDesync("RefreshOnShot", v) end,
     Tooltip = "tt_aa_desync_refresh_shot" })
 desyncSec:AddToggle({ Name = "aa_desync_visualize",
+    ConfigKey = "AntiAim.Desync.Settings.Visualize",
     Value = AntiAim.Desync.Settings.Visualize or false,
     Callback = function(v) SetVisualizationEnabled(v) end,
     Tooltip = "tt_aa_desync_visualize" })

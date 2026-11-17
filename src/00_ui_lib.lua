@@ -1922,12 +1922,12 @@ local function createToggle(section, opts)
     if opts.Key then getSectionState(section)[opts.Key] = eff end
     local meta = {Name = T(opts.Name or ""), Type = "Toggle", Element = row, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
-        Set = function(v) userState = v; setEff(v, false) end}
+        Set = function(v, fire) userState = v and true or false; setEff(userState, fire == true) end}
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
     return {Set = meta.Set, Get = function() return eff end, BindId = bindId,
-        _meta = meta, _rawName = opts.Name, _type = "Toggle"}
+        _meta = meta, _rawName = opts.Name, _type = "Toggle", _default = eff}
 end
 
 local function createSlider(section, opts)
@@ -1990,12 +1990,15 @@ local function createSlider(section, opts)
     if opts.Key then getSectionState(section)[opts.Key] = effV end
     local meta = {Name = T(opts.Name or ""), Type = "Slider", Element = row, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
-        Set = function(v) userV = math.clamp(v, min, max); setEff(userV, false) end}
+        Set = function(v, fire)
+            v = tonumber(v); if v == nil then return end
+            userV = math.clamp(v, min, max); setEff(userV, fire == true)
+        end}
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
     return {Set = meta.Set, Get = function() return effV end, BindId = bindId,
-        _meta = meta, _rawName = opts.Name, _type = "Slider"}
+        _meta = meta, _rawName = opts.Name, _type = "Slider", _default = effV}
 end
 
 local function createButton(section, opts)
@@ -2067,17 +2070,22 @@ local function createInput(section, opts)
     end)
     local meta = {Name = T(opts.Name or ""), Type = "Input", Element = row,
         Options = opts.Options, State = getSectionState(section),
-        Set = function(v) value = v; input.Text = v end}
+        Set = function(v, fire)
+            value = (v == nil) and "" or tostring(v)
+            input.Text = value
+            if fire == true and opts.Callback then pcall(opts.Callback, value) end
+        end}
     attachRowBinds(row, nil, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
     return {Set = meta.Set, Get = function() return value end, _meta = meta,
-        _rawName = opts.Name, _type = "Input"}
+        _rawName = opts.Name, _type = "Input", _default = value}
 end
 
 local function createDropdown(section, opts)
     local list = opts.List or {}
     local value = opts.Value or (list[1] or "")
+    local defaultValue = value
     local open = false
     local row = new("Frame", {BorderSizePixel = 0, Size = UDim2.new(1,0,0,36)}, section.Content)
     themeBg(row, "Element"); regTransparency(row, "Element", 0); addCorner(row, UDim.new(0,8))
@@ -2140,7 +2148,20 @@ local function createDropdown(section, opts)
     if opts.Key then getSectionState(section)[opts.Key] = value end
     local meta = {Name = T(opts.Name or ""), Type = "Dropdown", Element = row, BindId = bindId,
         Options = opts.Options, State = getSectionState(section),
-        Set = function(v) value = v; vLbl.Text = T(tostring(v)) end}
+        Set = function(v, fire)
+            if v == nil then return end
+            v = tostring(v)
+            if #list > 0 then
+                local valid = false
+                for _, item in ipairs(list) do
+                    if tostring(item) == v then valid = true; break end
+                end
+                if not valid then return end
+            end
+            value = v; vLbl.Text = T(tostring(value))
+            if opts.Key then getSectionState(section)[opts.Key] = value; reevaluateVisibility() end
+            if fire == true and opts.Callback then pcall(opts.Callback, value) end
+        end}
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
@@ -2148,7 +2169,7 @@ local function createDropdown(section, opts)
         Set = meta.Set,
         Get = function() return value end,
         BindId = bindId, _meta = meta,
-        _rawName = opts.Name, _type = "Dropdown",
+        _rawName = opts.Name, _type = "Dropdown", _default = defaultValue,
         _setList = function(newList)
             for i = #list, 1, -1 do list[i] = nil end
             for _, v in ipairs(newList or {}) do list[#list+1] = v end
@@ -2177,25 +2198,41 @@ local function createColorpicker(section, opts)
     addCorner(swatch, UDim.new(0,6)); addStroke(swatch, Theme.Outline, 1, 0.2)
     local click = new("TextButton", {BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = ""}, row)
     
+    local defaultColor       = color
+    local defaultAlpha       = alpha
+    local defaultRainbow     = rainbowEnabled
+    local defaultRainbowSpeed = rainbowSpeed
+
     local activeCpApi = nil
+    local swatchRainbowCtrl = nil
     local cpElement = {
-        Set = function(c, a, rbData) 
-            color = c; if a then alpha = a end; swatch.BackgroundColor3 = c 
+        Set = function(c, a, rbData, fire)
+            if typeof(c) ~= "Color3" then return end
+            color = c
+            if type(a) == "number" then alpha = a end
+            swatch.BackgroundColor3 = c
             if rbData then
-                rainbowEnabled = rbData.rainbowEnabled
-                rainbowSpeed = rbData.rainbowSpeed
+                rainbowEnabled = rbData.rainbowEnabled and true or false
+                rainbowSpeed = tonumber(rbData.rainbowSpeed) or rainbowSpeed
+                if swatchRainbowCtrl then
+                    swatchRainbowCtrl.active = rainbowEnabled
+                    swatchRainbowCtrl.speed = rainbowSpeed
+                end
             end
-            if activeCpApi then activeCpApi.Set(c, a, rbData) end
+            if activeCpApi then activeCpApi.Set(c, alpha, rbData) end
+            if fire == true and opts.Callback then pcall(opts.Callback, c, alpha) end
         end, 
         Get = function() return color, alpha, {rainbowEnabled = rainbowEnabled, rainbowSpeed = rainbowSpeed} end, 
         _meta = {Name = T(opts.Name or ""), Type = "Colorpicker", Element = row,
             Options = opts.Options, State = getSectionState(section),
-            Set = function(c, a, rbData) cpElement.Set(c, a, rbData) end
+            Set = function(c, a, rbData, fire) cpElement.Set(c, a, rbData, fire) end
         },
-        _rawName = opts.Name, _type = "Colorpicker"
+        _rawName = opts.Name, _type = "Colorpicker",
+        _defaultColor = defaultColor, _defaultAlpha = defaultAlpha,
+        _defaultRainbow = defaultRainbow, _defaultRainbowSpeed = defaultRainbowSpeed,
     }
     
-    local swatchRainbowCtrl = {
+    swatchRainbowCtrl = {
         active = rainbowEnabled, speed = rainbowSpeed, root = swatch,
         keepAlive = true,
         setFromRainbow = function(hv, frame)
@@ -2269,6 +2306,7 @@ end
 
 local function createKeybind(section, opts)
     local value = opts.Value or Enum.KeyCode.F
+    local defaultValue = value
     local modes = opts.Modes or {}
     local state = getSectionState(section)
     local stateId = opts.Key or opts.Name or "kb"
@@ -2361,7 +2399,7 @@ local function createKeybind(section, opts)
     end
     local meta = {Name = T(opts.Name or ""), Type = "Keybind", Element = row, BindId = bindId,
         Options = opts.Options, State = state, Modes = modes, Default = opts.Value,
-        Set = function(v)
+        Set = function(v, fire)
             value = v
             btn.Text = keyName(v)
             if opts.Key then state[opts.Key] = v end
@@ -2371,12 +2409,13 @@ local function createKeybind(section, opts)
                     AddBindKey(bindId, v, state["__mode_" .. tostring(stateId)] or "Toggle")
                 end
             end
+            if fire == true and opts.Callback then pcall(opts.Callback, v) end
         end}
     attachRowBinds(row, bindId, meta)
     if opts.Tooltip then attachTooltip(row, opts.Tooltip) end
     if opts.VisibleIf then registerVisibleIf(row, opts.VisibleIf, section) end
     return {Set = meta.Set, Get = function() return value end, BindId = bindId,
-        _meta = meta, _rawName = opts.Name, _type = "Keybind"}
+        _meta = meta, _rawName = opts.Name, _type = "Keybind", _default = defaultValue}
 end
 
 -- ══════════════════════════════════════════════════════════════
@@ -2438,6 +2477,7 @@ local function createImage(section, opts)
         end
     end
     if source then setSource(source) end
+    local defaultSource = source
 
     markSearch(row, T(opts.Name or ""), nil)
 
@@ -2465,6 +2505,7 @@ local function createImage(section, opts)
         _meta = meta,
         _rawName = opts.Name or ("img_" .. tostring(math.random(1,99999))),
         _type = "Image",
+        _default = defaultSource,
     }
 end
 
@@ -2513,14 +2554,30 @@ local function createSection(tab, opts)
         if o and o.ConfigKey then t._configKey = o.ConfigKey end
         return track(t)
     end
-    function section:AddSlider(o) return track(createSlider(self, o)) end
+    function section:AddSlider(o)
+        local t = createSlider(self, o)
+        if o and o.ConfigKey then t._configKey = o.ConfigKey end
+        return track(t)
+    end
     function section:AddButton(o) return track(createButton(self, o)) end
     function section:AddLabel(o) return track(createLabel(self, o)) end
-    function section:AddDropdown(o) return track(createDropdown(self, o)) end
-    function section:AddColorpicker(o) return track(createColorpicker(self, o)) end
+    function section:AddDropdown(o)
+        local t = createDropdown(self, o)
+        if o and o.ConfigKey then t._configKey = o.ConfigKey end
+        return track(t)
+    end
+    function section:AddColorpicker(o)
+        local t = createColorpicker(self, o)
+        if o and o.ConfigKey then t._configKey = o.ConfigKey end
+        return track(t)
+    end
     function section:AddKeybind(o) return track(createKeybind(self, o)) end
     function section:AddDivider(o) return track(createDivider(self, o)) end
-    function section:AddInput(o) return track(createInput(self, o)) end
+    function section:AddInput(o)
+        local t = createInput(self, o)
+        if o and o.ConfigKey then t._configKey = o.ConfigKey end
+        return track(t)
+    end
     function section:AddImage(o) return track(createImage(self, o)) end
     return section
 end
@@ -3111,7 +3168,12 @@ local function createWindow(opts)
                             local secId = section._tKey or section.Name
                             if secId then
                                 local secData = {}
-                                for _, el in ipairs(section.Elements) do
+                                for _, rawEl in ipairs(section.Elements) do
+                                    -- Buttons / labels / dividers are raw Roblox Instances,
+                                    -- not element tables. Reading custom fields off an
+                                    -- Instance throws, so only serializable tables are used.
+                                    local el = (type(rawEl) == "table") and rawEl or nil
+                                    if el then
                                     local elId = el._rawName
                                     local elType = (el._meta and el._meta.Type) or el._type
                                     if elId and el.Get and elType then
@@ -3142,6 +3204,7 @@ local function createWindow(opts)
                                             end
                                         end
                                     end
+                                    end
                                 end
                                 if next(secData) then tbl[secId] = secData end
                             end
@@ -3163,6 +3226,8 @@ local function createWindow(opts)
             data.Elements = elems
         elseif not elemsOk then
             warn("[airhubUI] Elements serialization failed: " .. tostring(elems))
+        else
+            warn("[airhubUI] Elements export is empty: menu state will NOT be saved in this config")
         end
         if self._externalSerializer then
             local extOK, ext = pcall(self._externalSerializer)
@@ -3180,18 +3245,36 @@ local function createWindow(opts)
         return str
     end
 
+    local function coerceTable(v)
+        if type(v) == "table" then return v end
+        if type(v) == "string" and v ~= "" then
+            local ok, d = pcall(function() return HttpService:JSONDecode(v) end)
+            if ok and type(d) == "table" then return d end
+        end
+        return nil
+    end
+
     function window:ImportSettings(str)
         if not str or str == "" then return false, "empty" end
         local ok, data = pcall(function() return HttpService:JSONDecode(str) end)
         if not ok or type(data) ~= "table" then return false, "invalid JSON" end
-        if data.Theme then
-            for k, v in pairs(data.Theme) do
+
+        local prevImporting = self._importing
+        self._importing = true
+
+        -- The UI block may be nested (AirHub core configs) or the UI's own export.
+        local uiState = data
+        local nested = coerceTable(data.UI)
+        if nested then uiState = nested end
+
+        if type(uiState.Theme) == "table" then
+            for k, v in pairs(uiState.Theme) do
                 if type(v) == "table" and #v == 3 then Theme[k] = Color3.new(v[1], v[2], v[3]) end
             end
             refreshTheme()
         end
-        if data.Config then
-            for k, v in pairs(data.Config) do
+        if type(uiState.Config) == "table" then
+            for k, v in pairs(uiState.Config) do
                 if Config[k] ~= nil then Config[k] = v end
             end
             if Config.NotificationPosition then resetNotifHolder() end
@@ -3202,53 +3285,146 @@ local function createWindow(opts)
                 self:SetLogo(Config.LogoSource, Config.LogoSize)
             end
         end
-        if type(data.Elements) == "table" then
+
+        -- 1) Backend/module state first.
+        local external = coerceTable(data.External)
+        if not external and nested then
+            -- Flat legacy AirHub config: top-level Aimbot/WallHack/Fly/... + nested UI.
+            local flat = {}
+            for k, v in pairs(data) do
+                if k ~= "UI" and k ~= "Theme" and k ~= "Config"
+                   and k ~= "Elements" and k ~= "External" and k ~= "__meta" then
+                    flat[k] = v
+                end
+            end
+            if next(flat) then external = flat end
+        end
+        if external and self._externalDeserializer then
+            local extOK, extErr = pcall(self._externalDeserializer, external)
+            if not extOK then
+                warn("[airhubUI] External deserializer failed: " .. tostring(extErr))
+            end
+        end
+
+        -- 2) Menu controls last, with callbacks fired, so the menu is authoritative.
+        local elementsData = type(uiState.Elements) == "table" and uiState.Elements
+        if not elementsData and nested and type(data.Elements) == "table" then
+            elementsData = data.Elements
+        end
+        if type(elementsData) == "table" then
+            local stats = {
+                tabsPresent = 0, tabsMatched = 0,
+                sectionsPresent = 0, sectionsMatched = 0,
+                uiElems = 0, matched = 0, applied = 0, errors = 0,
+                missingTabs = {},
+            }
+
+            local function normKey(s)
+                s = tostring(s or ""):lower()
+                return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+            end
+
+            -- Configs written by older builds may store a localized / display key
+            -- instead of the internal raw name. Try exact keys first, then a
+            -- case-insensitive, trimmed match.
+            local function findSavedKey(tbl, keys)
+                for _, k in ipairs(keys) do
+                    if k ~= nil and tbl[k] ~= nil then return k end
+                end
+                local wanted = {}
+                for _, k in ipairs(keys) do
+                    if k ~= nil then wanted[normKey(k)] = true end
+                end
+                for k in pairs(tbl) do
+                    if wanted[normKey(k)] then return k end
+                end
+                return nil
+            end
+
             local elemsOk, elemsErr = pcall(function()
                 for _, tab in ipairs(self.Tabs) do
                     local tabId = tab._nameKey or tab.Name
                     if tabId and not BUILTIN_TABS[tabId] then
-                        local tabData = data.Elements[tabId]
+                        stats.tabsPresent = stats.tabsPresent + 1
+                        local tabKey = findSavedKey(elementsData, { tabId, tab.Name })
+                        local tabData = tabKey and elementsData[tabKey]
                         if type(tabData) == "table" then
+                            stats.tabsMatched = stats.tabsMatched + 1
+
+                            local function applyOne(el, elType, savedVal, elId)
+                                stats.matched = stats.matched + 1
+                                local ok, err
+                                if elType == "Colorpicker" then
+                                    if type(savedVal) == "table" and isFiniteNum(savedVal.r) then
+                                        local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
+                                        local rbData = {
+                                            rainbowEnabled = savedVal.rainbowEnabled or false,
+                                            rainbowSpeed = savedVal.rainbowSpeed or 1
+                                        }
+                                        ok, err = pcall(el.Set, c, savedVal.alpha or 0, rbData, true)
+                                    end
+                                elseif elType == "Keybind" then
+                                    ok, err = pcall(el.Set, deserializeElemKey(savedVal), true)
+                                elseif elType == "Button" then
+                                    -- action buttons must not be re-triggered by configs
+                                    ok = true
+                                elseif elType == "Image" then
+                                    ok, err = pcall(el.Set, savedVal)
+                                else
+                                    ok, err = pcall(el.Set, savedVal, true)
+                                end
+                                if ok then
+                                    stats.applied = stats.applied + 1
+                                else
+                                    stats.errors = stats.errors + 1
+                                    if stats.errors <= 3 then
+                                        warn(string.format("[airhubUI] element %s failed: %s",
+                                            tostring(elId), tostring(err)))
+                                    end
+                                end
+                            end
+
                             local function applySections(tbl, sectionsList)
                                 for _, section in ipairs(sectionsList) do
+                                    stats.sectionsPresent = stats.sectionsPresent + 1
                                     local secId = section._tKey or section.Name
-                                    local secData = secId and tbl[secId]
+                                    local secKey = secId and findSavedKey(tbl, {
+                                        secId, section.Name, T(secId or ""),
+                                    })
+                                    local secData = secKey and tbl[secKey]
                                     if type(secData) == "table" then
-                                        for _, el in ipairs(section.Elements) do
-                                            local elId = el._rawName
-                                            local elType = (el._meta and el._meta.Type) or el._type
-                                            local savedVal = elId and secData[elId]
-                                            if elId and el.Set and elType and savedVal ~= nil then
-                                                if elType == "Colorpicker" then
-                                                    if type(savedVal) == "table" and isFiniteNum(savedVal.r) then
-                                                        local c = Color3.new(savedVal.r, savedVal.g, savedVal.b)
-                                                        local rbData = {
-                                                            rainbowEnabled = savedVal.rainbowEnabled or false,
-                                                            rainbowSpeed = savedVal.rainbowSpeed or 1
-                                                        }
-                                                        pcall(el.Set, c, savedVal.alpha or 0, rbData)
+                                        stats.sectionsMatched = stats.sectionsMatched + 1
+                                        for _, rawEl in ipairs(section.Elements) do
+                                            local el = (type(rawEl) == "table") and rawEl or nil
+                                            if el then
+                                                stats.uiElems = stats.uiElems + 1
+                                                local elId = el._rawName
+                                                local elType = (el._meta and el._meta.Type) or el._type
+                                                if elId and el.Set and elType then
+                                                    local key = findSavedKey(secData, {
+                                                        elId, el._meta and el._meta.Name, T(elId),
+                                                    })
+                                                    if key ~= nil then
+                                                        applyOne(el, elType, secData[key], elId)
                                                     end
-                                                elseif elType == "Keybind" then
-                                                    pcall(el.Set, deserializeElemKey(savedVal))
-                                                elseif elType == "Button" then
-                                                elseif elType == "Image" then
-                                                    pcall(el.Set, savedVal)
-                                                else
-                                                    pcall(el.Set, savedVal)
                                                 end
                                             end
                                         end
                                     end
                                 end
                             end
+
                             applySections(tabData, tab.Sections)
                             for _, subTab in ipairs(tab.SubTabs) do
                                 local subId = "__sub_" .. (subTab._nameKey or subTab.Name)
-                                local subData = tabData[subId]
+                                local subKey = findSavedKey(tabData, { subId, subTab.Name })
+                                local subData = subKey and tabData[subKey]
                                 if type(subData) == "table" then
                                     applySections(subData, subTab.Sections)
                                 end
                             end
+                        else
+                            stats.missingTabs[#stats.missingTabs + 1] = tostring(tabId)
                         end
                     end
                 end
@@ -3257,17 +3433,75 @@ local function createWindow(opts)
                 warn("[airhubUI] Elements import failed: " .. tostring(elemsErr))
             end
             pcall(reevaluateVisibility)
-        end
-        if type(data.External) == "table" and self._externalDeserializer then
-            local extOK, extErr = pcall(self._externalDeserializer, data.External)
-            if not extOK then
-                warn("[airhubUI] External deserializer failed: " .. tostring(extErr))
+
+            if stats.applied == 0 then
+                local savedGroups = 0
+                for _ in pairs(elementsData) do savedGroups = savedGroups + 1 end
+                warn(string.format(
+                    "[AirHub config] no element values applied: menu elements=%d, tabs matched=%d/%d, saved groups=%d%s",
+                    stats.uiElems, stats.tabsMatched, stats.tabsPresent, savedGroups,
+                    (#stats.missingTabs > 0) and (" | not found in config: " .. table.concat(stats.missingTabs, ", ")) or ""))
+            else
+                print(string.format(
+                    "[AirHub config] applied %d values (menu elements=%d, matched=%d, tabs %d/%d, sections %d/%d, errors=%d)",
+                    stats.applied, stats.uiElems, stats.matched,
+                    stats.tabsMatched, stats.tabsPresent,
+                    stats.sectionsMatched, stats.sectionsPresent, stats.errors))
             end
+        else
+            print("[AirHub config] config has no Elements block: menu state cannot be restored, backend state only")
         end
+
         if type(self._postImportHook) == "function" then
             pcall(self._postImportHook)
         end
         for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
+        self._importing = prevImporting
+        return true
+    end
+
+    function window:ResetElements()
+        local prevImporting = self._importing
+        self._importing = true
+        local function resetSections(sectionsList)
+            for _, section in ipairs(sectionsList or {}) do
+                for _, rawEl in ipairs(section.Elements or {}) do
+                    local el = (type(rawEl) == "table") and rawEl or nil
+                    if el then
+                    local elType = (el._meta and el._meta.Type) or el._type
+                    if el.Set and elType ~= "Button" then
+                        if elType == "Colorpicker" then
+                            if el._defaultColor then
+                                pcall(el.Set, el._defaultColor, el._defaultAlpha or 0, {
+                                    rainbowEnabled = el._defaultRainbow or false,
+                                    rainbowSpeed = el._defaultRainbowSpeed or 1,
+                                }, true)
+                            end
+                        elseif elType == "Image" then
+                            pcall(el.Set, el._default)
+                        elseif el._default ~= nil then
+                            pcall(el.Set, el._default, true)
+                        end
+                    end
+                    end
+                end
+            end
+        end
+        for _, tab in ipairs(self.Tabs) do
+            local tabId = tab._nameKey or tab.Name
+            if tabId and not BUILTIN_TABS[tabId] then
+                resetSections(tab.Sections)
+                for _, subTab in ipairs(tab.SubTabs or {}) do
+                    resetSections(subTab.Sections)
+                end
+            end
+        end
+        pcall(reevaluateVisibility)
+        if type(self._postImportHook) == "function" then
+            pcall(self._postImportHook)
+        end
+        for _, t in ipairs(self.Tabs) do if t._refresh then t._refresh() end end
+        self._importing = prevImporting
         return true
     end
 
@@ -3567,7 +3801,7 @@ secLogo:AddButton({
     Name = "btn_remove_logo",
     Callback = function()
         Window:SetLogo(nil)
-        if logoInputRef and logoInputRef.Set then logoInputRef:Set("") end
+        if logoInputRef and logoInputRef.Set then logoInputRef.Set("") end
         Notify("airhubUI", T("n_logo_removed"), "warning")
     end,
 })
@@ -3584,7 +3818,7 @@ local _origSetLogo = Window.SetLogo
 Window.SetLogo = function(self, source, size)
     local r = _origSetLogo(self, source, size)
     if previewImgRef and previewImgRef.Set then
-        previewImgRef:Set(source)
+        previewImgRef.Set(source)
     end
     return r
 end
