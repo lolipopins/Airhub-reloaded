@@ -1010,16 +1010,22 @@ local function IsTargetValid(character, player)
     if not player then return Aimbot.Settings.TargetNPCs == true end
 
     local tc = Aimbot.Settings.TeamCheck
-    if not tc.Enabled then return true end
+    if not tc or not tc.Enabled then return true end
     local lt, tt = LocalPlayer.Team, player.Team
     local mode = tc.Mode or "Enemies"
     if mode == "All" then return true end
     if mode == "Enemies" then
+        -- Если у игроков нет команд, обрабатываем их как нейтральные.
+        -- Если TreatNeutralAsEnemy=true, то они считаются врагами.
         if lt and tt and lt == tt then return false end
-        if (not lt or not tt) and not tc.TreatNeutralAsEnemy then return false end
+        if (not lt or not tt) then
+            return tc.TreatNeutralAsEnemy == true
+        end
         return true
     elseif mode == "Allies" then
-        return (lt and tt and lt == tt)
+        -- Если команды не заданы, считаем что они не союзники (если только они не оба без команды)
+        if not lt or not tt then return false end
+        return lt == tt
     elseif mode == "IgnoreNeutrals" then
         if not lt or not tt then return false end
         return lt ~= tt
@@ -1633,8 +1639,11 @@ local function GetEffectiveMode() return Aimbot.Settings.SilentAimMode end
 
 -- FIX: только при AimMode == "Silent" silent-hooks активны
 local function IsModeHooked(mode)
-    return Aimbot.Settings.Enabled and AimModeIs("Silent")
-       and Aimbot.Settings.SilentAimMode == mode
+    if Aimbot.Settings.Enabled and AimModeIs("Silent") 
+       and Aimbot.Settings.SilentAimMode ~= "Camera" then
+        return Aimbot.Settings.SilentAimMode == mode
+    end
+    return false
 end
 local function ShouldRedirect(mode) return IsModeHooked(mode) and Running end
 
@@ -2153,7 +2162,7 @@ local function VerifyAndFixHooks()
 end
 local function ManageHooks()
     local mode    = Aimbot.Settings.SilentAimMode
-    local enabled = Aimbot.Settings.Enabled and AimModeIs("Silent")
+    local enabled = Aimbot.Settings.Enabled and AimModeIs("Silent") and (mode ~= "Camera")
     local wantAV  = enabled and (AV_MODE_SET[mode] == true)
     local wantMHT = enabled and mode == "Mouse.Hit/Target"
     local key = tostring(wantAV) .. "|" .. tostring(wantMHT)
@@ -2168,12 +2177,14 @@ end
 --// ===========================================================================
 local function ApplyAimModeCamera(visiblePoint, interval)
     local mode = Aimbot.Settings.AimMode
-    if mode == "Silent" then return end
+    -- Разрешаем "Silent" (Camera) делать snap (instant), если режим SilentAimMode == "Camera"
+    if mode == "Silent" and Aimbot.Settings.SilentAimMode ~= "Camera" then return end
+    
     local cam = workspace.CurrentCamera
     if not cam then return end
     local camPos = cam.CFrame.Position
 
-    if mode == "Instant" then
+    if mode == "Silent" or mode == "Instant" then
         cam.CFrame = CFrame.new(camPos, visiblePoint)
     elseif mode == "Smooth" then
         local targetCF = CFrame.new(camPos, visiblePoint)
@@ -2361,7 +2372,12 @@ local function LoadAimbot()
     end)
 end
 
-Track(UserInputService.TextBoxFocused:Connect(function() Typing = true end))
+Track(Players.PlayerAdded:Connect(function(pl)
+    -- Trigger an immediate target search when a new player joins
+    if Aimbot.Settings.Enabled and Running then
+        Aimbot.Internal.TargetAccum = 999
+    end
+end))
 Track(UserInputService.TextBoxFocusReleased:Connect(function() Typing = false end))
 
 Track(UserInputService.InputBegan:Connect(function(inp, gpe)
@@ -3169,14 +3185,10 @@ secD:AddDropdown({ Name = "aim_silent_mode", Value = AS.SilentAimMode or "Camera
     List = silentAimModes,
     Callback = function(v)
         aSet("SilentAimMode", v)
+        -- Принудительно отключаем хуки, если не в режиме "Silent" или выбран режим "Camera"
+        if Aimbot.RemoveAVHook then pcall(Aimbot.RemoveAVHook) end
+        if Aimbot.RemoveMHTProxy then pcall(Aimbot.RemoveMHTProxy) end
         if Aimbot.Internal then Aimbot.Internal.LastManageKey = nil end
-        local isAV = (v == "Raycast" or v == "FindPartOnRay"
-                      or v == "FindPartOnRayWithWhitelist"
-                      or v == "FindPartOnRayWithIgnoreList")
-        if not isAV and Aimbot.RemoveAVHook then pcall(Aimbot.RemoveAVHook) end
-        if v ~= "Mouse.Hit/Target" and Aimbot.RemoveMHTProxy then
-            pcall(Aimbot.RemoveMHTProxy)
-        end
     end, Tooltip = "tt_aim_silent_mode" })
 secD:AddToggle({ Name = "aim_use_backtrack",
     ConfigKey = "Aimbot.Settings.UseBacktrack", Value = AS.UseBacktrack or false,
