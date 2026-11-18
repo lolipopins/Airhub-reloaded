@@ -381,7 +381,8 @@ local function PingResolver(targetPart)
     local predicted = partPos + vel * leadTime
     return predicted
 end
-    if not part then return Vector3.new(0,0,0) end
+
+local function PredictPartPosition(part)
     if not IsAlive(part) then return Vector3.new(0,0,0) end
     if part.Parent:GetAttribute("AirHub_Ghost") then return part.Position end
 
@@ -2440,6 +2441,7 @@ Aimbot.GetBacktrackGhostTargets = GetBacktrackGhostTargets
 Aimbot.ResolveOwnerCharacter = ResolveOwnerCharacter
 Aimbot.ResolveOwnerPlayer    = ResolveOwnerPlayer
 Aimbot.DebugPrint            = DebugPrint
+Aimbot.PingResolver          = PingResolver
 Aimbot.PerformWallbang       = PerformWallbang
 Aimbot.PerformMagicBullet    = PerformMagicBullet
 Aimbot.PerformInfiniteTP     = PerformInfiniteTP
