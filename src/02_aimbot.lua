@@ -3040,6 +3040,10 @@ predSec:AddToggle({ Name = "aim_ping_resolver",
     ConfigKey = "Aimbot.Settings.UsePingResolver", Value = AS.UsePingResolver or false,
     Callback = function(v) aSet("UsePingResolver", v) end,
     Tooltip = "aim_ping_resolver_tooltip" })
+predSec:AddToggle({ Name = "aim_ping_resolver",
+    ConfigKey = "Aimbot.Settings.UsePingResolver", Value = AS.UsePingResolver or false,
+    Callback = function(v) aSet("UsePingResolver", v) end,
+    Tooltip = "aim_ping_resolver_tooltip" })
 predSec:AddSlider({ Name = "aim_pred_x", Value = AS.PredictionX or 0,
     Min = -100, Max = 100,
     Callback = function(v) aSet("PredictionX", v) end,
