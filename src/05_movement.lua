@@ -184,10 +184,13 @@ local function Fly_ComputeOrbitVelocity(hrp, targetPos, targetVel, dt)
 
     -- Desired position on orbit
     local angle = Fly.Internal.OrbitAngle
+    -- Adaptive radius: scale with target speed to prevent cutting corners
+    local targetSpeed = targetVel and targetVel.Magnitude or 0
+    local adaptRadius = radius + (targetSpeed * 0.5)
     local offset = Vector3.new(
-        math.cos(angle) * radius,
+        math.cos(angle) * adaptRadius,
         height,
-        math.sin(angle) * radius
+        math.sin(angle) * adaptRadius
     )
     local desiredPos = targetPos + offset
 

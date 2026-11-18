@@ -367,7 +367,20 @@ local function GetMousePos()
     return UserInputService:GetMouseLocation()
 end
 
-local function PredictPartPosition(part)
+local function PingResolver(targetPart)
+    if not targetPart or not IsAlive(targetPart) then return PredictPartPosition(targetPart) end
+    local partPos = targetPart.Position
+    local vel = targetPart.AssemblyLinearVelocity or targetPart.Velocity or Vector3.zero
+    local ping = 0
+    pcall(function()
+        local stats = game:GetService("Stats")
+        local item = stats.Network.ServerStatsItem["Data Ping"]
+        if item then ping = item:GetValue() / 1000 end
+    end)
+    local leadTime = (Aimbot.Settings.PredictionTime or 0.15) + ping
+    local predicted = partPos + vel * leadTime
+    return predicted
+end
     if not part then return Vector3.new(0,0,0) end
     if not IsAlive(part) then return Vector3.new(0,0,0) end
     if part.Parent:GetAttribute("AirHub_Ghost") then return part.Position end
