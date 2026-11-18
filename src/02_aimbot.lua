@@ -121,6 +121,7 @@ H.Aimbot = {
         IgnoreFOV = false,
         CheckFromPlayerOnTP = true,
         PredictionEnabled = false, PredictionX = 0, PredictionY = 0, PredictionTime = 0.15,
+UsePingResolver = false,
         TargetNPCs = false, NPCNameFilter = "",
         AimbotHz = 120,
         IgnoreGameProcessed = true,
@@ -394,6 +395,19 @@ local function PredictPartPosition(part)
     if not Aimbot.Settings.PredictionEnabled then return part.Position end
     local vel = part.AssemblyLinearVelocity or part.Velocity
     if not vel then return part.Position end
+    
+    -- Ping Resolver integration
+    if Aimbot.Settings.UsePingResolver then
+        local ping = 0
+        pcall(function()
+            local stats = game:GetService("Stats")
+            local item = stats.Network.ServerStatsItem["Data Ping"]
+            if item then ping = item:GetValue() / 1000 end
+        end)
+        local leadTime = (Aimbot.Settings.PredictionTime or 0.15) + ping
+        return part.Position + vel * leadTime
+    end
+    
     local bt = Aimbot.Settings.PredictionTime or 0.15
     local px = (Aimbot.Settings.PredictionX or 0) / 100
     local py = (Aimbot.Settings.PredictionY or 0) / 100
@@ -2577,6 +2591,8 @@ do
             aim_pred_x = "Prediction X (%)",
             aim_pred_y = "Prediction Y (%)",
             aim_pred_time = "Base Time (s)",
+            aim_ping_resolver = "Ping Resolver",
+            aim_ping_resolver_tooltip = "Predict target position based on server ping and target velocity",
             -- mp
             aim_mp_enabled = "Enabled (aim at closest VISIBLE mesh point)",
             aim_mp_density = "Density (rays per axis)",
@@ -2744,6 +2760,8 @@ do
             aim_pred_x = "Предсказание X (%)",
             aim_pred_y = "Предсказание Y (%)",
             aim_pred_time = "Базовое время (с)",
+            aim_ping_resolver = "Ping Resolver",
+            aim_ping_resolver_tooltip = "Предсказание позиции цели на основе пинга сервера и скорости цели",
             aim_mp_enabled = "Включен (аим в ближайшую ВИДИМУЮ точку меша)",
             aim_mp_density = "Плотность (лучей на ось)",
             aim_mp_jitter = "Jitter-лучи (на промах-клетку)",
@@ -3018,6 +3036,10 @@ predSec:AddToggle({ Name = "aim_pred_enabled",
     ConfigKey = "Aimbot.Settings.PredictionEnabled", Value = AS.PredictionEnabled or false,
     Callback = function(v) aSet("PredictionEnabled", v) end,
     Tooltip = "tt_aim_pred_enabled" })
+predSec:AddToggle({ Name = "aim_ping_resolver",
+    ConfigKey = "Aimbot.Settings.UsePingResolver", Value = AS.UsePingResolver or false,
+    Callback = function(v) aSet("UsePingResolver", v) end,
+    Tooltip = "aim_ping_resolver_tooltip" })
 predSec:AddSlider({ Name = "aim_pred_x", Value = AS.PredictionX or 0,
     Min = -100, Max = 100,
     Callback = function(v) aSet("PredictionX", v) end,
