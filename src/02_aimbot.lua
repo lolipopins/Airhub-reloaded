@@ -3335,3 +3335,15 @@ secAS:AddSlider({ Name = "aim_as_stop_time",
     end, Tooltip = "tt_aim_as_stop_time" })
 
 print("[AirHub] 02_aimbot: loaded OK v32 (AimMode: Silent/Instant/Smooth/CFrame + RU loc + tooltips)")
+    -- Ping Resolver integration (works independently of PredictionEnabled)
+    if Aimbot.Settings.UsePingResolver then
+        local vel = part.AssemblyLinearVelocity or part.Velocity or Vector3.zero
+        local ping = 0
+        pcall(function()
+            local stats = game:GetService("Stats")
+            local item = stats.Network.ServerStatsItem["Data Ping"]
+            if item then ping = item:GetValue() / 1000 end
+        end)
+        local leadTime = (Aimbot.Settings.PredictionTime or 0.15) + ping
+        return part.Position + vel * leadTime
+    end
